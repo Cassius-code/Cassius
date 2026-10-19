@@ -1,0 +1,4 @@
+aiogram==3.13.1
+Telethon==1.36.0
+tzdata==2024.2
+reportlab>=4.0,<6

@@ -1,0 +1,199 @@
+"""«Проёб» guruhi: «доброе утро» va tanaffuslar, kassa cheklari va jarima/bonuslar, «✅ Выполнено» tugmasi,
+/proyob /statistika /top /id buyruqlari. Bot boshqa guruhlarda hech narsa o'qimaydi va yozmaydi."""
+from __future__ import annotations
+
+import logging
+
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
+
+from . import kassa as K
+from . import kassa_flow
+from . import people as P
+from . import ui
+from .attendance import norm
+from .kassa_view import rating_plain
+from .reports import weekly_group
+from .timeutil import local_date
+from .ui import Req, card, h, kb, screen, title
+
+log = logging.getLogger("group")
+
+GROUPS = {"group", "supergroup"}
+TOP_CMDS = {"top": "td", "topyest": "yd", "topweek": "tw", "toplast": "lw"}
+REACT = {"arrived": "👍", "break_start": "👌", "break_end": "👍", "break_end_late": "👍"}
+
+
+def is_proyob(ctx, chat_id: int) -> bool:
+    return str(chat_id) == (ctx.db.get("proyob_group_id") or "").strip()
+
+
+def sender_info(ctx, message: Message) -> tuple[int | None, bool, str]:
+    """-> (user_id, staff (ega/to'liq admin yoki anonim admin), ism)."""
+    anon = message.sender_chat is not None and message.sender_chat.id == message.chat.id
+    if anon:
+        return None, True, message.author_signature or "admin"
+    u = message.from_user
+    if u is None or u.is_bot:
+        return None, False, ""
+    level = P.admin_level(ctx.db, ctx.cfg.owner_ids, u.id)
+    name = " ".join(x for x in (u.first_name, u.last_name) if x) or str(u.id)
+    return u.id, level in ("owner", "full"), name
+
+
+async def react(ctx, message: Message, emoji: str) -> None:
+    try:
+        from aiogram.types import ReactionTypeEmoji
+        await ctx.bot.set_message_reaction(chat_id=message.chat.id, message_id=message.message_id,
+                                           reaction=[ReactionTypeEmoji(emoji=emoji)])
+    except Exception:
+        pass
+
+
+async def reply(message: Message, text: str) -> None:
+    try:
+        await message.reply(text, disable_web_page_preview=True)
+    except Exception as exc:
+        log.info("Guruhga javob yozilmadi: %s", exc)
+
+
+def build_router(ctx) -> Router:
+    r = Router(name="group")
+    in_group = F.chat.type.in_(GROUPS)
+
+    # ───────────── buyruqlar
+    @r.message(in_group, Command("proyob"))
+    async def cmd_proyob(message: Message) -> None:
+        uid, _staff, _n = sender_info(ctx, message)
+        if uid is None or P.admin_level(ctx.db, ctx.cfg.owner_ids, uid) not in ("owner", "full"):
+            await reply(message, "⛔ Только владелец или админ бота (не анонимно).")
+            return
+        ctx.db.set("proyob_group_id", str(message.chat.id))
+        await reply(message, "✅ Эта группа подключена как «Проёб».")
+
+    @r.message(in_group, Command("id"))
+    async def cmd_id(message: Message) -> None:
+        await reply(message, f"🆔 Группа: {message.chat.id}")
+
+    @r.message(in_group, Command("statistika", "stat"))
+    async def cmd_stat(message: Message) -> None:
+        if not is_proyob(ctx, message.chat.id):
+            return
+        t = local_date(ctx.clock(), ctx.tz)
+        s = K.week_start(t)
+        await reply(message, weekly_group(ctx, s, t))
+
+    # eski kassa botidagidek: /top — bugun, /topyest — kecha, /topweek — shu hafta, /toplast — o'tgan hafta
+    @r.message(in_group, Command(*TOP_CMDS))
+    async def cmd_top(message: Message) -> None:
+        if not is_proyob(ctx, message.chat.id):
+            return
+        _uid, staff, _n = sender_info(ctx, message)
+        if not staff:
+            return
+        cmd = (message.text or "").split()[0].split("@")[0].lstrip("/").lower()
+        s, e = K.period_range(TOP_CMDS.get(cmd, "td"), local_date(ctx.clock(), ctx.tz))
+        await reply(message, rating_plain(K.calc(ctx.db, s, e), s, e))
+
+    # ───────────── «✅ Выполнено»
+    @r.callback_query(F.data.startswith("al:"), F.message.chat.type.in_(GROUPS))
+    async def on_done(cb: CallbackQuery) -> None:
+        try:
+            aid = int(cb.data.split(":")[1])
+        except (ValueError, IndexError):
+            await cb.answer()
+            return
+        u = cb.from_user
+        who = f"@{u.username}" if u.username else (u.first_name or str(u.id))
+        try:
+            n = await ctx.tracker.press_done(aid, who)
+        except Exception:
+            log.exception("Выполнено")
+            n = 0
+        try:
+            await cb.answer("✅ Отмечено" if n else "Уже закрыто")
+        except Exception:
+            pass
+
+    @r.callback_query(F.message.chat.type.in_(GROUPS))
+    async def on_other_cb(cb: CallbackQuery) -> None:
+        try:
+            await cb.answer()
+        except Exception:
+            pass
+
+    # ───────────── matnlar
+    async def handle(message: Message, edited: bool) -> None:
+        if message.migrate_to_chat_id and is_proyob(ctx, message.chat.id):
+            ctx.db.set("proyob_group_id", str(message.migrate_to_chat_id))
+            return
+        if not is_proyob(ctx, message.chat.id) or not ctx.db.flag("bot_enabled"):
+            return
+        text = (message.text or message.caption or "").strip()
+        if not text or text.startswith("/"):
+            return
+        if not edited and len(text) <= 20 and norm(text) in ("statistika", "statistik"):   # eski botdagidek
+            t = local_date(ctx.clock(), ctx.tz)
+            await reply(message, weekly_group(ctx, K.week_start(t), t))
+            return
+        uid, staff, name = sender_info(ctx, message)
+        if uid is None and not staff:
+            return
+        K.ACTOR.set(uid)
+        if not edited and uid is not None:
+            person = P.identify(ctx.db, uid, message.from_user.username)
+            if person is not None:
+                res = await ctx.att.on_text(person, text, int(message.date.timestamp()))
+                if res:
+                    if res in REACT:
+                        await react(ctx, message, REACT[res])
+                    elif res == "late":
+                        row = ctx.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
+                                         (local_date(message.date.timestamp(), ctx.tz).isoformat(), person["id"]))
+                        await react(ctx, message, "👍")
+                        await reply(message, f"🕘 {P.mention(person)}, опоздание {row['late_min'] if row else '?'} мин")
+                    elif res == "break_limit":
+                        await reply(message, f"⛔ {P.mention(person)}, перерывы на сегодня закончились "
+                                             f"({ctx.db.get_int('breaks_per_day', 3)})")
+                    return
+        try:
+            await kassa_flow.on_group_text(ctx, message, text, staff, uid, name)
+        except Exception:
+            log.exception("Kassa: guruh xabari")
+
+    @r.message(in_group)
+    async def on_message(message: Message) -> None:
+        await handle(message, edited=False)
+
+    @r.edited_message(in_group)
+    async def on_edited(message: Message) -> None:
+        await handle(message, edited=True)
+
+    # ───────────── bot guruhga qo'shildi
+    @r.my_chat_member(F.chat.type.in_(GROUPS))
+    async def on_added(ev: ChatMemberUpdated) -> None:
+        new = ev.new_chat_member.status
+        if new not in ("member", "administrator") or ev.old_chat_member.status in ("member", "administrator"):
+            return
+        if is_proyob(ctx, ev.chat.id):
+            return
+        lang = ctx.lang()
+        L = (lambda uz, ru: ru if lang == "ru" else uz)
+        text = ui.join(f"<b>➕ {L('BOT GURUHGA QO‘SHILDI', 'БОТА ДОБАВИЛИ В ГРУППУ')}</b>", "", card(
+            [f"👥 {h(ev.chat.title or '')} · <code>{ev.chat.id}</code>",
+             L("Shu guruh «Проёб» bo'lsinmi? (xodimlar, kassa cheklari, zaderjkalar shu yerda)",
+               "Сделать эту группу «Проёб»? (сотрудники, чеки кассы, задержки — здесь)")]))
+        await ctx.notifier.notify_owner(text, kb([(L("✅ Ha, «Проёб»", "✅ Да, «Проёб»"), f"sgset:{ev.chat.id}")],
+                                                 [(L("✖️ Yo'q", "✖️ Нет"), "m")]))
+
+    return r
+
+
+@screen("sgset", "owner")
+async def set_group(ctx, r: Req):
+    ctx.db.set("proyob_group_id", r.args[0])
+    return ui.join(title("✅", r.L("«ПРОЁБ» BELGILANDI", "«ПРОЁБ» ЗАДАНА")), "", card(
+        [f"<code>{h(r.args[0])}</code>", r.L("Botni guruhda admin qiling — shunda hamma xabarni ko'radi.",
+                                            "Сделайте бота админом группы — так он видит все сообщения.")])), \
+        kb([(r.L("⌂ Menyu", "⌂ Меню"), "m")])
