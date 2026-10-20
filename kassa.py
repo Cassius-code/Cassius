@@ -376,6 +376,15 @@ def seed_opening(db: Database) -> None:
     db.set("opening_seeded", "1")
 
 
+def rename_opening(db: Database, old: str, new: str) -> None:
+    """Xodim ismi o'zgardi — boshlang'ich kassadagi ismi ham (umumiy reyting ikkiga bo'linib qolmasin)."""
+    if not old or not new or not db.one("SELECT 1 FROM opening WHERE name=?", (old,)):
+        return
+    if old.lower() != new.lower() and db.one("SELECT 1 FROM opening WHERE name=?", (new,)):
+        return                                             # bu ism allaqachon bor — tegmaymiz
+    db.run("UPDATE opening SET name=? WHERE name=?", (new, old))
+
+
 def openings(db: Database):
     return db.all("SELECT * FROM opening ORDER BY raw DESC")
 

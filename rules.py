@@ -285,6 +285,52 @@ class Tracker:
         h = self.db.one("SELECT name FROM known_humans WHERE user_id=?", (uid,))
         return h["name"] if h and h["name"] else "менеджер"
 
+    def live_counts(self, now: int) -> dict:
+        """Bosh menyu uchun aniq, real vaqtdagi sonlar (zaderjka qoidalari bilan bir xil):
+        waiting — hozir javob kutayotgan lidlar (nazoratdagi papkalar, ⚡/💊 va stavkadagilarsiz);
+        stavka — stavka bosqichidagi yangi lidlar; overdue — papka -> limitdan oshib javobsiz turganlar."""
+        limit = max(1, self.db.get_int("limit_minutes", 20)) * 60
+        skip = skip_list(self.db)
+        on = {f["id"] for f in P.folders(self.db) if f["delay_on"]}
+        out = {"waiting": 0, "stavka": 0, "overdue": {}}
+        for th in self.db.all("SELECT chat_id, topic_id, wait_since, stavka FROM threads "
+                              "WHERE wait_since IS NOT NULL OR stavka='on'"):
+            fid = self.chat_folder.get(th["chat_id"])
+            if fid is None:
+                continue                                   # papkada emas (nazoratda yo'q)
+            if th["stavka"] == "on":
+                out["stavka"] += 1
+                continue
+            if fid not in on or label_excluded(self.label(th["chat_id"], th["topic_id"]), skip):
+                continue
+            out["waiting"] += 1
+            if self.elapsed(fid, th["wait_since"], now) >= limit:
+                out["overdue"][fid] = out["overdue"].get(fid, 0) + 1
+        return out
+
+    def overdue_now(self, now: int) -> dict[int, int]:
+        return self.live_counts(now)["overdue"]
+
+    async def status_changed(self, chat_id: int, topic_id: int) -> bool:
+        """Lid statusi (topik belgisi) ⚡/💊 ga o'zgardi: bunday lid zaderjka emas — kutish bekor, ochiq
+        «задержка» havolasi yopiladi va hisobga kirmaydi (void). -> bekor qilindimi."""
+        label = self.label(chat_id, topic_id)
+        if not label_excluded(label, skip_list(self.db)):
+            return False
+        th = self.thread(chat_id, topic_id)
+        if th is None or (th["wait_since"] is None and not th["alert_id"]):
+            return False
+        now = int(self.clock())
+        self._set(chat_id, topic_id, wait_since=None, wait_msg_id=None, alert_id=None)
+        a = self.db.one("SELECT * FROM alerts WHERE id=?", (th["alert_id"],)) if th["alert_id"] else None
+        if a is not None and a["status"] == "open":
+            self.db.run("UPDATE alerts SET status='void', closed_ts=?, closed_by=? WHERE id=?",
+                        (now, f"статус {label.split()[0]}", a["id"]))
+            if a["group_msg_id"]:
+                await self.render_alert_message(a["group_chat_id"], a["group_msg_id"])
+        log.info("Status %s: %s/%s — zaderjka emas", label[:2], chat_id, topic_id)
+        return True
+
     async def press_done(self, alert_id: int, who: str) -> int:
         """«✅ Выполнено» guruhda bosildi: shu xabardagi hamma ochiq havolalar yopiladi. -> nechta yopildi."""
         a = self.db.one("SELECT * FROM alerts WHERE id=?", (alert_id,))

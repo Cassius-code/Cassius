@@ -150,7 +150,8 @@ async def amain() -> None:
     sched = Scheduler(ctx)
     tasks = [asyncio.create_task(supervise("Telegram bot", lambda: polling(bot, dp), notifier)),
              asyncio.create_task(supervise("Asosiy akkaunt", userbot.run, notifier)),
-             asyncio.create_task(supervise("Nazorat", sched.run, notifier))]
+             asyncio.create_task(supervise("Nazorat", sched.run, notifier)),
+             asyncio.create_task(supervise("Panel", lambda: panel.live_loop(ctx), notifier))]
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

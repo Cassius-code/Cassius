@@ -8,9 +8,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «✅ Выполнено» tugmasi boradi. Faqat ish vaqtida hisoblanadi: kechasi kelgan xabarlar sanalmaydi.
   Javob — har qanday xodim xabari, papka akkauntidan yozilgani ham (Push yuborgan xabarlar sanalmaydi).
   Xodim yozgandan keyin bot yozsa — bu mijozning yangi xabari, unga ham javob kerak.
-  Ish vaqtida guruhlar har 5 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
+  Ish vaqtida guruhlar har 2 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
   yetkazmay qolgan xabar ham topilib, o'z vaqti bilan hisoblanadi.
   Bir vaqtda kechikkan lidlar — bitta xabarda; keyin kechikkani — pastga yangi xabar (eskisi o'chmaydi).
+  Lid statusi ⚡/💊 (Клоун, Мариновка) — zaderjka emas: status qo'yilsa kutish bekor, ochiq zaderjka yopiladi.
+  Xodimning `/status` buyrug'i va vositachi botning status menyusi mijoz xabari hisoblanmaydi.
   **Papkalar:** 🚨 Nazorat → 📁 Papkalar — asosiy akkauntdagi papkalar ro'yxati; ➕ — qo'shish (guruhlari o'zi
   keladi), ✅ — ochish: 👤 javob beradigan xodimlar, nazorat, o'chirish. Har papkada 🔥 lidlar soni.
 - **🎬 Stavka.** Yangi chatda birinchi stavka 20 daqiqada, keyingilari ham 20 daqiqada kelishi kerak.
@@ -28,7 +30,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   - **Hisobotni botning o'ziga yozish mumkin:** tepasida ism bilan, masalan `Baxa` / `rd 19.10` / `1950` / `2600`.
     Ism notanish bo'lsa — «➕ Yangi xodim: Baxa» tugmasi chiqadi (shunday tanishtirasiz). Jarima ham:
     `@ivan штраф 5`. Guruhda ham xuddi shunday.
-  - Bosh menyuda — 💰 **Cash**: shu haftaning jami oyligi ($). Kassa bo'limida — cheklar yig'indisi va 🏆 top 3.
+  - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
+    da hozir nechta zaderjka (🟢 yo'q · 🟡 bor · 🔴 ko'p). Menyu o‘z joyida har 2 soniyada yangilanadi.
+    Kassa bo'limida — cheklar yig'indisi, har birining $ i va jami, 🏆 top 3.
   - **🏆 Umumiy reyting** kassa bo'limida: boshlang'ich (oldingi haftalar) kassa + 19.10 dan keyingi cheklar.
     Guruhda `/topall`. Boshlang'ich raqamlar: 🏆 Reyting → ♾ Hammasi → 📌.
   - **🧮 Haftani hisoblash.** Hafta (Du–Ya) tugagach bosasiz. Bot o'tgan haftadagi foizlarni ko'rsatadi:

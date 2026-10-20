@@ -518,7 +518,9 @@ async def edit_do(ctx, r: Req, pid: int, field: str):
     if field == "name":
         if not text or len(text) > 40:
             return r.L("⚠️ Ism 1–40 belgi", "⚠️ Имя 1–40 символов")
+        old = (P.person(db, pid) or {"name": ""})["name"]
         P.update_person(db, pid, name=text)
+        K.rename_opening(db, old, text)                    # umumiy reytingdagi boshlang'ich kassa ham shu ismga
     elif field == "user":
         u = "" if text in ("-", "—") else P.norm_username(text)
         if u and not P.valid_username(u):

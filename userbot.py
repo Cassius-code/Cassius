@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 
 from . import people as P
@@ -20,7 +21,11 @@ log = logging.getLogger("userbot")
 TOPIC_FETCH_LIMIT = 300        # yangi topik: boshidan nechta xabar olinadi
 OLD_THREAD_TAIL = 15           # eski (o'rnatishdan oldingi) nit birinchi ko'rilganda: oxirgi nechta xabar
 SYNC_EVERY = 600               # papka/topik sinxroni va tekshiruv har necha soniyada
-WATCH_EVERY = 5                # ish vaqtida: guruhlarda yangi xabar bormi — har necha soniyada tekshiriladi
+WATCH_EVERY = 2                # ish vaqtida: guruhlarda yangi xabar bormi — har necha soniyada tekshiriladi
+# Vositachi botning o'z menyusi: «Статус: 🔥 Новый …» (/status paneli), «✅Установлен: 💊 Мариновка». Bu mijoz xabari
+# emas. Faqat xabar boshidagi bir necha belgiga qaraladi — matn o'qilmaydi va saqlanmaydi.
+BOT_UI_RE = re.compile(r"^\W*(статус|установлен|status)\s*:", re.IGNORECASE)
+CMD_WINDOW = 300               # xodim /buyruq yozgandan keyin botning tugmali javobi — menyu (5 daqiqagacha)
 
 
 def thread_of(m, is_forum: bool) -> int:
@@ -61,8 +66,10 @@ class Userbot(TgAccount, PushSender):
         self._bots: set[int] = set()
         self.deep_running = False                  # Push bazasini to'liq tekshirish ketyapti
         self._deep_task = None
-        self.tick = 5                              # kuzatuv uchun tez-tez uyg'onadi
+        self.tick = 1                              # kuzatuv uchun tez-tez uyg'onadi
+        self._watch_pause = 0.0                    # Telegram «sekinlang» (FloodWait) desa — shu vaqtgacha kutish
         self._tops: dict[int, int] = {}            # chat -> oxirgi ko'rilgan xabar id (kuzatuv)
+        self._cmd_ts: dict[tuple, float] = {}      # (chat, topik) -> xodim oxirgi /buyruq yozgan vaqt
         self._last_watch = 0.0
         self._sync_task = None                     # papka/topik sinxroni fonda (kuzatuvni ushlab turmaydi)
         self.watch_found = 0                       # kuzatuv topgan (jonli kelmay qolgan) xabarlar
@@ -131,7 +138,7 @@ class Userbot(TgAccount, PushSender):
         now = now or time.time()
         if not (self.in_work_time(now) and self.db.flag("bot_enabled")):
             return
-        if now - self._last_watch < WATCH_EVERY:
+        if now - self._last_watch < WATCH_EVERY or now < self._watch_pause:
             return
         self._last_watch = now
         try:
@@ -139,7 +146,12 @@ class Userbot(TgAccount, PushSender):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log.info("Kuzatuv: %s", type(exc).__name__)
+            wait = getattr(exc, "seconds", None)
+            if wait:                                       # FloodWait: Telegram so'rovni kamaytirishni so'radi
+                self._watch_pause = now + int(wait)
+                log.warning("Kuzatuv: Telegram %s s kutishni so'radi", wait)
+            else:
+                log.info("Kuzatuv: %s", type(exc).__name__)
 
     async def poll_chats(self, client) -> int:
         """Bitta so'rov bilan hamma guruhning oxirgi xabari; o'zgargan guruhda — faol topiklar tekshiriladi."""
@@ -188,9 +200,8 @@ class Userbot(TgAccount, PushSender):
             res = await client(GetForumTopicsRequest(channel=peer, offset_date=None, offset_id=0, offset_topic=0,
                                                      limit=20))
             topics = [t for t in res.topics if hasattr(t, "title") and int(t.id) != 1]
-            new = [t for t in topics if not self.tracker.thread(chat_id, int(t.id))]
-            if new:
-                await self._store_topics(chat_id, new)
+            if topics:
+                await self._store_topics(chat_id, topics)
             for t in topics:
                 await self._catch_thread(chat_id, int(t.id), int(getattr(t, "top_message", 0) or 0),
                                          _unix(getattr(t, "date", None)))
@@ -334,8 +345,26 @@ class Userbot(TgAccount, PushSender):
                         "name=excluded.name", (int(sid), name[:60]))
         return False
 
+    def _bot_ui(self, m, chat_id: int, topic: int) -> bool:
+        """Vositachi botning menyusi/javobi (status paneli, «Установлен: …») — mijoz xabari emas."""
+        if BOT_UI_RE.match((getattr(m, "message", "") or "")[:40]):
+            return True
+        rm = getattr(m, "reply_markup", None)
+        if rm is not None and type(rm).__name__ == "ReplyInlineMarkup":     # tugmali xabar — buyruqqa javob
+            last = self._cmd_ts.get((chat_id, topic))
+            return last is not None and 0 <= m.date.timestamp() - last <= CMD_WINDOW
+        return False
+
     async def _process(self, m, chat_id: int, topic: int, source: str) -> str:
+        action = getattr(m, "action", None)
+        if source != "live" and action is not None and "TopicEdit" in type(action).__name__ and topic > 1:
+            await self.refresh_topic(chat_id, topic)       # status (🔥/⚡/💊) o'zgardi — jonli kelmagan bo'lsa ham
         who = await self.classify(m, chat_id)
+        if who == "client" and self._bot_ui(m, chat_id, topic):
+            who = "service"
+        elif who == "staff" and (getattr(m, "message", "") or "").startswith("/"):
+            self._cmd_ts[(chat_id, topic)] = m.date.timestamp()            # /status va h.k. — javob ham emas
+            who = "service"
         msg = Msg(chat_id, topic, int(m.id), int(m.date.timestamp()), m.sender_id, who,
                   video=bool(getattr(m, "video_note", None)), source=source)
         return await self.tracker.handle(msg)
@@ -502,12 +531,18 @@ class Userbot(TgAccount, PushSender):
 
     async def _store_topics(self, chat_id: int, topics: list) -> None:
         icons = await self._icon_chars({int(t.icon_emoji_id) for t in topics if getattr(t, "icon_emoji_id", None)})
+        changed = []
         for t in topics:
             icon = icons.get(int(t.icon_emoji_id), "") if getattr(t, "icon_emoji_id", None) else ""
+            old = self.db.one("SELECT icon FROM topics WHERE chat_id=? AND topic_id=?", (chat_id, int(t.id)))
+            if old is not None and old["icon"] != icon:
+                changed.append(int(t.id))
             self.db.run("INSERT INTO topics(chat_id, topic_id, title, icon, created_ts) VALUES(?,?,?,?,?) "
                         "ON CONFLICT(chat_id, topic_id) DO UPDATE SET title=excluded.title, icon=excluded.icon, "
                         "created_ts=COALESCE(topics.created_ts, excluded.created_ts)",
                         (chat_id, int(t.id), t.title or "", icon, _unix(getattr(t, "date", None))))
+        for tid in changed:                                # status ⚡/💊 bo'ldi — kutish va zaderjka bekor
+            await self.tracker.status_changed(chat_id, tid)
 
     async def _icon_chars(self, doc_ids: set[int]) -> dict[int, str]:
         from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest

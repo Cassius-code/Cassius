@@ -87,7 +87,8 @@ class Pusher:
         self.running = False
         self._stop = False
         self._workers: list = []
-        self.progress_text = ""
+        self.progress_text = ""                  # «120/300 · ✖️2» — ketayotgan Push (panel o'zi o'qiydi)
+        self.last_report: tuple | None = None    # (tugagan vaqt, natija) — oxirgi Push
 
     # ------------------------------------------------------------ mazmun
     def media(self) -> dict | None:
@@ -258,6 +259,7 @@ class Pusher:
 
         async def tick() -> None:
             stat["done"] += 1
+            self.progress_text = f"{stat['sent']}/{len(items)}" + (f" · ✖️ {stat['failed']}" if stat["failed"] else "")
             if stat["done"] % PROGRESS_EVERY == 0:
                 self.db.run("UPDATE broadcasts SET sent=?, failed=? WHERE id=?", (stat["sent"], stat["failed"], bid))
                 if progress:
@@ -332,8 +334,11 @@ class Pusher:
                         (stat["sent"], stat["failed"], status, int(self.clock()), bid))
             self.running = False
             self._workers = []
-        return {"status": status, "sent": stat["sent"], "failed": stat["failed"], "total": len(items),
-                "reasons": reasons, "reason": stat["aborted"], "per_folder": per_folder, "aud": aud}
+            self.progress_text = ""
+        res = {"status": status, "sent": stat["sent"], "failed": stat["failed"], "total": len(items),
+               "reasons": reasons, "reason": stat["aborted"], "per_folder": per_folder, "aud": aud}
+        self.last_report = (int(self.clock()), res)
+        return res
 
     async def send_test(self, bot, uid: int) -> None:
         """Sinov: faqat adminning o'ziga (bot orqali), mijoz ko'radigandek."""

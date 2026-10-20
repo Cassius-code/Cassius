@@ -24,6 +24,10 @@ INPUTS: dict[str, tuple] = {}          # amal -> (fn, level)
 PANEL: dict[int, int] = {}             # chat_id -> panel xabari id
 WAIT: "_Wait"                          # user_id -> {"act", "data", "back"} — pastda, bazada ham saqlanadi
 HIST: dict[int, list] = {}             # user_id -> [{"data", "text", "markup", "safe", "ask"}]
+VIEW: dict[int, str | None] = {}       # chat_id -> panelda hozir ochiq ekran (bosh menyu jonli yangilanadi)
+SHOWN: dict[int, str] = {}             # chat_id -> panelda turgan matn
+SHOW_N: dict[int, int] = {}            # chat_id -> panel necha marta ko'rsatildi (o'zgardimi — bilish uchun)
+_LOCKS: dict[int, asyncio.Lock] = {}
 STORE = None                           # Database: panel xabari id si qayta ishga tushganda ham esda qolsin
 _bg: set = set()
 
@@ -259,6 +263,13 @@ def bg(coro) -> None:
 
 
 # ───────────────────────── ko'rsatish
+def lock(chat_id: int) -> asyncio.Lock:
+    """Bitta chat paneliga bir vaqtda bitta yozish (tugma bosilishi va jonli yangilanish to'qnashmasin)."""
+    if chat_id not in _LOCKS:
+        _LOCKS[chat_id] = asyncio.Lock()
+    return _LOCKS[chat_id]
+
+
 def panel_id(chat_id: int) -> int | None:
     if chat_id in PANEL:
         return PANEL[chat_id]
@@ -291,8 +302,17 @@ async def _drop(bot, chat_id: int, mid: int | None) -> None:
             pass
 
 
-async def show(bot, chat_id: int, text: str, markup=None, edit_id: int | None = None, fresh: bool = False) -> None:
-    """Panelni joyida yangilash. fresh=True — panelni pastga (yangi xabar) ko'chirish. Chatda doim bitta panel."""
+async def show(bot, chat_id: int, text: str, markup=None, edit_id: int | None = None, fresh: bool = False,
+               view: str | None = None) -> None:
+    """Panelni joyida yangilash. fresh=True — panelni pastga (yangi xabar) ko'chirish. Chatda doim bitta panel.
+    view — ko'rsatilgan ekran (bosh menyu bo'lsa, u o'zi jonli yangilanib turadi)."""
+    VIEW[chat_id] = None
+    await _show(bot, chat_id, text, markup, edit_id, fresh)
+    VIEW[chat_id], SHOWN[chat_id] = view, text
+    SHOW_N[chat_id] = SHOW_N.get(chat_id, 0) + 1
+
+
+async def _show(bot, chat_id: int, text: str, markup, edit_id: int | None, fresh: bool) -> None:
     from aiogram.exceptions import TelegramBadRequest
     from aiogram.types import LinkPreviewOptions
     kw = dict(reply_markup=markup, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))

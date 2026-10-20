@@ -2,15 +2,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
+from datetime import datetime
 
 from . import people as P
 from . import ui
 from .push import hhmm, slot_bounds
 from .timeutil import fmt, parse_date, parse_hhmm, parse_minutes, parse_number
 from .ui import Req, card, grid, h, kb, nav, on_input, onoff, screen, title, must
+
+log = logging.getLogger("panel_push")
 
 MAX_MEDIA = 20 * 1024 * 1024
 SPEED_UZ = {"fast": "tez 1–2 s", "normal": "oddiy 2–3 s", "slow": "ehtiyot 3–5 s"}
@@ -91,7 +95,13 @@ async def push_menu(ctx, r: Req):
                   [f"📅 {r.L('Baza', 'База')}: {dstr(base)} {r.L('dan keyin o‘zi yozgan lidlar', 'и позже (писали сами)')}" +
                    base_state(ctx, r)])]
     if pu.running:
-        parts.append(card([f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')}… {h(pu.progress_text)}"]))
+        parts.append(card([f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')} — <b>{h(pu.progress_text or '…')}</b>",
+                           r.L("<i>Raqamlar shu yerda o'zi yangilanadi. Menyuga o'tsangiz ham Push davom etadi.</i>",
+                               "<i>Цифры обновляются здесь сами. Можно уйти в меню — рассылка продолжится.</i>")]))
+    elif pu.last_report:
+        ts, res = pu.last_report
+        parts.append(card([f"{report_lines(ctx, r, res)[0]} · {datetime.fromtimestamp(ts, ctx.tz):%d.%m %H:%M}"]
+                          + report_lines(ctx, r, res)[1:]))
     rows = []
     if pu.running:
         rows.append([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux")])
@@ -144,30 +154,27 @@ async def start_run(ctx, r: Req):
     pu = ctx.pusher
     if pu.running:
         return r.L("⏳ Push allaqachon ketyapti", "⏳ Рассылка уже идёт")
-    chat_id, mid = r.chat_id, r.message.message_id
-
-    async def progress(sent, failed, total):
-        pu.progress_text = f"{sent}/{total}" + (f" · ✖️{failed}" if failed else "")
-        try:
-            await ui.show(ctx.bot, chat_id, ui.join(title("📣", "PUSH"), "", card(
-                [f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')}: <b>{sent}/{total}</b>" +
-                 (f" · ✖️ {failed}" if failed else "")])), kb([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux")]),
-                edit_id=mid)
-        except Exception:
-            pass
+    import asyncio
 
     async def job():
-        res = await pu.run("manual", None, progress)
-        pu.progress_text = ""
-        await ui.show(ctx.bot, chat_id, report_text(ctx, r, res), kb([("📣 Push", "u"), (r.L("⌂ Menyu", "⌂ Меню"), "m")]),
-                      edit_id=mid)
+        try:
+            await pu.run("manual", None)                   # holat va natija Pusher'da — panel o'zi ko'rsatadi
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Push")
 
     ui.bg(job())
-    return ui.join(title("📣", "PUSH"), "", card([r.L("⏳ Boshlandi…", "⏳ Начинаю…")])), \
-        kb([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux")])
+    await asyncio.sleep(0)                                 # Push boshlansin — ekranda darhol «ketyapti»
+    ui.view(r, "u")
+    return await push_menu(ctx, r)
 
 
 def report_text(ctx, r: Req, res: dict) -> str:
+    return ui.join(title("📣", "PUSH"), "", card(report_lines(ctx, r, res)))
+
+
+def report_lines(ctx, r: Req, res: dict) -> list[str]:
     names = {"done": r.L("✅ Push tugadi", "✅ Рассылка завершена"), "stopped": r.L("⏹ To'xtatildi", "⏹ Остановлено"),
              "aborted": r.L("⛔ Push uzildi", "⛔ Рассылка прервана"), "busy": r.L("⏳ Boshqa Push ketyapti",
                                                                               "⏳ Другая рассылка идёт"),
@@ -185,13 +192,13 @@ def report_text(ctx, r: Req, res: dict) -> str:
         if res.get("reasons"):
             top = sorted(res["reasons"].items(), key=lambda kv: -kv[1])[:3]
             lines.append(r.L("Sabablar: ", "Причины: ") + "; ".join(f"{h(k)} ×{v}" for k, v in top))
-    return ui.join(title("📣", "PUSH"), "", card(lines))
+    return lines
 
 
 @screen("ux", "full")
 async def stop(ctx, r: Req):
-    ctx.pusher.stop()
-    await ui.toast(ctx.bot, r.chat_id, r.L("⏹ To'xtatildi", "⏹ Остановлено"))
+    ctx.pusher.stop()                                      # natija shu ekranda o'zi chiqadi (jonli yangilanish)
+    ui.view(r, "u")
     return await push_menu(ctx, r)
 
 

@@ -1281,6 +1281,11 @@ def pc(v) -> str:
     return "❓" if v is None or v == 0 else f"{float(v):g}%"
 
 
+def pusd(usd, v) -> str:
+    """Foiz $ da: «(26 $)». Foiz kiritilmagan bo'lsa — bo'sh."""
+    return "" if not v or usd is None else f" <i>({money(float(usd) * float(v) / 100)} $)</i>"
+
+
 def rule_lines(r: Req, w: dict, names: dict, partner: str) -> list[str]:
     you = r.L("Siz", "Вы")
     out = []
@@ -1291,29 +1296,28 @@ def rule_lines(r: Req, w: dict, names: dict, partner: str) -> list[str]:
             head += f" <i>({r.L('umumiy', 'общий')})</i>"
         elif it["kind"] == "self":
             head += f" <i>({you.lower()})</i>"
-        head += f" · {num(it['raw'])} · {money(it['usd'])} $" + (" ❓" if miss else "")
+        usd = it["usd"]
+        head += f" · {num(it['raw'])} · <b>{money(usd)} $</b>"
         if it["kind"] == "worker":
             rest = 100 - (it["wpct"] or 0) - (it["opct"] or 0) - it["kshare"]
-            parts = [f"{h(it['name'])} {pc(it['wpct'])}" if it["zp_on"] else
+            parts = [f"{h(it['name'])} {pc(it['wpct'])}{pusd(usd, it['wpct'])}" if it["zp_on"] else
                      f"{h(it['name'])} <i>{r.L('zp o‘zingiz', 'зп сами')}</i>",
-                     f"{you} {pc(it['opct']) if it['opct'] is not None else '❓'}"]
+                     f"{you} {pc(it['opct']) if it['opct'] is not None else '❓'}{pusd(usd, it['opct'])}"]
         elif it["kind"] == "self":
             rest = 100 - (it["wpct"] or 0) - it["kshare"]
-            parts = [f"{you} {pc(it['wpct'])}"]
+            parts = [f"{you} {pc(it['wpct'])}{pusd(usd, it['wpct'])}"]
         else:
             rest = None
             parts = [r.L("ishlagan xodim — o‘z %", "кто работал — свой %"),
-                     f"{you} {pc(it['opct']) if it['opct'] is not None else '❓'}"]
+                     f"{you} {pc(it['opct']) if it['opct'] is not None else '❓'}{pusd(usd, it['opct'])}"]
         if it["kshare_owner"]:
             parts[-1] += f" <i>(−{r.L('ulush', 'доля')} {it['kshare_owner']:g}%)</i>"
         if it["kshare"]:
             parts.append(f"{r.L('ulush', 'доля')} {it['kshare']:g}% <i>({h(partner)}{r.L('dan', '')})</i>")
-        if rest is None:
-            parts.append(f"{h(partner)} {r.L('qolgani', 'остаток')}")
-        elif miss:
-            parts.append(f"{h(partner)} {r.L('qolgani', 'остаток')}")
+        if rest is None or miss:
+            parts.append(f"{h(partner)} — {r.L('qolgani', 'остаток')}")
         else:
-            parts.append(f"{h(partner)} <b>{rest:g}%</b>" + (" ⚠️" if rest < 0 else ""))
+            parts.append(f"{h(partner)} <b>{rest:g}%</b>{pusd(usd, rest)}" + (" ⚠️" if rest < 0 else ""))
         out.append(head)
         out.append("   " + " · ".join(parts))
     for it in w["subs"]:
@@ -1364,21 +1368,25 @@ async def week_calc(ctx, r: Req):
                  + ("" if w["confirmed"] else f" · <i>{r.L('o‘tgan haftadagidek', 'как на прошлой неделе')}</i>")]
         lines += rule_lines(r, w, names, partner)
         parts.append(card(lines))
+        parts.append(card([f"💰 Cash — <b>{money(sum(it['usd'] or 0 for it in w['accts']))} $</b>"]))
         btn = [(f"✏️ {it['name']}", f"kze:{w0.isoformat()}:{it['pid']}") for it in w["accts"] + w["subs"]]
     if w["shares"]:
         parts.append(card([f"<b>🤝 {r.L('Ulushlar', 'Доли')}</b>"] + [share_line(r, sh, names, partner)
                                                                     for sh in w["shares"]]))
-    hint = []
+    hint = [r.L(f"<b>Qanday bo'linadi:</b> har akkaunt kassasi ($) → xodim %, siz %, qolgani — {h(partner)}.",
+                f"<b>Как делится:</b> касса каждого аккаунта ($) → сотрудник %, вы %, остаток — {h(partner)}.")]
     if w["missing"]:
-        hint.append(r.L(f"❓ {len(w['missing'])} ta foiz kiritilmagan — «✅ Hisoblash» ni bosing, bot o'zi so'raydi.",
-                        f"❓ Не введено процентов: {len(w['missing'])} — нажмите «✅ Рассчитать», бот спросит."))
+        hint.append(r.L(f"❓ {len(w['missing'])} ta foiz hali kiritilmagan — pastdagi «✅» ni bosing, bot bittalab "
+                        "so'raydi (ikki son: xodim va siz, masalan <code>40 10</code>).",
+                        f"❓ Не введено процентов: {len(w['missing'])} — нажмите «✅» внизу, бот спросит по очереди "
+                        "(два числа: сотрудник и вы, например <code>40 10</code>)."))
     if w["over"]:
         hint.append("⚠️ " + ", ".join(h(names.get(x, "?")) for x in w["over"]) +
                     r.L(" — foizlar 100% dan oshdi", " — сумма процентов больше 100%"))
-    hint.append(r.L("To'g'ri bo'lsa — «✅». O'zgargan bo'lsa — ismni bosib yangi sonni yozing. O'zgarish faqat shu "
-                    "haftadan: o'tgan haftalar buzilmaydi.",
-                    "Всё верно — «✅». Изменилось — нажмите имя и напишите число. Меняется только с этой недели: "
-                    "прошлые недели не трогаются."))
+    hint.append(r.L("Foizlar bir marta kiritiladi — keyingi haftalar o'zi shu foizlar bilan hisoblanadi. "
+                    "O'zgartirish: ismni bosing va yangi sonlarni yozing (faqat shu haftadan, o'tganlari buzilmaydi).",
+                    "Проценты вводятся один раз — следующие недели считаются по ним сами. Изменить: нажмите имя "
+                    "и напишите новые числа (только с этой недели, прошлые не меняются)."))
     parts.append(card(hint))
     rows = grid(btn, 3)
     rows.append([(r.L("🤝 Ulushlar", "🤝 Доли"), f"kzs:{w0.isoformat()}")])

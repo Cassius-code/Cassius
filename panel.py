@@ -62,28 +62,34 @@ async def main_menu(ctx, r: Req):
     alive = db.flag("bot_enabled")
     from .timeutil import day_start
     d0 = day_start(now, ctx.tz)
-    waiting = db.scalar("SELECT COUNT(*) FROM threads WHERE wait_since IS NOT NULL")
+    lc = ctx.tracker.live_counts(now) if ctx.tracker else {"waiting": 0, "stavka": 0, "overdue": {}}
+    waiting, stavka = lc["waiting"], lc["stavka"]
     delays = db.scalar("SELECT COUNT(*) FROM alerts WHERE created_ts>=? AND status<>'void'", (d0,))
-    stavka = db.scalar("SELECT COUNT(*) FROM threads WHERE stavka='on'")
     staff = ctx.att.staff()
     day = t.date().isoformat()
     came = db.scalar("SELECT COUNT(*) FROM attendance WHERE day=? AND arrived_ts IS NOT NULL", (day,))
     lines = [f"<b>{r.L('Bugun', 'Сегодня')}</b>",
              f"⏱ {r.L('Javob kutyapti', 'Ждут ответа')} — <b>{waiting}</b>",
-             f"🚨 {r.L('Zaderjka', 'Задержки')} — <b>{delays}</b>",
+             f"🚨 {r.L('Zaderjkalar', 'Задержки')} — <b>{delays}</b>",
              f"🎬 {r.L('Stavkada', 'В ставке')} — <b>{stavka}</b>",
              f"🙋 {r.L('Ishda', 'На работе')} — <b>{came} / {len(staff)}</b>"]
-    cash, ready = None, True
-    if r.can("full"):
+    if r.owner:                                        # 💰 shu hafta (dushanbadan) ishlangan jami kassa, $
         from . import kassa as K
         from .kassa_view import money
-        if K.zp_mode(db) != "off":                     # 💰 shu haftadagi jami oylik ($), dushanbadan beri
-            ws = K.week_start(t.date())
-            b = K.calc(db, ws, t.date())
-            zp = sum(x["zp"] for x in b["rows"].values() if x["kind"] == "worker" and x["zp_on"])
-            ready = K.zp_state(db, ws, t.date(), t.date())["ready"]
-            cash = money(zp)
-            lines.append(f"💰 Cash — <b>{'' if ready else '≈ '}{cash} $</b>")
+        b = K.calc(db, K.week_start(t.date()), t.date())
+        cash = sum(x["usd"] for x in b["rows"].values() if x["kind"] != "partner")
+        lines.append(f"💰 Cash — <b>{money(cash)} $</b> <i>({r.L('dushanbadan', 'с понедельника')})</i>")
+    # papkalar bo'yicha hozirgi zaderjkalar: 🟢 yo'q · 🟡 bor · 🔴 ko'p (jarima chegarasi)
+    over = lc["overdue"]
+    red = max(1, ctx.tracker.fine_rules()[0]) if ctx.tracker else 3
+    live = [f"<b>{r.L('Hozir zaderjka', 'Задержки сейчас')}</b>"]
+    if not db.flag("delay_enabled"):
+        live.append(r.L("⚪ nazorat o'chiq", "⚪ контроль выключен"))
+    for f in P.folders(db):
+        if not f["delay_on"] or not db.flag("delay_enabled"):
+            continue
+        n = over.get(f["id"], 0)
+        live.append(f"{'🟢' if n == 0 else ('🔴' if n >= red else '🟡')} {h(f['name'])} — <b>{n}</b>")
     ub = ctx.userbot
     ub_ok = ub is not None and ub.state == "online"
     accs = db.all("SELECT id FROM accounts WHERE paused=0")
@@ -92,6 +98,9 @@ async def main_menu(ctx, r: Req):
     sysline = (f"{'🟢' if ub_ok else '🔴'} {r.L('Akkaunt', 'Аккаунт')} · "
                f"{'🟢' if (not accs or online == len(accs)) else '🟡'} Push {online}/{len(accs)} · "
                f"{'🟢' if group_ok else '🔴'} «Проёб»")
+    pu = ctx.pusher
+    pushline = (f"📣 {r.L('Push ketyapti', 'Идёт Push')} — <b>{h(pu.progress_text or '…')}</b>"
+                if pu is not None and pu.running else None)
     head = title("◆", "RD CONTROL", f"{when} · " + (r.L("🟢 ishlayapti", "🟢 работает") if alive else
                                                      r.L("⛔ to'xtatilgan", "⛔ остановлен")))
     from .kassa import pending_reports
@@ -103,7 +112,66 @@ async def main_menu(ctx, r: Req):
         buttons = [b for b in buttons if b[1] in ("c", "p", "r")]
     rows = grid(buttons)
     rows.append([(r.L("🌐 Русский язык", "🌐 O'zbek tili"), r.L("lang:ru", "lang:uz"))])
-    return ui.join(head, "", card(lines), card([sysline])), kb(*rows)
+    return ui.join(head, "", card(lines), card(live) if len(live) > 1 else "", card([sysline, pushline])), kb(*rows)
+
+
+# ───────────────────────── jonli panel: bosh menyu va Push o'z joyida yangilanib turadi
+LIVE_VIEWS = ("m", "u")
+_LIVE_PAUSE: dict[int, float] = {}
+LIVE_EVERY = 2
+
+
+async def live_refresh(ctx) -> int:
+    """Panelda bosh menyu (yoki Push) ochiq turgan chatlar: raqamlar o'zgargan bo'lsa — xabar JOYIDA tahrirlanadi
+    (yangi xabar yo'q, bildirishnoma yo'q, panel o'chib-yonmaydi). -> nechta tahrirlandi."""
+    import time as _t
+
+    from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+    from aiogram.types import LinkPreviewOptions
+    n = 0
+    for chat, view in list(ui.VIEW.items()):
+        if view not in LIVE_VIEWS or _t.monotonic() < _LIVE_PAUSE.get(chat, 0) or chat in ui.WAIT:
+            continue
+        async with ui.lock(chat):
+            mid = ui.panel_id(chat)
+            if ui.VIEW.get(chat) != view or not mid:
+                continue                                   # foydalanuvchi boshqa ekranga o'tdi
+            req = make_req(ctx, chat, chat, view)
+            fn, need = ui.SCREENS[view]
+            if not req.can(need):
+                ui.VIEW.pop(chat, None)
+                continue
+            res = await fn(ctx, req)
+            if not isinstance(res, tuple) or res[0] == ui.SHOWN.get(chat):
+                continue
+            text, markup = res
+            try:
+                await ctx.bot.edit_message_text(text, chat_id=chat, message_id=mid, reply_markup=markup,
+                                                parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
+                ui.SHOWN[chat] = text
+                n += 1
+            except TelegramRetryAfter as exc:              # Telegram «sekinroq» dedi — shu chatda biroz kutamiz
+                _LIVE_PAUSE[chat] = _t.monotonic() + exc.retry_after
+            except TelegramBadRequest as exc:
+                if "not modified" in str(exc).lower():
+                    ui.SHOWN[chat] = text
+                else:
+                    ui.VIEW.pop(chat, None)                # panel o'chirilgan — kuzatmaymiz
+            except Exception as exc:
+                log.info("Jonli panel %s: %s", chat, type(exc).__name__)
+    return n
+
+
+async def live_loop(ctx) -> None:
+    import asyncio
+    while True:
+        await asyncio.sleep(LIVE_EVERY)
+        try:
+            await live_refresh(ctx)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Jonli panel")
 
 
 @screen("lang", "view")
@@ -135,7 +203,7 @@ async def refresh_panels(ctx, note: str = "") -> None:
         req = Req(uid=chat, chat_id=chat, level=level, lang=ctx.lang(chat))
         try:
             text, markup = await main_menu(ctx, req)
-            await ui.show(ctx.bot, chat, text, markup)
+            await ui.show(ctx.bot, chat, text, markup, view="m")
             if note and level == "owner":
                 await ui.toast(ctx.bot, chat, note, 30)
         except Exception as exc:
@@ -188,7 +256,9 @@ def build_router(ctx) -> Router:
             await ui.toast(ctx.bot, req.chat_id, res)
             return
         text, markup = res
-        await ui.show(ctx.bot, req.chat_id, text, markup, edit_id=edit_id, fresh=fresh)
+        async with ui.lock(req.chat_id):
+            await ui.show(ctx.bot, req.chat_id, text, markup, edit_id=edit_id, fresh=fresh,
+                          view=None if req.uid in ui.WAIT else req.view)
         if edit_id:
             ctx.notifier.forget(req.chat_id, edit_id)       # savol xabari panelga aylandi
         ui.remember(req.uid, req.view or "?", text, markup, safe, ask=req.uid in ui.WAIT)
@@ -236,6 +306,16 @@ def build_router(ctx) -> Router:
             from . import private
             await private.on_worker_cb(ctx, cb, data)
             return
+        chat = cb.message.chat.id
+        before, shown = ui.VIEW.get(chat), ui.SHOW_N.get(chat, 0)
+        ui.VIEW[chat] = None                               # tugma bosildi — jonli yangilanish bu panelga tegmaydi
+        try:
+            await _on_cb(req, uid, data, cb)
+        finally:
+            if ui.SHOW_N.get(chat, 0) == shown and ui.VIEW.get(chat) is None:
+                ui.VIEW[chat] = before                     # ekran o'zgarmadi (faqat bildirishnoma) — qaytadi
+
+    async def _on_cb(req: Req, uid: int, data: str, cb: CallbackQuery) -> None:
         if data == "bk" or data.startswith("bk:"):         # «‹ Orqaga» — oldingi ekran
             ui.WAIT.pop(uid, None)
             prev = ui.previous(uid)

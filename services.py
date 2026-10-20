@@ -16,7 +16,8 @@ from .timeutil import local_date, parse_hhmm
 
 log = logging.getLogger("services")
 
-TICK = 10
+TICK = 10                      # hisobot, zaxira, Push jadvali va h.k.
+FAST_TICK = 2                  # zaderjka va stavka — har 2 soniyada
 JOURNAL_DAYS = 14
 
 
@@ -68,10 +69,15 @@ class Scheduler:
         self._last_pool = 0.0
 
     async def run(self) -> None:
+        last_full = 0.0
         while True:
             started = time.monotonic()
-            await self.step()
-            await asyncio.sleep(max(1.0, TICK - (time.monotonic() - started)))
+            if started - last_full >= TICK:
+                last_full = started
+                await self.step()
+            else:
+                await self._safe("zaderjka va stavka", self.ctx.tracker.tick(int(self.ctx.clock())))
+            await asyncio.sleep(max(0.5, FAST_TICK - (time.monotonic() - started)))
 
     async def _safe(self, name: str, coro) -> None:
         try:

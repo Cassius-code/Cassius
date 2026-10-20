@@ -191,7 +191,8 @@ def overall(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, cmp: dict |
             continue
         tag = f" <i>({w('pool', lang)})</i>" if r["kind"] == "pool" else ""
         up = arrow(cmp["cur"].get(r["p"]["id"], 0.0), cmp["prev"].get(r["p"]["id"])) if cmp else ""
-        kl.append(f"{h(r['p']['name'])}{tag} · {kassa_line(r, lang)}{up}")
+        usd = f" · {money(r['usd'])} $" if owner else ""     # $ — faqat egaga
+        kl.append(f"{h(r['p']['name'])}{tag} · {kassa_line(r, lang)}{usd}{up}")
         if r["unassigned"]:
             kl.append(f"   ⚠️ {r['unassigned']} {w('unassigned', lang)}")
         if r["noprice"]:
@@ -200,7 +201,8 @@ def overall(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, cmp: dict |
     if not kl:
         return "\n".join(parts + [w("no_data", lang)])
     up = arrow(cmp["K"], cmp["PK"]) if cmp else ""
-    kl.append(f"<b>{w('total', lang)}</b> · {num(tn)} {w('checks', lang)} · <b>{num(traw)}</b>{up}")
+    kl.append(f"<b>{w('total', lang)}</b> · {num(tn)} {w('checks', lang)} · <b>{num(traw)}</b>"
+              + (f" · <b>{money(tusd)} $</b>" if owner else "") + up)
     note = cmp_note(cmp, lang)
     if note:
         kl.append(note)
