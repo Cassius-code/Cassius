@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery, Message
 
 from . import people as P
 from . import ui
-from .ui import Req, card, grid, h, kb, nav, onoff, screen, title
+from .ui import Req, card, grid, h, kb, screen, title
 
 log = logging.getLogger("panel")
 CUR_CHAT: contextvars.ContextVar = contextvars.ContextVar("panel_chat", default=None)
@@ -98,12 +98,8 @@ async def main_menu(ctx, r: Req):
     if not r.can("full"):
         buttons = [b for b in buttons if b[1] in ("c", "p", "r")]
     rows = grid(buttons)
-    rows.append([(r.L("🌐 Русский язык", "🌐 O'zbek tili"), r.L("lang:ru", "lang:uz")),
-                 (r.L("🎨 Mavzu", "🎨 Тема"), "th")])
-    from . import panel_cards as PC
-    blocks = PC.main(r, t, alive, waiting, delays, stavka, came, len(staff), cash, ready, ub_ok, online, len(accs),
-                     group_ok)
-    return ui.rich(ui.join(head, "", card(lines), card([sysline])), blocks), kb(*rows)
+    rows.append([(r.L("🌐 Русский язык", "🌐 O'zbek tili"), r.L("lang:ru", "lang:uz"))])
+    return ui.join(head, "", card(lines), card([sysline])), kb(*rows)
 
 
 @screen("lang", "view")
@@ -116,41 +112,6 @@ async def switch_lang(ctx, r: Req):
     ui.HIST.pop(r.uid, None)                               # eski tildagi ko'rinishlar «Orqaga»da chiqmasin
     await set_commands(ctx, r.uid)
     return await main_menu(ctx, r)
-
-
-@screen("th", "view")
-async def theme_menu(ctx, r: Req):
-    """🎨 Mavzu: rasm-panel ranglari (10 xil), rasm/matn, tugma uslubi — har admin o'ziga."""
-    from . import cards, look
-    from . import panel_cards as PC
-    db = ctx.db
-    a = r.args[0] if r.args else ""
-    if a in cards.THEMES:
-        db.set(f"theme:{r.uid}", a)
-    elif a == "img":
-        db.set(f"cards:{r.uid}", "0" if look.cards_on(db, r.uid) else "1")
-    elif a == "btn":
-        db.set(f"btnstyle:{r.uid}", "0" if look.buttons_on(db, r.uid) else "1")
-    if a:
-        ui.view(r, "th")
-    cur = look.theme_of(db, r.uid)
-    img, btn = look.cards_on(db, r.uid), look.buttons_on(db, r.uid)
-    names = list(cards.THEMES)
-    items = [(f"{'● ' if k == cur else ''}{i + 1}. {cards.THEMES[k].name}", f"th:{k}") for i, k in enumerate(names)]
-    rows = grid(items)
-    rows.append([(r.L("🖼 Rasm-panel: ", "🖼 Картинки: ") + (r.L("yoq", "вкл") if img else r.L("o'chiq", "выкл")),
-                  "th:img"),
-                 (r.L("🔤 Tugmalar: ", "🔤 Кнопки: ") + (r.L("qalin", "жирные") if btn else r.L("oddiy", "обычные")),
-                  "th:btn")])
-    rows.append(nav(r))
-    lines = [f"🎨 {r.L('Mavzu', 'Тема')} — <b>{h(cards.THEMES[cur].name)}</b>",
-             f"🖼 {r.L('Rasm-panel', 'Картинки')} — {onoff(r, img)}",
-             f"🔤 {r.L('Tugmalar', 'Кнопки')} — " + (r.L("qalin harflar, oq belgilar", "белые значки")
-                                                    if btn else r.L("oddiy", "обычные"))]
-    text = ui.join(title("🎨", r.L("MAVZU", "ТЕМА"), r.L("faqat siz uchun", "только для вас")), "", card(lines),
-                   r.L("<i>Mavzuni bosing — darhol almashadi. Boshqa adminlarda o'zgarmaydi.</i>",
-                       "<i>Нажмите тему — сразу сменится. У других админов не меняется.</i>"))
-    return ui.rich(text, PC.theme_preview(r, cards.THEMES[cur].name)), kb(*rows)
 
 
 async def refresh_panels(ctx, note: str = "") -> None:
@@ -170,7 +131,7 @@ async def refresh_panels(ctx, note: str = "") -> None:
         req = Req(uid=chat, chat_id=chat, level=level, lang=ctx.lang(chat))
         try:
             text, markup = await main_menu(ctx, req)
-            await ui.show(ctx.bot, chat, text, markup, styled=True)
+            await ui.show(ctx.bot, chat, text, markup)
             if note and level == "owner":
                 await ui.toast(ctx.bot, chat, note, 30)
         except Exception as exc:
@@ -223,7 +184,7 @@ def build_router(ctx) -> Router:
             await ui.toast(ctx.bot, req.chat_id, res)
             return
         text, markup = res
-        await ui.show(ctx.bot, req.chat_id, text, markup, edit_id=edit_id, fresh=fresh, styled=True)
+        await ui.show(ctx.bot, req.chat_id, text, markup, edit_id=edit_id, fresh=fresh)
         if edit_id:
             ctx.notifier.forget(req.chat_id, edit_id)       # savol xabari panelga aylandi
         ui.remember(req.uid, req.view or "?", text, markup, safe, ask=req.uid in ui.WAIT)
@@ -275,8 +236,7 @@ def build_router(ctx) -> Router:
             ui.WAIT.pop(uid, None)
             prev = ui.previous(uid)
             if prev is not None and not prev["safe"]:
-                await ui.show(ctx.bot, req.chat_id, prev["text"], prev["markup"], edit_id=cb.message.message_id,
-                              styled=True)
+                await ui.show(ctx.bot, req.chat_id, prev["text"], prev["markup"], edit_id=cb.message.message_id)
                 return
             data = prev["data"] if prev is not None else (data[3:] or "m")
             req = make_req(ctx, uid, cb.message.chat.id, data, message=cb.message)

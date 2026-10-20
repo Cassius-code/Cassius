@@ -6,7 +6,7 @@ import datetime as dt
 from . import kassa as K
 from . import people as P
 from . import ui
-from .kassa_view import label as plabel, money, num, owner_cabinet, person_view, worker_message
+from .kassa_view import label as plabel, money, owner_cabinet, person_view, worker_message
 from .timeutil import local_date, parse_number
 from .ui import Req, card, grid, h, kb, nav, on_input, onoff, screen, title, must
 
@@ -47,32 +47,7 @@ async def people_list(ctx, r: Req):
                  "👑 владелец · 💼 обработчик · 🔁 общий аккаунт · 🤝 партнёр · 👤 только контроль")
     head = title("👥", r.L("XODIMLAR", "СОТРУДНИКИ") + (r.L(" · ARXIV", " · АРХИВ") if archived else ""))
     body = card([legend]) if ps else r.L("<i>Hozircha hech kim yo'q.</i>", "<i>Пока никого нет.</i>")
-    text = ui.join(head, "", body)
-    if archived:
-        return text, kb(*rows)
-    return ui.rich(text, people_card(ctx, r)), kb(*rows)
-
-
-def people_card(ctx, r: Req) -> list:
-    from . import panel_cards as PC
-    db = ctx.db
-    day = today(ctx).isoformat()
-    allp = [p for p in P.people(db, active_only=False) if visible(r, p)]
-    staff = ctx.att.staff()
-    arr = {a["person_id"]: a for a in db.all("SELECT * FROM attendance WHERE day=?", (day,))}
-    came = sum(1 for a in arr.values() if a["arrived_ts"])
-    tz = ctx.tz
-    rows = []
-    for p in staff:
-        a = arr.get(p["id"])
-        if a and a["arrived_ts"]:
-            t = dt.datetime.fromtimestamp(a["arrived_ts"], tz)
-            right = f"{t:%H:%M}" + (f" · +{a['late_min']}" if a["late_min"] else "")
-        else:
-            right = "—"
-        rows.append((p["name"], right, "🙋" if a and a["arrived_ts"] else "🕒"))
-    return PC.people(r, sum(1 for p in allp if p["active"]), came, len(staff), len(P.folders(db)),
-                     sum(1 for p in allp if not p["active"]), rows)
+    return ui.join(head, "", body), kb(*rows)
 
 
 # ───────────────────────── yangi xodim
@@ -183,49 +158,13 @@ async def person_card(ctx, r: Req):
                          + ([(r.L("🤝 Ulushlar", "🤝 Доли"), f"ksh:{pid}")] if r.owner else []))
         if p["kassa_kind"] == "worker":
             rows += grid([(r.L("📤 Xodimga yuborish", "📤 Отправить ему"), f"psd:{pid}:{key}")]
-                         + ([(r.L("✅ Oylik berildi", "✅ Зп выдана"), f"ppd:{pid}:{key}", "success")] if r.owner else []))
+                         + ([(r.L("✅ Oylik berildi", "✅ Зп выдана"), f"ppd:{pid}:{key}")] if r.owner else []))
         rows.append([(r.L("⚙️ Sozlamalar", "⚙️ Настройки"), f"ps:{pid}")])
     else:
         rows.append([(r.L("📅 Davr", "📅 Период"), f"pp:{pid}")])
     rows.append(nav(r, "p"))
-    text = ui.join(*parts)
-    caption = ui.join(*parts[3:])                       # batafsil hisob — rasm ostida (sig'sa)
-    if ui.plain_len(caption) > 1000:
-        return text, kb(*rows)
-    return ui.rich(text, person_blocks(ctx, r, p, row, s, e, zst, lp, att, folders), caption), kb(*rows)
+    return ui.join(*parts), kb(*rows)
 
-
-def person_blocks(ctx, r: Req, p, row, s, e, zst, lp, att, folders) -> list:
-    from . import panel_cards as PC
-    db = ctx.db
-    kind = p["kassa_kind"]
-    sub = kind_name(r, kind) if kind else r.L("faqat nazorat", "только контроль")
-    if kind in ("worker", "self", "partner"):
-        sub += f" · {K.percent_on(db, p['id'], today(ctx)):g}%"
-    a = db.one("SELECT arrived_ts FROM attendance WHERE day=? AND person_id=?", (today(ctx).isoformat(), p["id"]))
-    here = bool(a and a["arrived_ts"])
-    tiles, cash = [], None
-    if row is not None:
-        fines = sum(x["usd"] for x in row["fines"])
-        tiles.append((r.L("Kassa", "Касса"), num(row["raw"]), r.L(f"{row['n']} chek", f"{row['n']} чек."), None, "💵",
-                      None))
-        tiles.append((r.L("Jarima", "Штраф"), f"{money(fines)} $", "", "bad" if fines else None, "💸", None))
-        if r.can("full"):
-            tiles.append((r.L("Bonus", "Бонус"), f"{money(sum(x['usd'] for x in row['bonuses']))} $", "", None, "🎁",
-                          None))
-            tiles.append((r.L("Avans", "Аванс"), f"{money(sum(x['usd'] for x in row['advs']))} $", "", None, "💳",
-                          None))
-        if zst["ready"] and row["zp_on"] and kind in ("worker", "self") and row["total"] is not None:
-            cash = money(row["total"])
-    rows = [(r.L("Davr", "Период"), plabel(s, e), "🗓")]
-    if lp is not None:
-        rows.append((r.L("Oxirgi oylik", "Последняя зп"), f"{dt.date.fromisoformat(lp['upto_day']):%d.%m}", "✅"))
-    if att:
-        rows.append((r.L("Kech qolish", "Опоздания"), str(len(att)), "🕘"))
-    if folders:
-        rows.append((r.L("Papkalar", "Папки"), folders, "📁"))
-    return PC.person(r, p["name"], sub, r.L("ISHDA", "НА РАБОТЕ") if here else "", True if here else None, tiles,
-                     cash, plabel(s, e), rows)
 
 
 @screen("pp", "view")

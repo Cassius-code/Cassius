@@ -80,12 +80,12 @@ async def kassa_menu(ctx, r: Req):
         lines.append(f"⏳ {r.L('Yopilmagan kunlar', 'Незакрытые дни')} — <b>{', '.join(dm(d) for d in open_days)}</b>")
     if pend:
         lines.append(f"❓ {r.L('Javob kutayotgan savollar', 'Открытые вопросы')} — <b>{pend}</b>")
-    items = [(r.L("📊 Hisobot", "📊 Отчёт"), "kr"), (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc", "success"),
+    items = [(r.L("📊 Hisobot", "📊 Отчёт"), "kr"), (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc"),
              (r.L("🗓 Oy yakuni", "🗓 Итоги месяца"), "km"), (r.L("🏆 Reyting", "🏆 Рейтинг"), "kg"),
              (r.L("❓ Savollar", "❓ Вопросы") + (f" ({pend})" if pend else ""), "kq"),
              (r.L("💲 Prays", "💲 Прайс"), "kp"), (r.L("📜 Tarix", "📜 История"), "kh"), ("📄 PDF", "kf")]
     if r.owner:
-        items = [(r.L("🧮 Haftani hisoblash", "🧮 Рассчитать неделю"), "kz", "success"),
+        items = [(r.L("🧮 Haftani hisoblash", "🧮 Рассчитать неделю"), "kz"),
                  (r.L("📋 To'lov ro'yxati", "📋 Ведомость выплат"), "kpay")] + items + \
             [(r.L("🤝 Ulushlar", "🤝 Доли"), "ksh")]
     rows = grid(items)
@@ -95,21 +95,7 @@ async def kassa_menu(ctx, r: Req):
         medal = ["🥇", "🥈", "🥉"]
         lines += ["", f"🏆 <i>{r.L('Reyting (hammasi)', 'Рейтинг (всего)')}</i>"] + \
             [f"{medal[i]} {h(n)} <i>{num(v)}</i>" for i, (n, v, _p) in enumerate(top)]
-    from . import panel_cards as PC
-    cash = None
-    if K.zp_mode(db) != "off":
-        cash = money(sum(x["zp"] for x in week["rows"].values() if x["kind"] == "worker" and x["zp_on"]))
-    notes = []
-    if pst["weeks"]:
-        notes.append((r.L("O'tgan hafta hisoblanmagan", "Прошлая неделя не рассчитана"), wlabel(prev_w), "🧮"))
-    if open_days:
-        notes.append((r.L("Yopilmagan kunlar", "Незакрытые дни"), ", ".join(dm(d) for d in open_days[-3:]), "⏳"))
-    if pend:
-        notes.append((r.L("Javob kutayotgan savollar", "Открытые вопросы"), str(pend), "❓"))
-    income = money(week["owner"]["income"]) if r.owner and zst["ready"] else None
-    blocks = PC.kassa(r, t, day["raw"], day["n"], week["raw"], PC.delta(cmp["K"], cmp["PK"]) if cmp else "",
-                      cash, zst["ready"], income, top, notes)
-    return ui.rich(ui.join(title("💵", r.L("KASSA", "КАССА")), "", card(lines)), blocks), kb(*rows)
+    return ui.join(title("💵", r.L("KASSA", "КАССА")), "", card(lines)), kb(*rows)
 
 
 # ───────────────────────── hisobot

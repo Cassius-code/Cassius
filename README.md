@@ -48,11 +48,6 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
 - **📊 Hisobotlar.** Faqat buyruq bilan: shaxsiy chatda `/hisobot`, guruhda `/statistika` (🥇🥈🥉 bilan).
 - **🌐 Til.** Har admin o'z tilini tanlaydi (bosh menyuning pastida). Savol va ogohlantirishlar ham har kimga
   o'z tilida boradi.
-- **🎨 Ko'rinish.** Bosh ekranlar (menyu, Nazorat, Kassa, Push, Xodimlar, xodim kartasi, Hisobotlar, Sozlamalar)
-  premium rasm-panel bo'lib chiqadi. 10 ta mavzu: Black Gold, Royal Navy, Emerald, Bordo, Amethyst, Mocha,
-  Platinum (odatiy), Rose Gold, Ivory, Aurora. Bosh menyu → 🎨 Mavzu — bosing, darhol almashadi; har admin
-  o'zinikini tanlaydi. Tugmalar: oq belgilar (◆ ✦ ❖) va qalin harflar (𝗡𝗮𝘇𝗼𝗿𝗮𝘁); muhim amallar yashil/qizil.
-  Raqam yoziladigan joylar va uzun ro'yxatlar oddiy matn. Rasm kerak bo'lmasa: 🎨 → 🖼 Rasm-panel: o'chiq.
 - **🧼 Toza chat.** Chatda doim bitta panel. «‹ Orqaga» — oldingi ekranga. Savol bir nechta egaga borsa —
   biringiz javob bersangiz, boshqalardagi nusxa o'chadi. Har hisobotga alohida xabar kelmaydi (guruhda 👌).
 - **👥 Xodimlar.** ➕ qo'shish, ⚙️ → 🗑 O'chirish (yoki 🗄 Arxiv). ⚙️ Sozlamalar → 🧹 Tozalash: kassa / xodimlar /
@@ -77,7 +72,6 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 3. iPhone «Fayllar» ilovasida ZIP ni bosing — papka ochiladi.
 4. github.com → ➕ → New repository → nom (masalan `rdcontrol`) → Private → Create.
 5. «uploading an existing file» → papkadagi hamma fayllarni tanlang (`kassa_bot_uchun` dan tashqari) → Commit.
-   Shrift fayllari (`.otf`, `.ttf`) ham kerak — panel rasmlari ular bilan chiroyli chiqadi.
 
 **C. Eski botlarni to'xtatish** (bir akkaunt ikki joyda ishlamasligi kerak)
 - Railway → eski zaderjka servisi → Deployments → oxirgi deploy → ⋮ → Remove.

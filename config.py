@@ -8,9 +8,6 @@ from pathlib import Path
 # Panel orqali o'zgaradigan sozlamalar (boshlang'ich qiymatlar). Kalitlar bazadagi settings jadvalida.
 DEFAULTS: dict[str, str] = {
     "lang": "uz",                    # panel tili: uz / ru
-    "theme": "graphite",             # rasm-panel mavzusi (har admin o'zinikini tanlaydi: theme:{id})
-    "cards": "1",                    # rasm-panel (bosh ekranlar rasm bo'lib) — 0: faqat matn
-    "btn_style": "1",                # tugmalar: oq belgilar + qalin harflar — 0: oddiy emoji
     "bot_enabled": "1",              # bosh yoqgich: 0 — bot hech narsa qilmaydi (panel ishlaydi)
     # ── nazorat (zaderjka)
     "delay_enabled": "1",

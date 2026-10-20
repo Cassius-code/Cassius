@@ -54,25 +54,9 @@ async def settings(ctx, r: Req):
     rows.append([((r.L("💸 Jarimalarni o'chirish", "💸 Выключить штрафы") if db.flag("fines_enabled") else
                    r.L("💸 Jarimalarni yoqish", "💸 Включить штрафы")), "sfn")])
     rows.append([((r.L("⛔ Botni to'xtatish", "⛔ Остановить бота") if db.flag("bot_enabled") else
-                   r.L("▶️ Botni yoqish", "▶️ Включить бота")), "so", "danger" if db.flag("bot_enabled") else "success")])
+                   r.L("▶️ Botni yoqish", "▶️ Включить бота")), "so")])
     rows.append(nav(r))
-    text = ui.join(title("⚙️", r.L("SOZLAMALAR", "НАСТРОЙКИ")), "", card(lines))
-    from . import panel_cards as PC
-    alive = db.flag("bot_enabled")
-    ub_ok = bool(ub and ub.state == "online")
-    online = sum(1 for a in accs if ctx.pool and ctx.pool.state_of(a["id"]) == "online")
-    zp = {"button": r.L("tugma bilan", "по кнопке"), "auto": r.L("avtomatik", "авто"),
-          "off": r.L("o'chiq", "выкл")}[zp_mode(db)]
-    srows = [(r.L("Asosiy akkaunt", "Основной аккаунт"), (ub.me_label if ub and ub.me_label else "")[:22] or
-              (r.L("ulangan", "подключён") if ub_ok else r.L("ulanmagan", "не подключён")), "🔑"),
-             (r.L("Push akkauntlar", "Push-аккаунты"), f"{online} / {len(accs)}", "📲"),
-             (r.L("Avto-jarimalar", "Авто-штрафы"), PC.onoff(r, db.flag("fines_enabled")), "💸"),
-             (r.L("Zp hisoblash", "Расчёт зп"), zp, "🧮"),
-             (r.L("Ishga kelish", "Приход"), PC.onoff(r, db.flag("attendance_enabled")), "🙋"),
-             (r.L("Tanaffus", "Перерывы"), PC.onoff(r, db.flag("breaks_enabled")), "☕")]
-    chips = [(r.L("Bot", "Бот"), alive), (r.L("Akkaunt", "Аккаунт"), ub_ok),
-             ("«Проёб»", bool(db.get("proyob_group_id")))]
-    return ui.rich(text, PC.settings(r, alive, srows, chips)), kb(*rows)
+    return ui.join(title("⚙️", r.L("SOZLAMALAR", "НАСТРОЙКИ")), "", card(lines)), kb(*rows)
 
 
 WIPE = {"kassa": ("🧾", "Kassa yozuvlari", "Записи кассы",

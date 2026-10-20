@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import logging
 import uuid
 
 from . import people as P
@@ -13,7 +12,6 @@ from .push import hhmm, slot_bounds
 from .timeutil import fmt, parse_date, parse_hhmm, parse_minutes, parse_number
 from .ui import Req, card, grid, h, kb, nav, on_input, onoff, screen, title, must
 
-log = logging.getLogger("panel_push")
 MAX_MEDIA = 20 * 1024 * 1024
 SPEED_UZ = {"fast": "tez 1–2 s", "normal": "oddiy 2–3 s", "slow": "ehtiyot 3–5 s"}
 SPEED_RU = {"fast": "быстро 1–2 с", "normal": "обычно 2–3 с", "slow": "осторожно 3–5 с"}
@@ -85,49 +83,14 @@ async def push_menu(ctx, r: Req):
         parts.append(card([f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')}… {h(pu.progress_text)}"]))
     rows = []
     if pu.running:
-        rows.append([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux", "danger")])
+        rows.append([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux")])
     else:
-        rows += grid([(r.L("🚀 Yuborish", "🚀 Разослать"), "us", "success"), (r.L("🧪 Test (o'zimga)", "🧪 Тест (себе)"), "ut")])
+        rows += grid([(r.L("🚀 Yuborish", "🚀 Разослать"), "us"), (r.L("🧪 Test (o'zimga)", "🧪 Тест (себе)"), "ut")])
     rows += grid([(r.L("✏️ Matn", "✏️ Текст"), "ue"), (r.L("📎 Media", "📎 Медиа"), "um"),
                   (r.L("📋 Shablonlar", "📋 Шаблоны"), "ul"), (r.L("📁 Papkalar", "📁 Папки"), "uf"),
                   (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "uo"), (r.L("🧾 Jurnal", "🧾 Журнал"), "uh")])
     rows.append(nav(r))
-    cap = f"✏️ {preview}" + (f"\n📎 {kinds.get(media['kind'], media['kind'])}" if media else "")
-    return ui.rich(ui.join(*parts), push_card(ctx, r, pu, preview, media, kinds), cap), kb(*rows)
-
-
-def push_card(ctx, r: Req, pu, preview: str, media, kinds) -> list | None:
-    """Rasm-kartochka: hozirgi vaqt bo'lagi, kimga nechta, papkalar. Hisoblab bo'lmasa — None (matn qoladi)."""
-    from . import panel_cards as PC
-    db = ctx.db
-    try:
-        aud = pu.audience()
-    except Exception:
-        log.exception("Push kartochkasi")
-        return None
-    slot = aud["slot"]
-    g = aud["groups"]
-    m, e = slot_bounds(db)
-    idle = db.get_int("push_idle_minutes")
-    slot_name = {"morning": r.L(f"Ertalab · {hhmm(m)} gacha", f"Утро · до {hhmm(m)}"),
-                 "day": r.L(f"Kunduzi · {hhmm(m)}–{hhmm(e)}", f"День · {hhmm(m)}–{hhmm(e)}"),
-                 "evening": r.L(f"Kechqurun · {hhmm(e)} dan", f"Вечер · с {hhmm(e)}")}[slot]
-    groups = {"morning": [(r.L("Kechagilar", "Вчерашние"), str(g["yesterday"]), "", None, "🌅", None),
-                          (r.L("Eskiroqlar", "Старше"), str(g["older"]), "", None, "🗓", None)],
-              "day": [(r.L("Ertalabkilar", "Утренние"), str(g["morning"]), "", None, "☀️", None),
-                      (r.L("Jim turganlar", "Молчат"), str(g["quiet"]), f"{idle}+ {r.L('daq', 'мин')}", None, "🤫",
-                       None)],
-              "evening": [(r.L("Bugungilar", "Сегодняшние"), str(g["morning"] + g["quiet"]), "", None, "🌙", None),
-                          (r.L("Kecha va eski", "Вчера и ранее"), str(g["yesterday"] + g["older"]), "", None, "🗓",
-                           None)]}[slot]
-    folders = {f["id"]: f for f in P.folders(db)}
-    frows = [(f["name"], f"{aud['by_folder'].get(fid, 0)} {r.L('lid', 'лид.')}", "📁")
-             for fid, f in folders.items() if f["push_on"]]
-    accs = db.all("SELECT id FROM accounts WHERE paused=0")
-    online = sum(1 for a in accs if ctx.pool and ctx.pool.state_of(a["id"]) == "online")
-    n = len(aud["items"])
-    return PC.push(r, slot, slot_name, online, len(accs), groups, n, aud["cooled"], pu.estimate_minutes(n), frows,
-                   (pu.progress_text or "…") if pu.running else None)
+    return ui.join(*parts), kb(*rows)
 
 
 # ───────────────────────── yuborish
@@ -160,7 +123,7 @@ async def start_preview(ctx, r: Req):
         info.append("⚠️ " + r.L("Akkauntsiz papkalar: ", "Папки без аккаунта: ") +
                     h(", ".join(folders[f]["name"] for f in aud["no_account"])))
     text = ui.join(title("🚀", r.L("PUSHNI TASDIQLANG", "ПОДТВЕРДИТЕ PUSH")), "", card(info), card(lines) if lines else "")
-    rows = [[(r.L("✅ Boshlash", "✅ Начать"), "usy", "success")]] if n else []
+    rows = [[(r.L("✅ Boshlash", "✅ Начать"), "usy")]] if n else []
     rows.append(nav(r, "u"))
     return text, kb(*rows)
 
@@ -170,7 +133,7 @@ async def start_run(ctx, r: Req):
     pu = ctx.pusher
     if pu.running:
         return r.L("⏳ Push allaqachon ketyapti", "⏳ Рассылка уже идёт")
-    chat_id = r.chat_id
+    chat_id, mid = r.chat_id, r.message.message_id
 
     async def progress(sent, failed, total):
         pu.progress_text = f"{sent}/{total}" + (f" · ✖️{failed}" if failed else "")
@@ -178,7 +141,7 @@ async def start_run(ctx, r: Req):
             await ui.show(ctx.bot, chat_id, ui.join(title("📣", "PUSH"), "", card(
                 [f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')}: <b>{sent}/{total}</b>" +
                  (f" · ✖️ {failed}" if failed else "")])), kb([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux")]),
-                styled=True)
+                edit_id=mid)
         except Exception:
             pass
 
@@ -186,7 +149,7 @@ async def start_run(ctx, r: Req):
         res = await pu.run("manual", None, progress)
         pu.progress_text = ""
         await ui.show(ctx.bot, chat_id, report_text(ctx, r, res), kb([("📣 Push", "u"), (r.L("⌂ Menyu", "⌂ Меню"), "m")]),
-                      styled=True)
+                      edit_id=mid)
 
     ui.bg(job())
     return ui.join(title("📣", "PUSH"), "", card([r.L("⏳ Boshlandi…", "⏳ Начинаю…")])), \

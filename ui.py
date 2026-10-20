@@ -93,25 +93,6 @@ def must(x):
     return x
 
 
-class Rich(str):
-    """Ekran matni + rasm-kartochka (bloklar). Rasm o'chiq bo'lsa yoki chizilmasa — oddiy matn ko'rinadi."""
-    card: list | None = None
-    caption: str = ""
-
-
-def rich(text: str, blocks: list | None, caption: str = "") -> str:
-    t = Rich(text)
-    t.card = blocks
-    t.caption = caption
-    return t
-
-
-def plain_len(text: str) -> int:
-    """Telegram'da ko'rinadigan uzunlik (HTML teglarsiz) — rasm ostidagi matn 1024 dan oshmasin."""
-    import re
-    return len(html.unescape(re.sub(r"<[^>]+>", "", text or "")))
-
-
 def h(s) -> str:
     return html.escape(str(s if s is not None else ""), quote=False)
 
@@ -126,12 +107,11 @@ def kb(*rows):
         for item in row:
             if item is None:
                 continue
-            text, data = item[0], item[1]
-            extra = {"style": item[2]} if len(item) > 2 and item[2] else {}   # «success» yashil, «danger» qizil
+            text, data = item
             if data.startswith("http"):
-                line.append(InlineKeyboardButton(text=text, url=data, **extra))
+                line.append(InlineKeyboardButton(text=text, url=data))
             else:
-                line.append(InlineKeyboardButton(text=text, callback_data=data[:64], **extra))
+                line.append(InlineKeyboardButton(text=text, callback_data=data[:64]))
         if line:
             out.append(line)
     return InlineKeyboardMarkup(inline_keyboard=out)
@@ -193,22 +173,10 @@ def panel_id(chat_id: int) -> int | None:
     return None
 
 
-def panel_kind(chat_id: int) -> str:
-    if chat_id in KIND:
-        return KIND[chat_id]
-    v = (STORE.get(f"panelkind:{chat_id}") if STORE is not None else None) or "text"
-    KIND[chat_id] = v
-    return v
-
-
-def _remember(chat_id: int, mid: int, kind: str = "text") -> None:
+def _remember(chat_id: int, mid: int) -> None:
     PANEL[chat_id] = mid
-    KIND[chat_id] = kind
-    if STORE is not None:
-        if STORE.get(f"panel:{chat_id}") != str(mid):
-            STORE.set(f"panel:{chat_id}", str(mid))
-        if STORE.get(f"panelkind:{chat_id}") != kind:
-            STORE.set(f"panelkind:{chat_id}", kind)
+    if STORE is not None and STORE.get(f"panel:{chat_id}") != str(mid):
+        STORE.set(f"panel:{chat_id}", str(mid))
 
 
 async def _drop(bot, chat_id: int, mid: int | None) -> None:
@@ -223,108 +191,29 @@ async def _drop(bot, chat_id: int, mid: int | None) -> None:
             pass
 
 
-# ───────────────────────── rasm-panel
-KIND: dict[int, str] = {}              # chat_id -> "text" | "photo"
-PHOTO_IDS: dict[str, str] = {}         # kartochka kaliti -> Telegram file_id (bir xil rasm qayta yuklanmaydi)
-
-
-def _card_key(blocks, theme: str) -> str:
-    import hashlib
-    return hashlib.sha1((theme + repr(blocks)).encode()).hexdigest()
-
-
-async def _card_media(blocks, theme: str):
-    """-> (media, key): avval yuklangan bo'lsa file_id, aks holda chizilgan JPEG."""
-    from aiogram.types import BufferedInputFile
-    key = _card_key(blocks, theme)
-    if key in PHOTO_IDS:
-        return PHOTO_IDS[key], key
-    from . import cards
-    data = await asyncio.to_thread(cards.render, blocks, theme)
-    return BufferedInputFile(data, filename="panel.jpg"), key
-
-
-def _keep_id(key: str, msg) -> None:
-    photos = getattr(msg, "photo", None)
-    if key and photos:
-        if len(PHOTO_IDS) > 300:
-            PHOTO_IDS.clear()
-        PHOTO_IDS[key] = photos[-1].file_id
-
-
-def _look(chat_id: int, text) -> tuple:
-    """-> (blocks|None, theme, buttons_styled) — shu chat egasining tanlovi bo'yicha."""
-    from . import look
-    blocks = getattr(text, "card", None)
-    if STORE is None:
-        return None, look.DEFAULT_THEME, False
-    if blocks and not look.cards_on(STORE, chat_id):
-        blocks = None
-    return blocks, look.theme_of(STORE, chat_id), look.buttons_on(STORE, chat_id)
-
-
-async def show(bot, chat_id: int, text: str, markup=None, edit_id: int | None = None, fresh: bool = False,
-               styled: bool = False) -> None:
-    """Panelni joyida yangilash. fresh=True — panelni pastga (yangi xabar) ko'chirish. Chatda doim bitta panel.
-
-    styled=True — admin paneli: rasm-kartochka (bo'lsa) va tugma uslubi shu adminning tanlovi bo'yicha.
-    Matnli xabar rasmga (yoki aksincha) aylana olmaydi — unda yangisi yuboriladi, eskisi o'chadi."""
+async def show(bot, chat_id: int, text: str, markup=None, edit_id: int | None = None, fresh: bool = False) -> None:
+    """Panelni joyida yangilash. fresh=True — panelni pastga (yangi xabar) ko'chirish. Chatda doim bitta panel."""
     from aiogram.exceptions import TelegramBadRequest
-    from aiogram.types import InputMediaPhoto, LinkPreviewOptions
-    blocks, theme, btn = _look(chat_id, text) if styled else (None, "", False)
-    if btn and markup is not None:
-        from . import look
-        markup = look.style_markup(markup)
-    media = key = None
-    if blocks:
-        try:
-            media, key = await _card_media(blocks, theme)
-        except Exception:
-            log.exception("Kartochka chizilmadi — matn ko'rsatiladi")
-            media = None
-    kind = "photo" if media is not None else "text"
-    caption = (getattr(text, "caption", "") or None) if kind == "photo" else None
+    from aiogram.types import LinkPreviewOptions
     kw = dict(reply_markup=markup, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
     old = panel_id(chat_id)
     target = edit_id or (None if fresh else old)
     if target:
-        cur = panel_kind(chat_id) if target == old else "text"
         ok = False
-        if cur == kind:
-            try:
-                if kind == "text":
-                    await bot.edit_message_text(text, chat_id=chat_id, message_id=target, **kw)
-                else:
-                    msg = await bot.edit_message_media(
-                        media=InputMediaPhoto(media=media, caption=caption, parse_mode="HTML"),
-                        chat_id=chat_id, message_id=target, reply_markup=markup)
-                    _keep_id(key, msg)
-                ok = True
-            except TelegramBadRequest as exc:
-                ok = "not modified" in str(exc).lower()
-                if ok and kind == "photo":               # rasm bir xil — tugmalar baribir yangilansin
-                    try:
-                        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=target, reply_markup=markup)
-                    except Exception:
-                        pass
-            except Exception:
-                ok = False
+        try:
+            await bot.edit_message_text(text, chat_id=chat_id, message_id=target, **kw)
+            ok = True
+        except TelegramBadRequest as exc:
+            ok = "not modified" in str(exc).lower()
+        except Exception:
+            ok = False
         if ok:
-            _remember(chat_id, target, kind)
+            _remember(chat_id, target)
             if old and old != target:
                 await _drop(bot, chat_id, old)           # boshqa xabar panelga aylandi — eski panel ketadi
             return
-    if kind == "photo":
-        try:
-            sent = await bot.send_photo(chat_id, media, caption=caption, parse_mode="HTML", reply_markup=markup)
-            _keep_id(key, sent)
-        except Exception:
-            log.exception("Rasm-panel yuborilmadi — matn yuboriladi")
-            kind = "text"
-            sent = await bot.send_message(chat_id, text, **kw)
-    else:
-        sent = await bot.send_message(chat_id, text, **kw)
-    _remember(chat_id, sent.message_id, kind)
+    sent = await bot.send_message(chat_id, text, **kw)
+    _remember(chat_id, sent.message_id)
     if old and old != sent.message_id:
         await _drop(bot, chat_id, old)
     if target and target not in (old, sent.message_id):
