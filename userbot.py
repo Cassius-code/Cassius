@@ -20,7 +20,7 @@ log = logging.getLogger("userbot")
 TOPIC_FETCH_LIMIT = 300        # yangi topik: boshidan nechta xabar olinadi
 OLD_THREAD_TAIL = 15           # eski (o'rnatishdan oldingi) nit birinchi ko'rilganda: oxirgi nechta xabar
 SYNC_EVERY = 600               # papka/topik sinxroni va tekshiruv har necha soniyada
-WATCH_EVERY = 10               # ish vaqtida: guruhlarda yangi xabar bormi — har necha soniyada tekshiriladi
+WATCH_EVERY = 5                # ish vaqtida: guruhlarda yangi xabar bormi — har necha soniyada tekshiriladi
 
 
 def thread_of(m, is_forum: bool) -> int:
@@ -64,6 +64,7 @@ class Userbot(TgAccount, PushSender):
         self.tick = 5                              # kuzatuv uchun tez-tez uyg'onadi
         self._tops: dict[int, int] = {}            # chat -> oxirgi ko'rilgan xabar id (kuzatuv)
         self._last_watch = 0.0
+        self._sync_task = None                     # papka/topik sinxroni fonda (kuzatuvni ushlab turmaydi)
         self.watch_found = 0                       # kuzatuv topgan (jonli kelmay qolgan) xabarlar
         self.reload_ids()
 
@@ -92,17 +93,26 @@ class Userbot(TgAccount, PushSender):
         from telethon import events
         client.add_event_handler(self._on_event, events.NewMessage())
         log.info("Asosiy akkaunt ulandi: %s", self.me_label)
-        asyncio.create_task(self._initial_sync())
+        self._start_sync()
 
-    async def _initial_sync(self) -> None:
+    def _start_sync(self) -> None:
+        if self._sync_task is not None and not self._sync_task.done():
+            return
+        self.last_sync = time.time()
+        self._sync_task = asyncio.create_task(self._sync_bg())
+
+    async def _sync_bg(self) -> None:
         try:
             await self.sync_all()
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            log.exception("Boshlang'ich sinxron xatosi")
+            log.exception("Sinxron xatosi")
 
     async def periodic(self, client) -> None:
+        """Har tick (5 s): kuzatuv darhol; uzoq sinxron — fonda (kuzatuv va «выполнено» kutib qolmasin)."""
         if time.time() - self.last_sync >= SYNC_EVERY:
-            await self.sync_all()
+            self._start_sync()
         await self.watch(client)
 
     # ------------------------------------------------------------ ish vaqtida kuzatuv

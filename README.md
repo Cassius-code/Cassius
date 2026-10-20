@@ -8,7 +8,7 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «✅ Выполнено» tugmasi boradi. Faqat ish vaqtida hisoblanadi: kechasi kelgan xabarlar sanalmaydi.
   Javob — har qanday xodim xabari, papka akkauntidan yozilgani ham (Push yuborgan xabarlar sanalmaydi).
   Xodim yozgandan keyin bot yozsa — bu mijozning yangi xabari, unga ham javob kerak.
-  Ish vaqtida guruhlar har 10 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
+  Ish vaqtida guruhlar har 5 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
   yetkazmay qolgan xabar ham topilib, o'z vaqti bilan hisoblanadi.
   Bir vaqtda kechikkan lidlar — bitta xabarda; keyin kechikkani — pastga yangi xabar (eskisi o'chmaydi).
   **Papkalar:** 🚨 Nazorat → 📁 Papkalar — asosiy akkauntdagi papkalar ro'yxati; ➕ — qo'shish (guruhlari o'zi

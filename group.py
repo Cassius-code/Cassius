@@ -196,10 +196,10 @@ def build_router(ctx) -> Router:
                         row = ctx.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
                                          (local_date(message.date.timestamp(), ctx.tz).isoformat(), person["id"]))
                         await react(ctx, message, "👍")
-                        await reply(message, f"🕘 <b>Опоздание</b> · {h(P.mention(person))} — "
+                        await reply(message, f"🕘 опоздание · {h(P.mention(person))} — "
                                              f"{row['late_min'] if row else '?'} мин")
                     elif res == "break_limit":
-                        await reply(message, f"⛔ <b>Перерыв</b> · {h(P.mention(person))} — перерывы на сегодня "
+                        await reply(message, f"⛔ перерыв · {h(P.mention(person))} — перерывы на сегодня "
                                              f"закончились ({ctx.db.get_int('breaks_per_day', 3)})")
                     return
         try:

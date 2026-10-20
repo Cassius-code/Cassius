@@ -252,7 +252,7 @@ class Attendance:
             p = P.person(self.db, br["person_id"])
             try:
                 from .gtext import esc
-                await self.notifier.send_group(f"☕ <b>Перерыв</b> · {esc(P.mention(p))} — время перерыва вышло!")
+                await self.notifier.send_group(f"☕ перерыв · {esc(P.mention(p))} — время перерыва вышло!")
                 self.db.run("UPDATE breaks SET reminded=1 WHERE id=?", (br["id"],))
             except Exception as exc:
                 log.warning("Tanaffus eslatmasi yuborilmadi: %s", exc)
@@ -275,7 +275,7 @@ class Attendance:
         if not missing:
             return
         from .gtext import mentions
-        text = f"🙋 <b>Приход</b> · {mentions(missing)} — ещё нет «доброе утро»"
+        text = f"🙋 приход · {mentions(missing)} — ещё нет «доброе утро»"
         try:
             await self.notifier.send_group(text)
         except Exception as exc:

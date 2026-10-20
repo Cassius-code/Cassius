@@ -1,6 +1,10 @@
-"""«Проёб» guruhi uchun xabar ko'rinishi (ruscha, HTML): qalin sarlavha → raqamlangan lidlar kartasi → kim.
+"""«Проёб» guruhi uchun xabar ko'rinishi (ruscha, HTML) — oddiy va ixcham:
 
-Hamma matn shu yerdan o'tadi: ismlar, papka nomlari, lid nomlari HTML uchun xavfsiz (escape) qilinadi."""
+    Rd 2 · задержка · ждёт с 14:49        ← mayda (kursiv)
+    https://t.me/c/…/5040                  ← havolalar — oddiy
+    @vealorian                             ← mayda
+
+Ismlar, papka nomlari HTML uchun xavfsiz (escape) qilinadi."""
 from __future__ import annotations
 
 import html
@@ -12,11 +16,19 @@ def esc(s) -> str:
     return html.escape(str(s if s is not None else ""), quote=False)
 
 
-def lead_line(i: int, url: str, label: str, note: str = "", done: bool = False) -> str:
-    """«1. <lid nomi — havola> · ждёт с 14:05»; yopilgani — ✅ bilan."""
-    name = esc((label or "").strip() or "чат")
-    link = f'<a href="{html.escape(url, quote=True)}">{name}</a>'
-    return f"{'✅ ' if done else ''}{i}. {link}" + (f" · {esc(note)}" if note else "")
+def small(s: str) -> str:
+    """Ikkinchi darajali qator (Telegram'da shrift o'lchami yo'q — ingichka kursiv). s — tayyor (escape qilingan)."""
+    return f"<i>{s}</i>" if s else ""
+
+
+def head(folder: str, *parts: str) -> str:
+    """«Rd 2 · задержка · ждёт с 14:49» — mayda."""
+    return small(" · ".join(x for x in (esc(folder),) + tuple(esc(p) for p in parts) if x))
+
+
+def link(url: str, done: bool = False) -> str:
+    """Havolaning o'zi (oddiy); javob berilgani — ✅ bilan."""
+    return ("✅ " if done else "") + esc(url)
 
 
 def card_lines(lines: list[str]) -> str:
@@ -28,7 +40,7 @@ def mentions(people) -> str:
     return " ".join(esc(P.mention(p)) for p in people)
 
 
-def who_line(people, action: str) -> str:
-    """«👤 @ivan @aziza — ответьте клиентам». Xodim biriktirilmagan bo'lsa — eslatma."""
-    m = mentions(people)
-    return f"👤 {m} — {esc(action)}" if m else f"👤 <i>сотрудник папки не назначен</i> — {esc(action)}"
+def tag(people, note: str = "") -> str:
+    """«@ivan @aziza — note» — mayda. Xodim biriktirilmagan bo'lsa — eslatma."""
+    m = mentions(people) or "сотрудник папки не назначен"
+    return small(m + (f" — {esc(note)}" if note else ""))
