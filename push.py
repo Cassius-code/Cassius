@@ -63,6 +63,23 @@ def hhmm(minute: int) -> str:
     return f"{minute // 60:02d}:{minute % 60:02d}"
 
 
+# Baza: shu sanadan keyin o'zi (mijoz) yozgan HAR bir lid — yangi kelgani ham, eskisi ham (yozdi — aloqada).
+# so'rovda: threads th (+ LEFT JOIN topics t).
+BASE_SQL = "th.last_seen >= ?"
+
+
+def base_count(db, base_ts: int, folder_id: int | None = None, active_since: int = 0) -> int:
+    """Push bazasidagi lidlar soni (papka bo'yicha yoki hammasi); active_since — shu vaqtdan keyin o'zi yozganlar."""
+    q = ("SELECT COUNT(*) FROM threads th JOIN chats c ON c.chat_id=th.chat_id "
+         "LEFT JOIN topics t ON t.chat_id=th.chat_id AND t.topic_id=th.topic_id "
+         "WHERE th.first_seen IS NOT NULL AND " + BASE_SQL + " AND th.last_seen>=?")
+    args = [base_ts, active_since]
+    if folder_id is not None:
+        q += " AND c.folder_id=?"
+        args.append(folder_id)
+    return db.scalar(q, tuple(args))
+
+
 class Pusher:
     def __init__(self, db: Database, tz: ZoneInfo, notifier, pool, tracker, sleep=asyncio.sleep, clock=time.time):
         self.db, self.tz, self.notifier, self.pool, self.tracker = db, tz, notifier, pool, tracker
@@ -85,7 +102,7 @@ class Pusher:
         return bool(self.db.get("push_text").strip() or self.media())
 
     def base_from(self) -> int:
-        """Baza: shu sanadan beri o'zi (mijoz) yozgan lidlar."""
+        """Baza: shu sanadan keyin o'zi (mijoz) yozgan lidlar — yangi kelgani ham, eskisi ham."""
         raw = self.db.get("push_base_from") or "2026-08-28"
         try:
             return int(datetime.combine(parse_date(raw), dtime(0, 0), tzinfo=self.tz).timestamp())
@@ -93,8 +110,8 @@ class Pusher:
             return 0
 
     def window(self, now: int) -> tuple[int, int]:
-        """Davr: lidning oxirgi o'z xabari shu oraliqda bo'lsin (baza sanasidan oldin emas)."""
-        lo, hi = self.base_from(), 2 ** 31
+        """Davr: lidning oxirgi o'z xabari shu oraliqda bo'lsin. Baza (qachon kelgan) — alohida shart."""
+        lo, hi = 0, 2 ** 31
         days = self.db.get_int("push_days")
         if days > 0:
             lo = max(lo, day_start(now, self.tz) - (days - 1) * 86400)
@@ -133,15 +150,17 @@ class Pusher:
         skip, push_e = skip_list(self.db), self._push_emojis()
         rows = self.db.all(
             "SELECT th.*, CASE WHEN th.topic_id<>0 THEN TRIM(COALESCE(t.icon,'') || ' ' || COALESCE(t.title,'')) "
-            "ELSE COALESCE(c.title,'') END AS label FROM threads th JOIN chats c ON c.chat_id=th.chat_id "
+            "ELSE COALESCE(c.title,'') END AS label, COALESCE(t.created_ts, th.first_seen) AS born "
+            "FROM threads th JOIN chats c ON c.chat_id=th.chat_id "
             "LEFT JOIN topics t ON t.chat_id=th.chat_id AND t.topic_id=th.topic_id "
-            "WHERE th.first_seen IS NOT NULL AND th.last_seen BETWEEN ? AND ?", self.window(now))
+            "WHERE th.first_seen IS NOT NULL AND " + BASE_SQL + " AND th.last_seen BETWEEN ? AND ?",
+            (self.base_from(),) + self.window(now))
         rows = [r for r in rows if cmap.get(r["chat_id"]) in allowed and not label_excluded(r["label"], skip)
                 and (not push_e or label_excluded(r["label"], push_e))]
         matched = len(rows)
         fresh_n = max(0, self.db.get_int("push_newlead_minutes"))
         border = now - fresh_n * 60
-        kept = [r for r in rows if r["stavka"] != "on" and (not fresh_n or r["first_seen"] <= border)]
+        kept = [r for r in rows if r["stavka"] != "on" and (not fresh_n or r["born"] <= border)]
         fresh, rows = len(rows) - len(kept), kept
         repeat = max(MIN_REPEAT, self.db.get_int("push_repeat_minutes"))
         kept = [r for r in rows if not r["last_push_ts"] or r["last_push_ts"] <= now - repeat * 60]

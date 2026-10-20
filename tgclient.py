@@ -81,6 +81,7 @@ class TgAccount:
         self.state = "starting"       # starting|disabled|no_session|connecting|online|offline|unauthorized
         self.me_id: int | None = None
         self.me_label = ""
+        self.tick = 15                # davriy ish (periodic) shu soniyada bir chaqiriladi
         self._wake = asyncio.Event()
 
     # ---- voris klasslar belgilaydi
@@ -183,7 +184,7 @@ class TgAccount:
         await self.on_online(client)
         failures, last_ping = 0, time.monotonic()
         while True:
-            await self._sleep_or_wake(15)
+            await self._sleep_or_wake(self.tick)
             if self.client is not client or self.session() != session:
                 return
             if time.monotonic() - last_ping >= 60:

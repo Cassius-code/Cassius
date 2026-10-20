@@ -201,7 +201,8 @@ CREATE TABLE IF NOT EXISTS breaks (
     person_id INTEGER NOT NULL,
     start_ts INTEGER NOT NULL,
     end_ts INTEGER,
-    reminded INTEGER NOT NULL DEFAULT 0
+    reminded INTEGER NOT NULL DEFAULT 0,
+    minutes INTEGER                           -- «отойду на 15 минут» — aytilgan vaqt (umumiy limitdan oshmaydi)
 );
 CREATE TABLE IF NOT EXISTS pauses (
     id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER NOT NULL, start_ts INTEGER NOT NULL, end_ts INTEGER

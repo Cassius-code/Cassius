@@ -8,6 +8,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «✅ Выполнено» tugmasi boradi. Faqat ish vaqtida hisoblanadi: kechasi kelgan xabarlar sanalmaydi.
   Javob — har qanday xodim xabari, papka akkauntidan yozilgani ham (Push yuborgan xabarlar sanalmaydi).
   Xodim yozgandan keyin bot yozsa — bu mijozning yangi xabari, unga ham javob kerak.
+  Ish vaqtida guruhlar har 10 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
+  yetkazmay qolgan xabar ham topilib, o'z vaqti bilan hisoblanadi.
+  Bir vaqtda kechikkan lidlar — bitta xabarda; keyin kechikkani — pastga yangi xabar (eskisi o'chmaydi).
+  **Papkalar:** 🚨 Nazorat → 📁 Papkalar — asosiy akkauntdagi papkalar ro'yxati; ➕ — qo'shish (guruhlari o'zi
+  keladi), ✅ — ochish: 👤 javob beradigan xodimlar, nazorat, o'chirish. Har papkada 🔥 lidlar soni.
 - **🎬 Stavka.** Yangi chatda birinchi stavka 20 daqiqada, keyingilari ham 20 daqiqada kelishi kerak.
   Kelmasa, «ставка» deb eslatadi (eng ko'pi 3 marta). Xodimning o'z videosi ham stavka hisoblanadi.
   3 ta stavkadan keyin oddiy zaderjka nazorati boshlanadi.
@@ -44,8 +49,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   🌅 ertalab (13:00 gacha) — bugun gaplashmaganlar, kechagidan boshlab eskiroqlariga;
   ☀️ kunduzi — faqat bugun gaplashganlar: ertalabkilar → jim turganlar (30/60 daq) → hozirgina yozishganlar;
   🌙 kechqurun (19:00 dan) — avval bugungilar, keyin kechagi va eskiroqlar.
-  Baza — 28.08.2026 dan beri o'zi yozgan lidlar. Vaqtlar va sana: 📣 Push → ⚙️ Sozlamalar.
+  Baza — 28.08.2026 dan keyin o'zi yozgan har bir lid (yangi kelgani ham, eskisi ham). Bot ularni bir marta to'liq
+  tekshiradi (tugagach xabar keladi; qayta: 📣 Push → ⚙️ → 🔍 Bazani tekshirish). Vaqtlar va sana: 📣 Push → ⚙️.
+  Papkaga akkaunt: 📣 Push → 📁 Papkalar → papka → 📲 Akkaunt (➕ yangisini shu yerning o'zida ulash mumkin).
 - **📊 Hisobotlar.** Faqat buyruq bilan: shaxsiy chatda `/hisobot`, guruhda `/statistika` (🥇🥈🥉 bilan).
+  «🆕 Yangi lidlar» — shu kuni ochilgan topiklar (eski lid bugun yozsa, yangi hisoblanmaydi).
 - **🌐 Til.** Har admin o'z tilini tanlaydi (bosh menyuning pastida). Savol va ogohlantirishlar ham har kimga
   o'z tilida boradi.
 - **🧼 Toza chat.** Chatda doim bitta panel. «‹ Orqaga» — oldingi ekranga. Savol bir nechta egaga borsa —

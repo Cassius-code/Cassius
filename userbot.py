@@ -13,12 +13,14 @@ import time
 from . import people as P
 from .rules import Msg, Tracker
 from .tgclient import TgAccount
+from .tgsend import PushSender
 
 log = logging.getLogger("userbot")
 
 TOPIC_FETCH_LIMIT = 300        # yangi topik: boshidan nechta xabar olinadi
 OLD_THREAD_TAIL = 15           # eski (o'rnatishdan oldingi) nit birinchi ko'rilganda: oxirgi nechta xabar
 SYNC_EVERY = 600               # papka/topik sinxroni va tekshiruv har necha soniyada
+WATCH_EVERY = 10               # ish vaqtida: guruhlarda yangi xabar bormi — har necha soniyada tekshiriladi
 
 
 def thread_of(m, is_forum: bool) -> int:
@@ -39,7 +41,13 @@ def _unix(d) -> int | None:
         return None
 
 
-class Userbot(TgAccount):
+def folder_key(name: str) -> str:
+    """Papka nomini solishtirish: katta-kichik harf, bo'sh joy va emoji farq qilmaydi («Rd3.1» = «RD 3.1 🔥»)."""
+    import re
+    return re.sub(r"[^\w.]+", "", (name or "").casefold())
+
+
+class Userbot(TgAccount, PushSender):
     def __init__(self, cfg, db, tracker: Tracker, notifier, tz):
         super().__init__(cfg, db, notifier)
         self.tracker = tracker
@@ -48,8 +56,15 @@ class Userbot(TgAccount):
         self.last_sync = 0.0
         self.last_event = 0.0
         self.missing_folders: list[str] = []
+        self.tg_folders: list[str] = []          # asosiy akkauntdagi Telegram papkalari (nomlari)
         self._push_ids: set[int] = set()
         self._bots: set[int] = set()
+        self.deep_running = False                  # Push bazasini to'liq tekshirish ketyapti
+        self._deep_task = None
+        self.tick = 5                              # kuzatuv uchun tez-tez uyg'onadi
+        self._tops: dict[int, int] = {}            # chat -> oxirgi ko'rilgan xabar id (kuzatuv)
+        self._last_watch = 0.0
+        self.watch_found = 0                       # kuzatuv topgan (jonli kelmay qolgan) xabarlar
         self.reload_ids()
 
     def title(self) -> str:
@@ -88,6 +103,89 @@ class Userbot(TgAccount):
     async def periodic(self, client) -> None:
         if time.time() - self.last_sync >= SYNC_EVERY:
             await self.sync_all()
+        await self.watch(client)
+
+    # ------------------------------------------------------------ ish vaqtida kuzatuv
+    def in_work_time(self, now: float | None = None) -> bool:
+        """Ish vaqti (5 daqiqa oldin va keyin bilan)."""
+        from datetime import datetime
+        t = datetime.fromtimestamp(now or time.time(), self.tz)
+        ws, we = self.tracker.work_window()
+        cur = t.hour * 60 + t.minute
+        a, b = (ws.hour * 60 + ws.minute - 5) % 1440, (we.hour * 60 + we.minute + 5) % 1440
+        return a <= cur <= b if a <= b else (cur >= a or cur <= b)
+
+    async def watch(self, client, now: float | None = None) -> None:
+        """Ish vaqtida har WATCH_EVERY soniyada guruhlarning oxirgi xabari tekshiriladi (akkaunt «online» qilinmaydi).
+        Telegram jonli xabarni yetkazmay qolsa ham, u shu yerda topilib, o'z vaqti bilan ishlanadi (zaderjka aniq)."""
+        now = now or time.time()
+        if not (self.in_work_time(now) and self.db.flag("bot_enabled")):
+            return
+        if now - self._last_watch < WATCH_EVERY:
+            return
+        self._last_watch = now
+        try:
+            await self.poll_chats(client)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.info("Kuzatuv: %s", type(exc).__name__)
+
+    async def poll_chats(self, client) -> int:
+        """Bitta so'rov bilan hamma guruhning oxirgi xabari; o'zgargan guruhda — faol topiklar tekshiriladi."""
+        from telethon.tl.functions.messages import GetPeerDialogsRequest
+        from telethon.tl.types import InputDialogPeer
+        chats = list(self.tracker.chat_folder)
+        peers = []
+        for cid in chats:
+            try:
+                peers.append((cid, await client.get_input_entity(cid)))
+            except Exception:
+                continue
+        found = 0
+        for i in range(0, len(peers), 50):
+            part = peers[i:i + 50]
+            res = await client(GetPeerDialogsRequest(peers=[InputDialogPeer(peer=p) for _c, p in part]))
+            tops = {}
+            for d in getattr(res, "dialogs", []):
+                try:
+                    from telethon import utils
+                    tops[int(utils.get_peer_id(d.peer))] = int(d.top_message or 0)
+                except Exception:
+                    continue
+            for cid, p in part:
+                top = tops.get(cid, 0)
+                old = self._tops.get(cid)
+                self._tops[cid] = max(top, old or 0)
+                if old is None or top <= old:
+                    continue                                   # birinchi marta yoki yangi xabar yo'q
+                seen = self.db.scalar("SELECT COALESCE(MAX(seen_msg_id), 0) FROM threads WHERE chat_id=?", (cid,))
+                if seen >= top:
+                    continue                                   # jonli kelgan va ishlangan
+                found += await self._poll_chat(client, cid, p, top)
+        self.watch_found += found
+        if found:
+            log.info("Kuzatuv: jonli kelmagan %s ta xabar topildi va ishlandi", found)
+        return found
+
+    async def _poll_chat(self, client, chat_id: int, peer, top: int) -> int:
+        """Guruhda yangi xabar bor: forumda — oxirgi faol topiklar, oddiy chatda — o'zi."""
+        before = self.db.scalar("SELECT COALESCE(SUM(msg_count), 0) FROM threads WHERE chat_id=?", (chat_id,))
+        if chat_id not in self.tracker.forums:
+            await self._catch_thread(chat_id, 0, top, None)
+        else:
+            from telethon.tl.functions.channels import GetForumTopicsRequest
+            res = await client(GetForumTopicsRequest(channel=peer, offset_date=None, offset_id=0, offset_topic=0,
+                                                     limit=20))
+            topics = [t for t in res.topics if hasattr(t, "title") and int(t.id) != 1]
+            new = [t for t in topics if not self.tracker.thread(chat_id, int(t.id))]
+            if new:
+                await self._store_topics(chat_id, new)
+            for t in topics:
+                await self._catch_thread(chat_id, int(t.id), int(getattr(t, "top_message", 0) or 0),
+                                         _unix(getattr(t, "date", None)))
+        after = self.db.scalar("SELECT COALESCE(SUM(msg_count), 0) FROM threads WHERE chat_id=?", (chat_id,))
+        return max(0, after - before)
 
     async def sync_all(self) -> None:
         """Papkalar → xodimlarning ID si → topiklar va o'tkazib yuborilgan xabarlar."""
@@ -99,6 +197,17 @@ class Userbot(TgAccount):
                 raise
             except Exception:
                 log.exception("Sinxron qadami %s xato", step.__name__)
+        base = self.db.get("push_base_from") or "2026-08-28"
+        if self.client is not None and not self.deep_running and self.db.get("deep_scan_base") != base:
+            self._deep_task = asyncio.create_task(self._deep_bg())    # uzoq ish — sinxronni ushlab turmaydi
+
+    async def _deep_bg(self) -> None:
+        try:
+            await self.deep_scan()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Push bazasini to'liq tekshirish xatosi")
 
     # ------------------------------------------------------------ jonli xabar
     async def _on_event(self, event) -> None:
@@ -133,6 +242,9 @@ class Userbot(TgAccount):
             created = await self._topic_created(chat_id, topic)
             if created is None and 0 < msg_id - topic <= 25:
                 created = int(time.time())                 # ma'lumot olinmadi, lekin topikning birinchi xabarlari
+                self.db.run("INSERT INTO topics(chat_id, topic_id, created_ts) VALUES(?,?,?) ON CONFLICT(chat_id, "
+                            "topic_id) DO UPDATE SET created_ts=COALESCE(topics.created_ts, excluded.created_ts)",
+                            (chat_id, topic, created))
         self.tracker.start_thread(chat_id, topic, created)
         th = self.tracker.thread(chat_id, topic)
         if th["stavka"] == "on":
@@ -165,8 +277,10 @@ class Userbot(TgAccount):
             # papka akkaunti: xodim undan mijozga JAVOB yozadi (jurnal: RD 7 da deyarli hamma javob shundan).
             # Faqat Push yuborgan xabar (ignored_msgs da) «biz»; qolgani — xodim javobi.
             return "ours" if await self._is_push_message(chat_id, int(m.id)) else "staff"
-        if m.out:
-            return "staff"                                 # asosiy akkauntdan yozilgan — javob
+        if m.out:                                          # asosiy akkauntdan yozilgan — javob,
+            if self.db.one("SELECT 1 FROM folders WHERE push_account_id=-1"):   # agar Push o'zi yubormagan bo'lsa
+                return "ours" if await self._is_push_message(chat_id, int(m.id)) else "staff"
+            return "staff"
         is_bot = await self._is_bot(m)
         return "client" if is_bot else "staff"
 
@@ -245,6 +359,71 @@ class Userbot(TgAccount):
             await self._process(m, chat_id, topic, "catchup")
             n += 1
         return n
+
+    # ------------------------------------------------------------ Push bazasi: to'liq tekshirish
+    async def deep_scan(self, force: bool = False) -> int | None:
+        """Push bazasi 100%: baza sanasidan keyingi HAR bir mijoz (vositachi bot) xabari. Oddiy sinxron eski
+        topiklarning faqat oxirgi xabarlarini ko'radi; bu esa har chatdagi baza sanasidan keyingi hamma xabarni bir
+        marta o'qiydi (matni saqlanmaydi — faqat kim va qachon). Baza sanasi o'zgarmaguncha qayta ishlamaydi.
+        -> topilgan lidlar soni yoki None (kerak emas / ketyapti)."""
+        from datetime import datetime, time as dtime
+        from .timeutil import parse_date
+        if self.client is None or self.deep_running:
+            return None
+        base_iso = self.db.get("push_base_from") or "2026-08-28"
+        if not force and self.db.get("deep_scan_base") == base_iso:
+            return None
+        try:
+            base_ts = int(datetime.combine(parse_date(base_iso), dtime(0, 0), tzinfo=self.tz).timestamp())
+        except ValueError:
+            return None
+        self.deep_running = True
+        leads: set = set()
+        failed = 0
+        try:
+            for chat_id in list(self.tracker.chat_folder):
+                forum = chat_id in self.tracker.forums
+                try:
+                    entity = await self.client.get_input_entity(chat_id)
+                    async for m in self.client.iter_messages(entity, limit=None):
+                        ts = _unix(m.date) or 0
+                        if ts < base_ts:
+                            break                                       # yangi → eski: bazadan oldingisi kerak emas
+                        if getattr(m, "action", None) is not None or m.out or m.sender_id in self._push_ids:
+                            continue
+                        if not await self._is_bot(m):
+                            continue                                    # mijoz = vositachi bot xabari
+                        topic = thread_of(m, forum)
+                        if forum and topic == 1:
+                            continue
+                        self.db.run("INSERT INTO threads(chat_id, topic_id, first_seen, last_seen) VALUES(?,?,?,?) "
+                                    "ON CONFLICT(chat_id, topic_id) DO UPDATE SET "
+                                    "first_seen=MIN(COALESCE(threads.first_seen, excluded.first_seen), "
+                                    "excluded.first_seen), last_seen=MAX(COALESCE(threads.last_seen, 0), "
+                                    "excluded.last_seen)", (chat_id, topic, ts, ts))
+                        leads.add((chat_id, topic))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    failed += 1
+                    log.warning("Bazani tekshirish: %s o'qilmadi (%s)", chat_id, type(exc).__name__)
+            from .push import base_count
+            n = base_count(self.db, base_ts)                            # bazadagi lidlar: shu sanadan keyin yozganlar
+            self.db.set("deep_scan_n", str(n))
+            self.db.set("deep_scan_ts", str(int(time.time())))
+            if not failed:
+                self.db.set("deep_scan_base", base_iso)                 # tugadi — keyingi sinxronda qaytarilmaydi
+            from .context import tr
+            d = f"{base_iso[8:10]}.{base_iso[5:7]}"
+            await self.notifier.notify_owner(lambda: (tr(
+                f"✅ Push bazasi to'liq tekshirildi: {d} dan keyin o'zi yozgan lidlar — {n} ta." +
+                (f" ⚠️ {failed} ta guruh o'qilmadi, keyinroq qayta uriniladi." if failed else ""),
+                f"✅ База Push проверена полностью: писали сами после {d} — {n}." +
+                (f" ⚠️ {failed} групп(ы) не прочитаны, повторю позже." if failed else "")), None),
+                key="deepscan")
+            return n
+        finally:
+            self.deep_running = False
 
     # ------------------------------------------------------------ o'tkazib yuborilganlarni olish
     async def catch_up(self) -> None:
@@ -343,6 +522,21 @@ class Userbot(TgAccount):
         await self._topic_created(chat_id, topic)
 
     # ------------------------------------------------------------ papkalar va xodimlar
+    async def folder_titles(self) -> list[str]:
+        """Asosiy akkauntdagi Telegram papkalari nomlari (📁 Papkalar ro'yxati uchun). Ulanmagan bo'lsa — oxirgisi."""
+        if self.client is None or self.state != "online":
+            return list(self.tg_folders)
+        from telethon.tl.functions.messages import GetDialogFiltersRequest
+        res = await self.client(GetDialogFiltersRequest())
+        titles = []
+        for f in getattr(res, "filters", res):
+            t = getattr(f, "title", None)
+            t = getattr(t, "text", t)
+            if isinstance(t, str) and t.strip():
+                titles.append(t.strip())
+        self.tg_folders = titles
+        return titles
+
     async def sync_folders(self) -> tuple[int, int]:
         from telethon import utils
         from telethon.tl.functions.messages import GetDialogFiltersRequest
@@ -351,6 +545,7 @@ class Userbot(TgAccount):
         res = await self.client(GetDialogFiltersRequest())
         filters = getattr(res, "filters", res)
         by_title: dict[str, set[int]] = {}
+        titles: list[str] = []
         for f in filters:
             title = getattr(f, "title", None)
             title = getattr(title, "text", title)
@@ -362,11 +557,12 @@ class Userbot(TgAccount):
                     ids.add(int(utils.get_peer_id(p)))
                 except Exception:
                     continue
-            by_title.setdefault(title.strip().casefold(), set()).update(ids)
+            by_title.setdefault(folder_key(title), set()).update(ids)
+            titles.append(title.strip())
         added = removed = 0
         missing = []
         for f in P.folders(self.db):
-            ids = by_title.get(f["name"].strip().casefold())
+            ids = by_title.get(folder_key(f["name"]))
             if ids is None:
                 missing.append(f["name"])
                 continue
@@ -374,6 +570,7 @@ class Userbot(TgAccount):
             added += a
             removed += r
         self.missing_folders = missing
+        self.tg_folders = titles
         self.tracker.reload()
         return added, removed
 

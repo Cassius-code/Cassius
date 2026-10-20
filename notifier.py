@@ -52,14 +52,14 @@ class Notifier:
     async def send_group(self, text: str, done_button=None) -> tuple[int, int]:
         gid = self.group_id()
         msg = await self._call(self.bot.send_message, chat_id=gid, text=text, reply_markup=self._done_kb(done_button),
-                               disable_web_page_preview=True)
+                               disable_web_page_preview=True, parse_mode="HTML")
         return msg.chat.id, msg.message_id
 
     async def edit_group(self, gid: int, mid: int, text: str, done_button=None) -> None:
         from aiogram.exceptions import TelegramBadRequest
         try:
             await self._call(self.bot.edit_message_text, chat_id=gid, message_id=mid, text=text,
-                             reply_markup=self._done_kb(done_button), disable_web_page_preview=True)
+                             reply_markup=self._done_kb(done_button), disable_web_page_preview=True, parse_mode="HTML")
         except TelegramBadRequest as exc:
             if "not modified" not in str(exc).lower():
                 raise

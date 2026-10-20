@@ -22,8 +22,18 @@ KIND_RU = {"voice": "🎤 голосовое", "video_note": "⭕ кружок",
 
 
 def acc_name(ctx, acc_id) -> str:
+    from .accounts import MAIN
+    from .context import tr
+    if acc_id == MAIN:
+        return "🔑 " + tr("Asosiy akkaunt", "Основной аккаунт")
     a = ctx.db.one("SELECT name FROM accounts WHERE id=?", (acc_id,)) if acc_id else None
     return a["name"] if a else "—"
+
+
+def used_by(ctx, acc_id, except_fid: int = 0) -> str:
+    """Akkaunt yana qaysi papkalarda Push qiladi (bitta akkaunt 2–3 papkada bo'lishi mumkin)."""
+    names = [f["name"] for f in P.folders(ctx.db) if f["push_account_id"] == acc_id and f["id"] != except_fid]
+    return (" · " + ", ".join(names))[:30] if names else ""
 
 
 def state_icon(ctx, acc_id) -> str:
@@ -78,7 +88,8 @@ async def push_menu(ctx, r: Req):
                   ([f"📎 {kinds.get(media['kind'], media['kind'])}"] if media else [])),
              card([f"<b>{r.L('Hozir', 'Сейчас')}: {name}</b>", f"<i>{rule}</i>"]),
              card([f"<b>{r.L('Papkalar', 'Папки')}</b>"] + (plan or [r.L("Push yoqilgan papka yo'q", "Нет папок с Push")]) +
-                  [f"📅 {r.L('Baza', 'База')}: {dstr(base)} {r.L('dan beri yozganlar', 'и позже')}"])]
+                  [f"📅 {r.L('Baza', 'База')}: {dstr(base)} {r.L('dan keyin o‘zi yozgan lidlar', 'и позже (писали сами)')}" +
+                   base_state(ctx, r)])]
     if pu.running:
         parts.append(card([f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')}… {h(pu.progress_text)}"]))
     rows = []
@@ -361,11 +372,17 @@ async def folder_card(ctx, r: Req):
         elif op == "a" and len(r.args) > 2:
             P.set_folder(db, fid, push_account_id=int(r.args[2]) or None)
         elif op == "a":
-            btn = [(f"{state_icon(ctx, a['id'])} {a['name']}", f"uf:{fid}:a:{a['id']}")
-                   for a in db.all("SELECT * FROM accounts ORDER BY id")]
+            from .accounts import MAIN
+            btn = [(f"{state_icon(ctx, MAIN)} {acc_name(ctx, MAIN)}{used_by(ctx, MAIN, fid)}"[:60], f"uf:{fid}:a:{MAIN}")]
+            btn += [(f"{state_icon(ctx, a['id'])} {a['name']} {a['label']}{used_by(ctx, a['id'], fid)}"[:60],
+                     f"uf:{fid}:a:{a['id']}") for a in db.all("SELECT * FROM accounts ORDER BY id")]
+            btn.append((r.L("➕ Yangi akkaunt ulash", "➕ Подключить новый"), f"sml:push:{fid}"))
             btn.append((r.L("✖️ Akkauntsiz", "✖️ Без аккаунта"), f"uf:{fid}:a:0"))
-            return title("📲", h(f["name"]), r.L("qaysi akkauntdan?", "с какого аккаунта?")), kb(*grid(btn),
-                                                                                              nav(r, f"uf:{fid}"))
+            return ui.join(title("📲", h(f["name"]), r.L("qaysi akkauntdan?", "с какого аккаунта?")), "", card(
+                [r.L("Bitta akkaunt 2–3 papkaga ham bo'ladi: navbat bilan, odatdagi tezlikda yuboradi. "
+                     "🔑 Asosiy akkaunt ham tanlanishi mumkin.",
+                     "Один аккаунт можно на 2–3 папки: отправит по очереди с обычной скоростью. "
+                     "Можно выбрать и 🔑 основной аккаунт.")])), kb(*grid(btn, 1), nav(r, f"uf:{fid}"))
         elif op == "n":
             ui.ask(r, "folder_push_n", f"uf:{fid}", fid=fid)
             return title("🔢", h(f["name"])) + "\n\n" + card(
@@ -376,7 +393,7 @@ async def folder_card(ctx, r: Req):
     lines = [f"📣 Push — {onoff(r, f['push_on'])}",
              f"📲 {r.L('Akkaunt', 'Аккаунт')} — {state_icon(ctx, f['push_account_id'])} {h(acc_name(ctx, f['push_account_id']))}",
              f"🔢 {r.L('Soni', 'Количество')} — <b>{f['push_limit'] or r.L('umumiy', 'общее')}</b>"]
-    rows = grid([((r.L("⛔ Push o'ch", "⛔ Выкл. Push") if f["push_on"] else r.L("✅ Push yoq", "✅ Вкл. Push")),
+    rows = grid([((r.L("⛔ Push'ni o'chirish", "⛔ Выкл. Push") if f["push_on"] else r.L("✅ Push'ni yoqish", "✅ Вкл. Push")),
                   f"uf:{fid}:o"), (f"📲 {r.L('Akkaunt', 'Аккаунт')}", f"uf:{fid}:a"),
                  (f"🔢 {r.L('Soni', 'Количество')}", f"uf:{fid}:n")])
     rows.append(nav(r, "uf"))
@@ -409,7 +426,8 @@ async def settings(ctx, r: Req):
              f"🕒 {r.L('Kun bo‘laklari', 'Части дня')} — 🌅 … {hhmm(m)} · ☀️ {hhmm(m)}–{hhmm(e)} · 🌙 {hhmm(e)} …",
              f"⏳ {r.L('Jim turgan deb hisoblash', 'Считать «молчит»')} — {db.get_int('push_idle_minutes')} {mins}",
              f"📅 {r.L('Baza', 'База')} — {dstr(db.get('push_base_from') or '2026-08-28')} "
-             f"{r.L('dan beri o‘zi yozgan lidlar', 'и позже (лиды, писавшие сами)')}",
+             f"{r.L('dan keyin o‘zi yozgan lidlar (yangi ham, eski ham)', 'и позже: писали сами (новые и старые)')}"
+             f"{base_state(ctx, r)}",
              f"🗓 {r.L('Davr', 'Период')} — {period_text(ctx, r)}",
              f"🆕 {r.L('Yangi lidga yo‘q', 'Новым лидам нет')} — {db.get('push_newlead_minutes')} {mins}",
              f"🔁 {r.L('Qayta yubormaslik', 'Не повторять')} — {db.get('push_repeat_minutes')} {mins}",
@@ -421,8 +439,33 @@ async def settings(ctx, r: Req):
            (f"🗓 {r.L('Davr', 'Период')}", "upd"),
            (f"📅 {r.L('Baza', 'База')}", "uoi:push_base_from"), (f"🆕 {r.L('Yangi lid', 'Новый лид')}", "uoi:push_newlead_minutes"),
            (f"🔁 {r.L('Takror', 'Повтор')}", "uoi:push_repeat_minutes"), (f"🔥 {r.L('Belgilar', 'Иконки')}", "uoi:push_emojis"),
-           (f"🚫 {r.L('Chiqarilgan', 'Исключены')}", "uoi:skip_emojis")]
+           (f"🚫 {r.L('Chiqarilgan', 'Исключены')}", "uoi:skip_emojis"),
+           (f"🔍 {r.L('Bazani tekshirish', 'Проверить базу')}", "uob")]
     return ui.join(title("⚙️", r.L("PUSH SOZLAMALARI", "НАСТРОЙКИ PUSH")), "", card(lines)), kb(*grid(btn), nav(r, "u"))
+
+
+def base_state(ctx, r: Req) -> str:
+    """Baza to'liq tekshirilganmi: « · ✅ to'liq (412)» / « · ⏳ tekshirilmoqda…»."""
+    db, ub = ctx.db, ctx.userbot
+    if ub is not None and getattr(ub, "deep_running", False):
+        return r.L(" · ⏳ tekshirilmoqda…", " · ⏳ проверяется…")
+    if db.get("deep_scan_base") == (db.get("push_base_from") or "2026-08-28"):
+        return r.L(f" · ✅ to'liq ({db.get('deep_scan_n') or 0})", f" · ✅ полная ({db.get('deep_scan_n') or 0})")
+    return r.L(" · ⏳ to'liq tekshiruv kutilmoqda", " · ⏳ ждёт полной проверки")
+
+
+@screen("uob", "full")
+async def base_rescan(ctx, r: Req):
+    """🔍 Bazani qayta to'liq tekshirish (fonda; tugagach xabar keladi)."""
+    ub = ctx.userbot
+    if ub is None or ub.state != "online":
+        return r.L("⚠️ Asosiy akkaunt ulanmagan", "⚠️ Основной аккаунт не подключён")
+    if not ub.deep_running:
+        ui.bg(ub.deep_scan(force=True))
+    await ui.toast(ctx.bot, r.chat_id, r.L("🔍 Tekshirilmoqda — tugagach xabar keladi",
+                                           "🔍 Проверяю — по окончании пришлю сообщение"), 6)
+    r.args = []
+    return await settings(ctx, r)
 
 
 def period_text(ctx, r: Req) -> str:
@@ -465,8 +508,9 @@ PROMPTS = {
                           "Только что писавшие — в конце."),
     "range": ("Sana oralig'i: <code>01.10.2026 20.10.2026</code> yoki bitta sana (o'sha kundan bugungacha).",
               "Даты: <code>01.10.2026 20.10.2026</code> или одна дата (с неё по сегодня)."),
-    "push_base_from": ("Baza: qaysi sanadan beri o'zi yozgan lidlar? Masalan <code>28.08.2026</code>.",
-                       "База: с какой даты лиды, писавшие сами? Например <code>28.08.2026</code>."),
+    "push_base_from": ("Baza: qaysi sanadan keyin o'zi yozgan lidlar (yangi ham, eski ham)? "
+                       "Masalan <code>28.08.2026</code>.",
+                       "База: с какой даты лиды, писавшие сами (новые и старые)? Например <code>28.08.2026</code>."),
     "push_newlead_minutes": ("Yangi lidga necha daqiqa Push yubormaslik? (<code>60</code>, <code>2 soat</code>)",
                              "Сколько минут не слать новым лидам? (<code>60</code>, <code>2ч</code>)"),
     "push_repeat_minutes": ("Push olganlarga necha daqiqa qayta yubormaslik? (kamida 180)",
@@ -528,6 +572,9 @@ async def setting_set(ctx, r: Req, key: str):
         if d is None:
             return r.L("⚠️ Masalan: 28.08.2026", "⚠️ Например: 28.08.2026")
         db.set("push_base_from", d.isoformat())
+        ub = ctx.userbot
+        if ub is not None and ub.state == "online" and not ub.deep_running:
+            ui.bg(ub.deep_scan())                      # yangi sana — baza qaytadan to'liq yig'iladi
     elif key in ("push_newlead_minutes", "push_idle_minutes", "push_repeat_minutes"):
         try:
             v = parse_minutes(text)

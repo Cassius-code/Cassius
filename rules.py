@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from . import people as P
 from .db import Database
 from .links import message_link
+from .gtext import card_lines, esc, lead_line, who_line
 from .timeutil import minutes_up, parse_hhmm, work_seconds, local_date, is_work_time
 
 log = logging.getLogger("rules")
@@ -303,27 +304,33 @@ class Tracker:
     # ------------------------------------------------------------ alert matni (guruh uchun ruscha)
     def alert_message_text(self, gid: int, mid: int) -> tuple[str, bool]:
         """Bitta guruh xabaridagi hamma havolalar: ochiqlari oddiy, yopilganlari ✅. -> (matn, hammasi yopildimi)."""
-        rows = self.db.all("SELECT * FROM alerts WHERE group_chat_id=? AND group_msg_id=? ORDER BY id", (gid, mid))
+        rows = self.db.all("SELECT * FROM alerts WHERE group_chat_id=? AND group_msg_id=? ORDER BY wait_since, id",
+                           (gid, mid))
         return self._compose(rows)
 
+    def hm(self, ts) -> str:
+        return datetime.fromtimestamp(ts, self.tz).strftime("%H:%M") if ts else ""
+
     def _compose(self, rows) -> tuple[str, bool]:
+        """«Проёб»: 🚨 RD 7 · задержка → raqamlangan lidlar (nomi — havola, qachondan kutyapti) → kim javob beradi."""
         if not rows:
             return "", True
         f = P.folder(self.db, rows[0]["folder_id"])
-        lines = []
-        for r in rows:
-            link = message_link(r["chat_id"], r["wait_msg_id"] or r["topic_id"], r["topic_id"])
-            lines.append(link if r["status"] == "open" else f"✅ {link}")
-        mentions = " ".join(P.mention(p) for p in P.folder_people(self.db, f["id"])) if f else ""
-        lines.append(f"{mentions} {f['name'] if f else ''} задержка".strip())
         closed = all(r["status"] != "open" for r in rows)
+        items = [lead_line(i, message_link(r["chat_id"], r["wait_msg_id"] or r["topic_id"], r["topic_id"]),
+                           self.label(r["chat_id"], r["topic_id"]), f"ждёт с {self.hm(r['wait_since'])}",
+                           done=r["status"] != "open") for i, r in enumerate(rows, 1)]
+        head = f"{'✅' if closed else '🚨'} <b>{esc(f['name'] if f else '')}</b> · задержка" + (" закрыта" if closed else "")
+        lines = [head, card_lines(items)]
         if closed:
             whos = []
             for r in rows:
                 if r["closed_by"] and r["closed_by"] not in whos:
                     whos.append(r["closed_by"])
-            lines.append("✅ Выполнено" + (f" — {', '.join(whos)}" if whos else ""))
-        return "\n".join(lines), closed
+            lines.append("✅ Выполнено" + (f" — {esc(', '.join(whos))}" if whos else ""))
+        else:
+            lines.append(who_line(P.folder_people(self.db, f["id"]) if f else [], "ответьте клиентам"))
+        return "\n".join(x for x in lines if x), closed
 
     async def render_alert_message(self, gid: int, mid: int) -> None:
         text, closed = self.alert_message_text(gid, mid)
@@ -383,9 +390,12 @@ class Tracker:
         sent = 0
         for fid, items in by_folder.items():
             f = P.folder(self.db, fid)
-            mentions = " ".join(P.mention(p) for p in P.folder_people(self.db, fid))
-            links = [message_link(th["chat_id"], th["seen_msg_id"] or th["topic_id"], th["topic_id"]) for th in items]
-            text = "\n".join(links + [f"{mentions} {f['name'] if f else ''} ставка".strip()])
+            rows = [lead_line(i, message_link(th["chat_id"], th["seen_msg_id"] or th["topic_id"], th["topic_id"]),
+                              self.label(th["chat_id"], th["topic_id"]),
+                              f"новый чат с {self.hm(th['stavka_from'])} · ставок {th['bets']} из {need}")
+                    for i, th in enumerate(items, 1)]
+            text = "\n".join(x for x in (f"🎬 <b>{esc(f['name'] if f else '')}</b> · ставка", card_lines(rows),
+                                          who_line(P.folder_people(self.db, fid), "отправьте ставку")) if x)
             try:
                 await self.notifier.send_group(text)
             except Exception as exc:
@@ -426,13 +436,16 @@ class Tracker:
         sent = 0
         for fid, items in by_folder.items():
             f = P.folder(self.db, fid)
-            mentions = " ".join(P.mention(p) for p in P.folder_people(self.db, fid))
             for i in range(0, len(items), MAX_LINKS):
                 part = items[i:i + MAX_LINKS]
-                links = [message_link(th["chat_id"], th["wait_msg_id"] or th["topic_id"], th["topic_id"]) for th in part]
-                head = " ".join(x for x in ("🌙", mentions, f"{f['name']}:") if x)
-                text = "\n".join(links + [f"{head} рабочий день закончился, эти чаты без ответа — доведите работу "
-                                           "до конца, чтобы ни один чат не остался без ответа"])
+                rows = [lead_line(i + k, message_link(th["chat_id"], th["wait_msg_id"] or th["topic_id"],
+                                                      th["topic_id"]),
+                                  self.label(th["chat_id"], th["topic_id"]), f"ждёт с {self.hm(th['wait_since'])}")
+                        for k, th in enumerate(part, 1)]
+                text = "\n".join(x for x in (
+                    f"🌙 <b>{esc(f['name'])}</b> · рабочий день закончился", card_lines(rows),
+                    who_line(P.folder_people(self.db, fid), "эти чаты без ответа — доведите работу до конца, "
+                                                            "чтобы ни один чат не остался без ответа")) if x)
                 try:
                     await self.notifier.send_group(text)
                     sent += len(part)
@@ -465,23 +478,24 @@ class Tracker:
         return sent
 
     async def _send_alert(self, items: list, f, now: int) -> int:
-        """Papka bo'yicha bitta «задержка» xabari (bir nechta havola). -> nechta nit."""
+        """Papka bo'yicha bitta «задержка» xabari: shu paytda kechikkan hamma lidlar birga (bittalab emas).
+        Keyin kechikkanlari — pastga yangi xabar bo'lib; eski xabarlar o'chirilmaydi. -> nechta nit."""
         ids = []
         for th in items:
             cur = self.db.run("INSERT INTO alerts(chat_id, topic_id, folder_id, wait_since, wait_msg_id, created_ts) "
                               "VALUES(?,?,?,?,?,?)", (th["chat_id"], th["topic_id"], f["id"], th["wait_since"],
                                                       th["wait_msg_id"], now))
             ids.append(int(cur.lastrowid))
-        rows = self.db.all("SELECT * FROM alerts WHERE id IN (%s) ORDER BY id" % ",".join("?" * len(ids)), ids)
+        q = ",".join("?" * len(ids))
+        rows = self.db.all(f"SELECT * FROM alerts WHERE id IN ({q}) ORDER BY wait_since, id", ids)
         text, _ = self._compose(rows)
         try:
             gid, mid = await self.notifier.send_group(text, done_button=ids[0])
         except Exception as exc:
-            self.db.run("DELETE FROM alerts WHERE id IN (%s)" % ",".join("?" * len(ids)), ids)
+            self.db.run(f"DELETE FROM alerts WHERE id IN ({q})", ids)
             log.warning("«задержка» yuborilmadi: %s", exc)
             return 0
-        self.db.run("UPDATE alerts SET group_chat_id=?, group_msg_id=? WHERE id IN (%s)" % ",".join("?" * len(ids)),
-                    [gid, mid] + ids)
+        self.db.run(f"UPDATE alerts SET group_chat_id=?, group_msg_id=? WHERE id IN ({q})", [gid, mid] + ids)
         for th, aid in zip(items, ids):
             self._set(th["chat_id"], th["topic_id"], alert_id=aid)
             self.db.run("INSERT INTO journal(at, ts, chat_id, topic_id, msg_id, sender_id, who, kind, source, "
@@ -580,21 +594,26 @@ class Tracker:
         """«Проёб» uchun (ruscha)."""
         inc = self.db.one("SELECT * FROM incidents WHERE id=?", (iid,))
         f = P.folder(self.db, inc["folder_id"])
-        name = f["name"] if f else ""
-        mentions = " ".join(P.mention(p) for p in P.folder_people(self.db, inc["folder_id"])) if f else ""
+        name = esc(f["name"] if f else "")
+        people = P.folder_people(self.db, inc["folder_id"]) if f else []
         _n, forgive, grace = self.fine_rules()
         leads = plural_leads(inc["n_leads"])
         amount = f"{inc['fine_usd']:g} $"
         if inc["status"] == "warn":
-            return (f"⚠️ {mentions} {name}: {leads} без ответа.\n"
-                    f"Предупреждение {inc['seq']} из {forgive} за сегодня — без штрафа.").strip()
+            return "\n".join([f"⚠️ <b>{name}</b> · предупреждение {inc['seq']} из {forgive}",
+                              card_lines([f"{leads} без ответа.", "Предупреждение {} из {} за сегодня — без штрафа."
+                                          .format(inc["seq"], forgive)]),
+                              who_line(people, "ответьте клиентам")])
         if inc["status"] == "grace":
-            return (f"⏳ {mentions} {name}: {leads} без ответа.\n"
-                    f"Ответьте за {grace // 60} мин — иначе штраф {amount} каждому.").strip()
+            return "\n".join([f"⏳ <b>{name}</b> · последний шанс",
+                              card_lines([f"{leads} без ответа.",
+                                          f"Ответьте за {grace // 60} мин — иначе штраф {amount} каждому."]),
+                              who_line(people, "ответьте прямо сейчас")])
         if inc["status"] == "fined":
-            return (f"💸 {mentions} {name}: штраф {amount} каждому.\n"
-                    f"{leads} без ответа, не ответили за {grace // 60} мин.").strip()
-        return f"✅ {name}: ответили вовремя — без штрафа."
+            return "\n".join([f"💸 <b>{name}</b> · штраф {amount} каждому",
+                              card_lines([f"{leads} без ответа, не ответили за {grace // 60} мин."]),
+                              "👤 " + (" ".join(esc(P.mention(p)) for p in people) or "—")])
+        return f"✅ <b>{name}</b> · ответили вовремя — без штрафа."
 
     async def _render_incident(self, iid: int) -> None:
         inc = self.db.one("SELECT * FROM incidents WHERE id=?", (iid,))

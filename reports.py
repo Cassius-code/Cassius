@@ -62,10 +62,27 @@ def delays_by_folder(db, s_ts: int, e_ts: int) -> list[tuple[str, int]]:
         "AND a.created_ts<? AND a.status<>'void' GROUP BY f.id ORDER BY n DESC", (s_ts, e_ts))]
 
 
+# Yangi lid = shu davrda OCHILGAN topik (Telegram'dagi yaratilgan vaqti). Eski lid bugun birinchi marta yozsa —
+# yangi emas. Topik vaqti olinmagan bo'lsa — stavka boshlangan vaqt (u ham yangi topik). Oddiy chat (topiksiz) —
+# mijozning birinchi xabari.
+NEW_LEADS_SQL = (
+    "SELECT x.chat_id FROM ("
+    " SELECT t.chat_id, t.created_ts born FROM topics t WHERE t.topic_id>1"
+    " UNION ALL SELECT th.chat_id, th.stavka_from FROM threads th WHERE th.topic_id>1 AND NOT EXISTS ("
+    "  SELECT 1 FROM topics t WHERE t.chat_id=th.chat_id AND t.topic_id=th.topic_id AND t.created_ts IS NOT NULL)"
+    " UNION ALL SELECT th.chat_id, th.first_seen FROM threads th WHERE th.topic_id=0"
+    ") x WHERE x.born>=? AND x.born<?")
+
+
 def new_leads(db, s_ts: int, e_ts: int) -> list[tuple[str, int]]:
     return [(r["name"], r["n"]) for r in db.all(
-        "SELECT f.name, COUNT(*) n FROM threads t JOIN chats c ON c.chat_id=t.chat_id JOIN folders f ON f.id=c.folder_id "
-        "WHERE t.first_seen>=? AND t.first_seen<? GROUP BY f.id ORDER BY n DESC", (s_ts, e_ts))]
+        "SELECT f.name, COUNT(*) n FROM (" + NEW_LEADS_SQL + ") l JOIN chats c ON c.chat_id=l.chat_id "
+        "JOIN folders f ON f.id=c.folder_id GROUP BY f.id ORDER BY n DESC", (s_ts, e_ts))]
+
+
+def new_leads_in(db, folder_id: int, s_ts: int, e_ts: int) -> int:
+    return db.scalar("SELECT COUNT(*) FROM (" + NEW_LEADS_SQL + ") l JOIN chats c ON c.chat_id=l.chat_id "
+                     "WHERE c.folder_id=?", (s_ts, e_ts, folder_id))
 
 
 def summary(ctx, s: dt.date, e: dt.date, lang: str, owner: bool, full: bool = True) -> str:
@@ -132,9 +149,10 @@ def weekly_group(ctx, s: dt.date, e: dt.date) -> str:
     db = ctx.db
     s_ts, e_ts = bounds(s, e, ctx.tz)
     st = staff_stats(db, s_ts, e_ts, ctx.tz)
-    lines = [f"📅 Итоги недели {label(s, e)}", ""]
+    from .gtext import card_lines, esc
+    lines = [f"📅 <b>Итоги недели</b> · {label(s, e)}"]
     if not st:
-        lines.append("Данных пока нет.")
+        lines.append(card_lines(["Данных пока нет."]))
         return "\n".join(lines)
     top_n = max(x["n"] for x in st)
     enough = max(5, int(top_n * 0.2))
@@ -151,16 +169,11 @@ def weekly_group(ctx, s: dt.date, e: dt.date) -> str:
         bits.append(f"задержек {x['delays']}" if x["delays"] else "без задержек ✅")
         if x["late"]:
             bits.append(f"опозданий {x['late']}")
-        return f"{x['name']} — " + " · ".join(bits)
+        return f"<b>{esc(x['name'])}</b> — " + " · ".join(bits)
     medals = ["🥇", "🥈", "🥉"]
     if ranked:
-        lines.append("🏆 Лучшие:")
-        for i, x in enumerate(ranked[:3]):
-            lines.append(f"{medals[i]} {row(x)}")
-        if len(ranked) > 3 or rest:
-            lines += ["", "Остальные:"]
-        for i, x in enumerate(ranked[3:], 4):
-            lines.append(f"{i}. {row(x)}")
-    for x in rest:
-        lines.append(f"• {row(x)}")
+        lines += ["", "🏆 <b>Лучшие</b>", card_lines([f"{medals[i]} {row(x)}" for i, x in enumerate(ranked[:3])])]
+    others = [f"{i}. {row(x)}" for i, x in enumerate(ranked[3:], 4)] + [f"• {row(x)}" for x in rest]
+    if others:
+        lines += ["", "<b>Остальные</b>", card_lines(others)]
     return "\n".join(lines)

@@ -52,14 +52,41 @@ async def react(ctx, message: Message, emoji: str) -> None:
 
 
 async def reply(message: Message, text: str) -> None:
+    """Faqat «Проёб» da (qulf boshqasini o'tkazmaydi). Matn — HTML (gtext.esc bilan)."""
     try:
-        await message.reply(text, disable_web_page_preview=True)
+        await message.reply(text, disable_web_page_preview=True, parse_mode="HTML")
     except Exception as exc:
         log.info("Guruhga javob yozilmadi: %s", exc)
 
 
+def group_lock(ctx):
+    """🔒 Bot guruhlardan FAQAT «Проёб» ga yozadi. Boshqa guruh/chatga (lidlarga) xabar, reaksiya, tahrir — texnik
+    jihatdan to'xtatiladi (Bot API so'rovi umuman ketmaydi). Shaxsiy chatlar (siz, adminlar) — mumkin."""
+    from aiogram.client.session.middlewares.base import BaseRequestMiddleware
+    from aiogram.exceptions import TelegramForbiddenError
+
+    names = {"SetMessageReaction", "PinChatMessage", "UnpinChatMessage", "UnpinAllChatMessages", "SendChatAction",
+             "EditMessageText", "EditMessageCaption", "EditMessageMedia", "EditMessageReplyMarkup"}
+
+    class GroupLock(BaseRequestMiddleware):
+        async def __call__(self, make_request, bot, method):
+            name = type(method).__name__
+            if name.startswith(("Send", "Forward", "Copy")) or name in names:
+                cid = getattr(method, "chat_id", None)
+                private = isinstance(cid, int) and cid > 0
+                if cid is not None and not private and str(cid) != (ctx.db.get("proyob_group_id") or "").strip():
+                    log.warning("🔒 %s → %s to'xtatildi: bot faqat «Проёб» ga yozadi", name, cid)
+                    raise TelegramForbiddenError(method=method, message="locked: bot writes only to «Проёб»")
+            return await make_request(bot, method)
+    return GroupLock()
+
+
 def build_router(ctx) -> Router:
     r = Router(name="group")
+    try:
+        ctx.bot.session.middleware(group_lock(ctx))
+    except Exception:
+        log.warning("🔒 Guruh qulfi o'rnatilmadi")
     in_group = F.chat.type.in_(GROUPS)
 
     # ───────────── buyruqlar
@@ -67,14 +94,22 @@ def build_router(ctx) -> Router:
     async def cmd_proyob(message: Message) -> None:
         uid, _staff, _n = sender_info(ctx, message)
         if uid is None or P.admin_level(ctx.db, ctx.cfg.owner_ids, uid) not in ("owner", "full"):
-            await reply(message, "⛔ Только владелец или админ бота (не анонимно).")
-            return
+            return                                       # begona guruhda jim
         ctx.db.set("proyob_group_id", str(message.chat.id))
         await reply(message, "✅ Эта группа подключена как «Проёб».")
 
     @r.message(in_group, Command("id"))
     async def cmd_id(message: Message) -> None:
-        await reply(message, f"🆔 Группа: {message.chat.id}")
+        if is_proyob(ctx, message.chat.id):
+            await reply(message, f"🆔 Группа: {message.chat.id}")
+            return
+        uid, _staff, _n = sender_info(ctx, message)       # boshqa guruh: ID — so'raganga shaxsan (admin bo'lsa)
+        if uid is not None and P.admin_level(ctx.db, ctx.cfg.owner_ids, uid):
+            try:
+                await ctx.bot.send_message(uid, f"🆔 {h(message.chat.title or '')}: <code>{message.chat.id}</code>",
+                                           parse_mode="HTML")
+            except Exception:
+                pass
 
     @r.message(in_group, Command("statistika", "stat"))
     async def cmd_stat(message: Message) -> None:
@@ -96,9 +131,11 @@ def build_router(ctx) -> Router:
         t = local_date(ctx.clock(), ctx.tz)
         if TOP_CMDS.get(cmd) == "all":
             items = K.cumulative_rating(ctx.db, t)
+            from .gtext import card_lines, esc
             medal = ["🥇", "🥈", "🥉"]
-            lines = [f"{medal[i] if i < 3 else f'{i + 1}.'} {n} — {num(v)}" for i, (n, v, _p) in enumerate(items)]
-            await reply(message, "\n".join(["🏆 Рейтинг кассы — всего", ""] + (lines or ["данных нет"])))
+            lines = [f"{medal[i] if i < 3 else f'{i + 1}.'} {esc(n)} — <b>{num(v)}</b>" for i, (n, v, _p) in
+                     enumerate(items)]
+            await reply(message, "\n".join(["🏆 <b>Рейтинг кассы</b> · всего", card_lines(lines or ["данных нет"])]))
             return
         s, e = K.period_range(TOP_CMDS.get(cmd, "td"), t)
         await reply(message, rating_plain(K.calc(ctx.db, s, e), s, e))
@@ -159,10 +196,11 @@ def build_router(ctx) -> Router:
                         row = ctx.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
                                          (local_date(message.date.timestamp(), ctx.tz).isoformat(), person["id"]))
                         await react(ctx, message, "👍")
-                        await reply(message, f"🕘 {P.mention(person)}, опоздание {row['late_min'] if row else '?'} мин")
+                        await reply(message, f"🕘 <b>Опоздание</b> · {h(P.mention(person))} — "
+                                             f"{row['late_min'] if row else '?'} мин")
                     elif res == "break_limit":
-                        await reply(message, f"⛔ {P.mention(person)}, перерывы на сегодня закончились "
-                                             f"({ctx.db.get_int('breaks_per_day', 3)})")
+                        await reply(message, f"⛔ <b>Перерыв</b> · {h(P.mention(person))} — перерывы на сегодня "
+                                             f"закончились ({ctx.db.get_int('breaks_per_day', 3)})")
                     return
         try:
             await kassa_flow.on_group_text(ctx, message, text, staff, uid, name)

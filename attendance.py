@@ -29,7 +29,26 @@ def norm(text: str) -> str:
     return re.sub(r"(.)\1+", r"\1", t)
 
 
-_BREAK_START = re.compile(r"(?<![a-z])(ataid[uoa]?|pereriv|obed)(?![a-z])")
+_BREAK_START = re.compile(r"(?<![a-z])(ataid[uoa]?|otoid[uoa]?|otosh[a-z]*|otho[jz]h?[a-z]*|pereriv|obed)(?![a-z])")
+_HOUR = re.compile(r"(?<![a-z])(chas|chasa|chasov|soat)(?![a-z])")
+
+
+def break_minutes(text: str | None) -> int | None:
+    """«отойду на 30 минут» → 30, «перерыв 15м» → 15, «полчаса» → 30, «на час» → 60. Aytilmagan — None."""
+    if not text:
+        return None
+    t = norm(text)
+    if "polchas" in t:
+        return 30
+    m = re.search(r"(\d{1,3})\s*(m|min|minut[a-z]*|daq[a-z]*)?(?![\d])", t)
+    if m:
+        v = int(m.group(1))
+        if re.search(r"(\d{1,3})\s*" + _HOUR.pattern, t):
+            v *= 60
+        return v if 1 <= v <= 240 else None
+    if _HOUR.search(t):
+        return 60
+    return None
 _BACK = {norm(w) for w in ("tut", "tutman", "qaytdim", "keldim", "вернулся", "vernulsya")}
 
 
@@ -139,7 +158,7 @@ class Attendance:
             return self.arrive(person, ts)
         kind = detect_break(text)
         if kind and self.db.flag("breaks_enabled"):
-            return self._break(person, kind, ts)
+            return self._break(person, kind, ts, break_minutes(text) if kind == "start" else None)
         return None
 
     def arrive(self, person, ts: int) -> str:
@@ -162,29 +181,34 @@ class Attendance:
         return "late" if late else "arrived"
 
     # ------------------------------------------------------------ tanaffus
-    def _break(self, person, kind: str, ts: int) -> str:
+    def length(self, br) -> int:
+        """Shu tanaffusning vaqti (soniya): aytilgan bo'lsa — o'sha, lekin umumiy limitdan oshmaydi."""
+        stated = br["minutes"] if "minutes" in br.keys() else None
+        return min(self.break_len, stated * 60) if stated else self.break_len
+
+    def _break(self, person, kind: str, ts: int, minutes: int | None = None) -> str:
         cur = self.db.one("SELECT * FROM breaks WHERE person_id=? AND end_ts IS NULL ORDER BY id DESC LIMIT 1",
                           (person["id"],))
         if kind == "start":
             if cur is not None:
-                if ts < cur["start_ts"] + self.break_len:
+                if ts < cur["start_ts"] + self.length(cur):
                     return "break_already"
-                self.db.run("UPDATE breaks SET end_ts=? WHERE id=?", (cur["start_ts"] + self.break_len, cur["id"]))
+                self.db.run("UPDATE breaks SET end_ts=? WHERE id=?", (cur["start_ts"] + self.length(cur), cur["id"]))
             since = day_start(ts, self.tz)
             n = self.db.scalar("SELECT COUNT(*) FROM breaks WHERE person_id=? AND start_ts>=?", (person["id"], since))
             if n >= self.breaks_per_day:
                 return "break_limit"
-            self.db.run("INSERT INTO breaks(person_id, start_ts) VALUES(?,?)", (person["id"], ts))
+            self.db.run("INSERT INTO breaks(person_id, start_ts, minutes) VALUES(?,?,?)", (person["id"], ts, minutes))
             self.recompute_pauses(ts)
             return "break_start"
         if cur is None:
             return None
         self.db.run("UPDATE breaks SET end_ts=? WHERE id=?", (ts, cur["id"]))
         self.recompute_pauses(ts)
-        return "break_end_late" if ts > cur["start_ts"] + self.break_len else "break_end"
+        return "break_end_late" if ts > cur["start_ts"] + self.length(cur) else "break_end"
 
     def _eff_end(self, br) -> int:
-        limit = br["start_ts"] + self.break_len
+        limit = br["start_ts"] + self.length(br)
         return min(br["end_ts"], limit) if br["end_ts"] is not None else limit
 
     def recompute_pauses(self, now: int) -> None:
@@ -222,12 +246,13 @@ class Attendance:
 
     async def _break_reminders(self, now: int) -> None:
         for br in self.db.all("SELECT * FROM breaks WHERE end_ts IS NULL AND reminded=0"):
-            due = br["start_ts"] + self.break_len
+            due = br["start_ts"] + self.length(br)
             if now < due:
                 continue
             p = P.person(self.db, br["person_id"])
             try:
-                await self.notifier.send_group(f"{P.mention(p)}, время перерыва вышло!")
+                from .gtext import esc
+                await self.notifier.send_group(f"☕ <b>Перерыв</b> · {esc(P.mention(p))} — время перерыва вышло!")
                 self.db.run("UPDATE breaks SET reminded=1 WHERE id=?", (br["id"],))
             except Exception as exc:
                 log.warning("Tanaffus eslatmasi yuborilmadi: %s", exc)
@@ -249,7 +274,8 @@ class Attendance:
             missing.append(p)
         if not missing:
             return
-        text = " ".join(P.mention(p) for p in missing) + " — ещё нет «доброе утро»"
+        from .gtext import mentions
+        text = f"🙋 <b>Приход</b> · {mentions(missing)} — ещё нет «доброе утро»"
         try:
             await self.notifier.send_group(text)
         except Exception as exc:

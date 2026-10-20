@@ -373,8 +373,8 @@ def rating_plain(b: dict, s: dt.date, e: dt.date) -> str:
     rows = sorted([r for r in b["rows"].values() if r["raw"] > 0 and r["kind"] in ("worker", "self", "pool")],
                   key=lambda r: -r["raw"])
     if not rows:
-        return f"🏆 Рейтинг кассы ({label(s, e)}): данных нет"
+        return f"🏆 <b>Рейтинг кассы</b> · {label(s, e)}\n<blockquote>данных нет</blockquote>"
     medal = ["🥇", "🥈", "🥉"]
-    return "\n".join([f"🏆 Рейтинг кассы ({label(s, e)})", ""] +
-                     [f"{medal[i] if i < 3 else f'{i + 1}.'} {r['p']['name']} — {num(r['raw'])}"
-                      for i, r in enumerate(rows)])
+    return "\n".join([f"🏆 <b>Рейтинг кассы</b> · {label(s, e)}", "<blockquote>" + "\n".join(
+        f"{medal[i] if i < 3 else f'{i + 1}.'} {h(r['p']['name'])} — <b>{num(r['raw'])}</b>"
+        for i, r in enumerate(rows)) + "</blockquote>"])

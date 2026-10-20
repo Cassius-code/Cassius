@@ -427,36 +427,102 @@ async def journal_file(ctx, r: Req):
 
 # ───────────────────────── papkalar
 def folder_leads(ctx, fid: int) -> dict:
-    """Papkadagi lidlar (o'zi yozganlar, baza sanasidan beri): jami, 7 kunda, bugun."""
+    """Papkadagi lidlar. total — hammasi (forum topiklari + oddiy chatlar, Telegram'dagidek);
+    all — Push bazasi: baza sanasidan keyin o'zi yozganlar (yangi ham, eski ham);
+    week, today — bazadagilardan shu vaqtda o'zi yozganlar."""
     from .timeutil import day_start
     db, now = ctx.db, int(ctx.clock())
     base = ctx.pusher.base_from() if ctx.pusher else 0
-    q = ("SELECT COUNT(*) FROM threads th JOIN chats c ON c.chat_id=th.chat_id "
-         "WHERE c.folder_id=? AND th.first_seen IS NOT NULL AND th.last_seen>=?")
-    return {"all": db.scalar(q, (fid, base)), "week": db.scalar(q, (fid, max(base, now - 7 * 86400))),
-            "today": db.scalar(q, (fid, max(base, day_start(now, ctx.tz))))}
+    from .push import base_count
+    total = db.scalar("SELECT COUNT(*) FROM topics t JOIN chats c ON c.chat_id=t.chat_id "
+                      "WHERE c.folder_id=? AND t.topic_id<>1", (fid,)) + \
+        db.scalar("SELECT COUNT(*) FROM chats c WHERE c.folder_id=? AND c.is_forum=0 "
+                  "AND NOT EXISTS (SELECT 1 FROM topics t WHERE t.chat_id=c.chat_id)", (fid,))
+    from .reports import new_leads_in
+    d0 = day_start(now, ctx.tz)
+    return {"total": total, "all": base_count(db, base, fid), "week": base_count(db, base, fid, now - 7 * 86400),
+            "today": base_count(db, base, fid, d0), "new": new_leads_in(db, fid, d0, now + 1)}
+
+
+def _fkey_hash(title: str) -> str:
+    import hashlib
+    from .userbot import folder_key
+    return hashlib.sha1(folder_key(title).encode()).hexdigest()[:12]
+
+
+async def _tg_folders(ctx) -> list[str]:
+    import asyncio
+    ub = ctx.userbot
+    if ub is None:
+        return []
+    try:
+        return await asyncio.wait_for(ub.folder_titles(), 10)
+    except Exception:
+        return list(getattr(ub, "tg_folders", []))
 
 
 @screen("cf", "full")
 async def folders(ctx, r: Req):
+    """Asosiy akkauntdagi Telegram papkalari: ➕ bosib qo'shiladi (chatlari o'zi keladi), ✅ — ochiladi."""
+    from .userbot import folder_key
     db = ctx.db
-    rows = []
-    for f in P.folders(db):
+    online = ctx.userbot is not None and ctx.userbot.state == "online"
+    tg = await _tg_folders(ctx)
+    mine = {folder_key(f["name"]): f for f in P.folders(db)}
+    rows, seen = [], set()
+
+    def added(f, warn=""):
         ppl = len(P.folder_people(db, f["id"]))
         chats = db.scalar("SELECT COUNT(*) FROM chats WHERE folder_id=?", (f["id"],))
-        leads = folder_leads(ctx, f["id"])["all"]
+        leads = folder_leads(ctx, f["id"])["total"]
         mark = "" if f["delay_on"] else " ⛔"
-        rows.append([(f"📁 {f['name']} · 👤{ppl} · 💬{chats} · 🔥{leads}{mark}", f"cfo:{f['id']}")])
-    missing = getattr(ctx.userbot, "missing_folders", []) if ctx.userbot else []
-    note = [r.L("Papka nomi Telegram'dagi papka nomi bilan bir xil bo'lsin — chatlar o'zi qo'shiladi.",
-                "Название папки = названию папки в Telegram — чаты подтянутся сами."),
-            r.L("👤 xodimlar · 💬 chatlar · 🔥 lidlar (o'zi yozganlar). Yangilash — «🔄 Telegram'dan».",
-                "👤 сотрудники · 💬 чаты · 🔥 лиды (писали сами). Обновить — «🔄 Из Telegram».")]
-    if missing:
-        note.append("⚠️ " + r.L("Telegram'da topilmadi: ", "Нет в Telegram: ") + h(", ".join(missing)))
-    rows += [[(r.L("➕ Papka qo'shish", "➕ Добавить папку"), "cfa"), (r.L("🔄 Telegram'dan", "🔄 Из Telegram"), "cfs")],
+        return [(f"{warn or '✅'} {f['name']} · 👤{ppl} · 💬{chats} · 🔥{leads}{mark}", f"cfo:{f['id']}")]
+
+    for t in tg:
+        k = folder_key(t)
+        if k in seen:
+            continue
+        seen.add(k)
+        f = mine.get(k)
+        rows.append(added(f) if f else [(f"➕ {t}", f"cft:{_fkey_hash(t)}")])
+    for k, f in mine.items():
+        if k not in seen:
+            rows.append(added(f, "⚠️"))
+    note = [r.L("Asosiy akkauntdagi papkalar. <b>➕</b> — qo'shish (chatlari o'zi keladi). <b>✅</b> — ochish: "
+                "xodimlar, nazorat, o'chirish.",
+                "Папки основного аккаунта. <b>➕</b> — добавить (чаты подтянутся сами). <b>✅</b> — открыть: "
+                "сотрудники, контроль, удаление."),
+            r.L("👤 javob beradigan xodimlar · 💬 guruhlar · 🔥 lidlar (hammasi)",
+                "👤 отвечающие сотрудники · 💬 группы · 🔥 лиды (все)")]
+    if not online:
+        note.append(r.L("⚠️ Asosiy akkaunt ulanmagan — Telegram papkalari ko'rinmaydi (⚙️ → 🔑 Asosiy akkaunt).",
+                        "⚠️ Основной аккаунт не подключён — папки Telegram не видны (⚙️ → 🔑 Основной аккаунт)."))
+    elif not tg:
+        note.append(r.L("Asosiy akkauntda papka yo'q.", "У основного аккаунта нет папок."))
+    if any(k not in seen for k in mine):
+        note.append(r.L("⚠️ — Telegram'da bunday papka yo'q (nomini to'g'rilang yoki o'chiring).",
+                        "⚠️ — такой папки нет в Telegram (переименуйте или удалите)."))
+    rows += [[(r.L("🔄 Yangilash", "🔄 Обновить"), "cfs"), (r.L("✍️ Nom bilan", "✍️ По названию"), "cfa")],
              nav(r, "c")]
     return ui.join(title("📁", r.L("PAPKALAR", "ПАПКИ")), "", card(note)), kb(*rows)
+
+
+@screen("cft", "full")
+async def folder_take(ctx, r: Req):
+    """➕ Telegram papkasini qo'shish — nomi aynan Telegram'dagidek, chatlari darhol tortiladi."""
+    import asyncio
+    want = r.args[0] if r.args else ""
+    t = next((x for x in await _tg_folders(ctx) if _fkey_hash(x) == want), None)
+    ui.view(r, "cf")
+    if t is None:
+        return await folders(ctx, r)
+    fid = P.add_folder(ctx.db, t)
+    if fid is not None and ctx.userbot is not None and ctx.userbot.state == "online":
+        try:
+            await asyncio.wait_for(ctx.userbot.sync_folders(), 15)
+        except Exception:
+            ui.bg(ctx.userbot.sync_all())
+    return await folders(ctx, r)
 
 
 @screen("cfs", "full")
@@ -497,25 +563,32 @@ async def folder_card(ctx, r: Req):
     ppl = P.folder_people(db, fid)
     chats = db.scalar("SELECT COUNT(*) FROM chats WHERE folder_id=?", (fid,))
     lc = folder_leads(ctx, fid)
+    from .panel_push import dstr
+    base_d = dstr(db.get("push_base_from") or "2026-08-28")[:5]
     lines = [f"👤 {r.L('Xodimlar', 'Сотрудники')} — " + (h(", ".join(P.mention(p) for p in ppl)) or
                                                          r.L("belgilanmagan ⚠️", "не назначены ⚠️")),
-             f"💬 {r.L('Chatlar', 'Чаты')} — <b>{chats}</b>",
-             f"🔥 {r.L('Lidlar', 'Лиды')} — <b>{lc['all']}</b> · {r.L('7 kunda', 'за 7 дней')} <b>{lc['week']}</b>"
-             f" · {r.L('bugun', 'сегодня')} <b>{lc['today']}</b>",
+             f"💬 {r.L('Guruhlar', 'Группы')} — <b>{chats}</b>",
+             f"🔥 {r.L('Lidlar', 'Лиды')} — <b>{lc['total']}</b> {r.L('ta', '')}".rstrip()
+             + f" · 🆕 {r.L('bugun yangi', 'новых сегодня')} <b>{lc['new']}</b>",
+             f"└ {r.L(f'Push bazasi ({base_d} dan keyin o‘zi yozgan)', f'База Push (писали сами после {base_d})')} — "
+             f"<b>{lc['all']}</b> · {r.L('7 kunda yozgan', 'писали за 7 дней')} <b>{lc['week']}</b> · "
+             f"{r.L('bugun', 'сегодня')} <b>{lc['today']}</b>",
              f"🚨 {r.L('Zaderjka nazorati', 'Контроль задержек')} — {onoff(r, f['delay_on'])}",
              f"💸 {r.L('Jarima', 'Штраф')} — {folder_fine_text(ctx, r, f)}"
              + ("" if ctx.db.flag("fines_enabled") else r.L(" · ⚪ jarimalar o'chiq", " · ⚪ штрафы выключены"))]
-    rows = grid([(f"👤 {r.L('Xodimlar', 'Сотрудники')}", f"cfp:{fid}"), (f"💬 {r.L('Chatlar', 'Чаты')}", f"cfc:{fid}"),
+    rows = grid([(f"👤 {r.L('Xodimlar', 'Сотрудники')}", f"cfp:{fid}"), (f"💬 {r.L('Guruhlar', 'Группы')}", f"cfc:{fid}"),
                  (f"💸 {r.L('Jarima', 'Штраф')}", f"cff:{fid}"),
-                 ((r.L("⛔ Nazorat o'ch", "⛔ Выкл. контроль") if f["delay_on"] else r.L("✅ Nazorat yoq",
+                 ((r.L("⛔ Nazoratni o'chirish", "⛔ Выкл. контроль") if f["delay_on"] else r.L("✅ Nazoratni yoqish",
                                                                                        "✅ Вкл. контроль")),
                   f"cfd:{fid}"),
                  (f"✏️ {r.L('Nomi', 'Название')}", f"cfr:{fid}"), (f"🗑 {r.L('O‘chirish', 'Удалить')}", f"cfx:{fid}")])
     rows.append([(r.L("🔄 Telegram'dan yangilash", "🔄 Обновить из Telegram"), "cfs")])
     rows.append(nav(r, "cf"))
     return ui.join(title("📁", h(f["name"])), "", card(lines),
-                   r.L("<i>🔥 Lidlar — baza sanasidan beri o'zi yozganlar (📣 Push → ⚙️ dagi sana).</i>",
-                       "<i>🔥 Лиды — писали сами с даты базы (📣 Push → ⚙️).</i>")), kb(*rows)
+                   r.L("<i>💬 — papkadagi guruhlar, har guruhda lidlar — topiklar. 🔥 — hamma lidlar; "
+                       "Push faqat baza sanasidan keyin o'zi yozganlarga boradi (yangi ham, eski ham).</i>",
+                       "<i>💬 — группы папки, лиды — топики в них. 🔥 — все лиды; Push идёт только тем, "
+                       "кто писал сам после даты базы (новые и старые).</i>")), kb(*rows)
 
 
 @screen("cfd", "full")

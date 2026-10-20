@@ -374,7 +374,7 @@ async def person_settings(ctx, r: Req):
                  else None,
                  ((r.L("💰 Zp: o'chirish", "💰 Зп: выкл") if p["zp_on"] else r.L("💰 Zp: yoqish", "💰 Зп: вкл")),
                   f"psz:{pid}") if p["kassa_kind"] in ("worker", "self") else None,
-                 ((r.L("🙋 Nazorat: o'ch", "🙋 Контроль: выкл") if p["attend"] else r.L("🙋 Nazorat: yoq",
+                 ((r.L("🙋 Nazoratni o'chirish", "🙋 Контроль: выкл") if p["attend"] else r.L("🙋 Nazoratni yoqish",
                                                                                          "🙋 Контроль: вкл")),
                   f"psa:{pid}"),
                  (f"🛌 {r.L('Dam olish', 'Выходные')}", f"psw:{pid}"), (f"📁 {r.L('Papkalar', 'Папки')}", f"psf:{pid}"),

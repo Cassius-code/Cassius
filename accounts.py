@@ -9,6 +9,8 @@ from .tgsend import PushSender
 
 log = logging.getLogger("accounts")
 
+MAIN = -1          # papka Push'i asosiy akkauntdan (alohida sessiya ochilmaydi — o'sha ulanish ishlatiladi)
+
 
 class PushAccount(TgAccount, PushSender):
     def __init__(self, cfg, db, notifier, acc_id: int, on_identified=None):
@@ -47,6 +49,7 @@ class AccountPool:
         self.on_identified = on_identified
         self.accounts: dict[int, PushAccount] = {}
         self._tasks: dict[int, asyncio.Task] = {}
+        self.main = None                      # asosiy akkaunt (Userbot) — Push uchun ham tanlash mumkin
 
     async def _runner(self, acc: PushAccount) -> None:
         while True:
@@ -70,9 +73,13 @@ class AccountPool:
             asyncio.create_task(acc._disconnect())
 
     def sender(self, acc_id: int | None):
+        if acc_id == MAIN:
+            return self.main
         return self.accounts.get(acc_id) if acc_id else None
 
     def state_of(self, acc_id: int | None) -> str:
+        if acc_id == MAIN:
+            return self.main.state if self.main is not None else "no_session"
         row = self.db.one("SELECT paused FROM accounts WHERE id=?", (acc_id,)) if acc_id else None
         if row is not None and row["paused"]:
             return "paused"

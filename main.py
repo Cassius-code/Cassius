@@ -131,6 +131,7 @@ async def amain() -> None:
     att = Attendance(db, tz, notifier)
     userbot = Userbot(cfg, db, tracker, notifier, tz)
     pool = AccountPool(cfg, db, notifier, on_identified=userbot.reload_ids)
+    pool.main = userbot                                   # papka Push'i asosiy akkauntdan ham bo'lishi mumkin
     pusher = Pusher(db, tz, notifier, pool, tracker)
     ctx = Ctx(cfg=cfg, db=db, tz=tz, bot=bot, notifier=notifier, tracker=tracker, att=att, userbot=userbot,
               pool=pool, pusher=pusher)

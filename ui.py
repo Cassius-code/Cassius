@@ -234,7 +234,7 @@ def nav(r: Req, back: str | None = "m") -> list:
 
 
 def onoff(r: Req, v) -> str:
-    return r.L("🟢 yoq", "🟢 вкл") if v else r.L("⚪ o'ch", "⚪ выкл")
+    return r.L("🟢 yoniq", "🟢 вкл") if v else r.L("⚪ o'chiq", "⚪ выкл")
 
 
 def title(icon: str, text: str, sub: str = "") -> str:

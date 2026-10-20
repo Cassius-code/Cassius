@@ -262,13 +262,18 @@ def login_error(r: Req, exc: Exception, stage: str) -> str:
     return "⚠️ " + msg
 
 
+def _back(target: str) -> str:
+    """Bekor qilinsa — qayerga: papkadan boshlangan bo'lsa o'sha papkaga."""
+    return f"uf:{target.split(':', 1)[1]}" if target.startswith("push:") else "s"
+
+
 def _phone_screen(r: Req, target: str, err: str = ""):
     what = r.L("asosiy akkaunt", "основной аккаунт") if target == "main" else r.L("yangi Push akkaunt",
                                                                                    "новый Push-аккаунт")
     return title("📲", r.L("ULASH", "ПОДКЛЮЧЕНИЕ"), what) + "\n\n" + card(
         ([err, ""] if err else []) +
         [r.L("Telefon raqamini yuboring, masalan <code>+998901234567</code>.",
-             "Пришлите номер телефона, например <code>+998901234567</code>.")]), ui.cancel_kb(r, "s")
+             "Пришлите номер телефона, например <code>+998901234567</code>.")]), ui.cancel_kb(r, _back(target))
 
 
 def _code_screen(r: Req, phone: str, err: str = ""):
@@ -292,9 +297,11 @@ def _pass_screen(r: Req, err: str = ""):
 @screen("sml", "full")
 async def login_start(ctx, r: Req):
     target = r.args[0] if r.args else "main"
+    if target == "push" and len(r.args) > 1 and r.args[1].isdigit():
+        target = f"push:{r.args[1]}"                   # 📣 Push → papka → akkaunt: ulangach shu papkaga biriktiriladi
     if not (ctx.cfg.api_id and ctx.cfg.api_hash):
         return r.L("⚠️ Railway'da API_ID va API_HASH berilmagan", "⚠️ В Railway не заданы API_ID и API_HASH")
-    ui.ask(r, "login_phone", "s", target=target)
+    ui.ask(r, "login_phone", _back(target), target=target)
     return _phone_screen(r, target)
 
 
@@ -303,7 +310,7 @@ async def login_phone(ctx, r: Req, target: str):
     contact = getattr(r.message, "contact", None)          # «📎 → Kontakt» bilan yuborilgan raqam ham bo'ladi
     phone = re.sub(r"[^\d+]", "", r.text or (getattr(contact, "phone_number", "") or ""))
     if len(re.sub(r"\D", "", phone)) < 9:
-        ui.ask(r, "login_phone", "s", target=target)
+        ui.ask(r, "login_phone", _back(target), target=target)
         return _phone_screen(r, target, r.L("⚠️ Raqam noto'g'ri", "⚠️ Неверный номер"))
     if not phone.startswith("+"):
         phone = "+" + phone
@@ -315,11 +322,11 @@ async def login_phone(ctx, r: Req, target: str):
         await flow.start(phone)
     except Exception as exc:
         await flow.cancel()
-        ui.ask(r, "login_phone", "s", target=target)
+        ui.ask(r, "login_phone", _back(target), target=target)
         return _phone_screen(r, target, login_error(r, exc, "phone"))
     ctx.login[r.uid] = flow
     _login_save(ctx, r.uid, flow, target)
-    ui.ask(r, "login_code", "s", target=target)
+    ui.ask(r, "login_code", _back(target), target=target)
     return _code_screen(r, phone)
 
 
@@ -331,7 +338,7 @@ async def login_resend(ctx, r: Req):
     st = json.loads(raw) if raw else {}
     phone, target = st.get("phone") or "", st.get("target") or "main"
     if not phone:
-        ui.ask(r, "login_phone", "s", target=target)
+        ui.ask(r, "login_phone", _back(target), target=target)
         return _phone_screen(r, target)
     old = ctx.login.pop(r.uid, None)
     if old is not None:
@@ -341,20 +348,29 @@ async def login_resend(ctx, r: Req):
         await flow.start(phone)
     except Exception as exc:
         await flow.cancel()
-        ui.ask(r, "login_code", "s", target=target)
+        ui.ask(r, "login_code", _back(target), target=target)
         return _code_screen(r, phone, login_error(r, exc, "phone"))
     ctx.login[r.uid] = flow
     _login_save(ctx, r.uid, flow, target)
-    ui.ask(r, "login_code", "s", target=target)
+    ui.ask(r, "login_code", _back(target), target=target)
     return _code_screen(r, phone, r.L("📨 Yangi kod yuborildi", "📨 Новый код отправлен"))
 
 
 @screen("smx", "full")
 async def login_cancel(ctx, r: Req):
+    import json
     flow = ctx.login.pop(r.uid, None)
     if flow is not None:
         await flow.cancel()
+    raw = ctx.db.get(_login_key(r.uid))
+    target = (json.loads(raw).get("target") or "") if raw else ""
     _login_forget(ctx, r.uid)
+    ui.WAIT.pop(r.uid, None)
+    if target.startswith("push:"):
+        from .panel_push import folder_card
+        r.args = [target.split(":", 1)[1]]
+        ui.view(r, f"uf:{r.args[0]}")
+        return await folder_card(ctx, r)
     return await settings(ctx, r)
 
 
@@ -367,18 +383,18 @@ async def login_code(ctx, r: Req, target: str):
         log.warning("Kirishni tiklab bo'lmadi: %s", type(exc).__name__)
     if flow is None:
         _login_forget(ctx, r.uid)
-        ui.ask(r, "login_phone", "s", target=target)
+        ui.ask(r, "login_phone", _back(target), target=target)
         return _phone_screen(r, target, r.L("⚠️ Kod eskirdi — raqamni qaytadan yuboring",
                                             "⚠️ Код устарел — пришлите номер ещё раз"))
     code = re.sub(r"\D", "", r.text)
     try:
         res = await flow.submit_code(code)
     except Exception as exc:
-        ui.ask(r, "login_code", "s", target=target)
+        ui.ask(r, "login_code", _back(target), target=target)
         return _code_screen(r, flow.phone, login_error(r, exc, "code"))
     if res == "password":
         _login_save(ctx, r.uid, flow, target)
-        ui.ask(r, "login_pass", "s", target=target)
+        ui.ask(r, "login_pass", _back(target), target=target)
         return _pass_screen(r)
     return await login_done(ctx, r, target)
 
@@ -391,13 +407,13 @@ async def login_pass(ctx, r: Req, target: str):
         flow = None
     if flow is None:
         _login_forget(ctx, r.uid)
-        ui.ask(r, "login_phone", "s", target=target)
+        ui.ask(r, "login_phone", _back(target), target=target)
         return _phone_screen(r, target, r.L("⚠️ Vaqt o'tib ketdi — raqamni qaytadan yuboring",
                                             "⚠️ Время вышло — пришлите номер ещё раз"))
     try:
         await flow.submit_password(r.text)
     except Exception as exc:
-        ui.ask(r, "login_pass", "s", target=target)
+        ui.ask(r, "login_pass", _back(target), target=target)
         return _pass_screen(r, login_error(r, exc, "pass"))
     return await login_done(ctx, r, target)
 
@@ -412,9 +428,17 @@ async def login_done(ctx, r: Req, target: str):
         await ui.toast(ctx.bot, r.chat_id, r.L("✅ Asosiy akkaunt ulandi", "✅ Основной аккаунт подключён"))
         return await main_account(ctx, r)
     n = ctx.db.scalar("SELECT COUNT(*) FROM accounts") + 1
-    ctx.db.run("INSERT INTO accounts(name, session, added_ts) VALUES(?,?,?)", (f"Push {n}", session, int(time.time())))
+    aid = ctx.db.run("INSERT INTO accounts(name, session, added_ts) VALUES(?,?,?)",
+                     (f"Push {n}", session, int(time.time()))).lastrowid
     ctx.pool.sync()
     await ui.toast(ctx.bot, r.chat_id, r.L("✅ Push akkaunt qo'shildi", "✅ Push-аккаунт добавлен"))
+    fid = int(target.split(":", 1)[1]) if target.startswith("push:") else 0
+    if fid and P.folder(ctx.db, fid) is not None:
+        P.set_folder(ctx.db, fid, push_account_id=int(aid))
+        from .panel_push import folder_card
+        r.args = [str(fid)]
+        ui.view(r, f"uf:{fid}")
+        return await folder_card(ctx, r)
     return await accounts(ctx, r)
 
 
