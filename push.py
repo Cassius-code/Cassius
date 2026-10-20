@@ -1,7 +1,14 @@
-"""Push: issiq lidlarga xabar — har papka o'z Push akkauntidan. Qo'lda (tugma) va jadval bo'yicha (avtomat).
+"""Push: issiq lidlarga xabar — har papka o'z Push akkauntidan, faqat qo'lda (🚀 tugma).
 
-Eski botda ishlagan qoidalar saqlangan: soni HAR papkaga; ⚡/💊 yo'q; stavkasi tugamagan yangi lidga yo'q;
-yaqinda yozishganlarga yo'q; 3 soat ichida qayta yo'q; tinch vaqt; tartib: bugun → kecha → hafta → eski.
+Kimga va qaysi tartibda — soatga qarab (egasi bilan kelishilgan):
+* 🌅 Ertalab (kunduzgi vaqtgacha): bugun gaplashmaganlar — kecha yozganlardan boshlab eskiroqlariga.
+* ☀️ Kunduzi: faqat bugun gaplashganlar — 1) ertalab gaplashganlar, 2) belgilangan vaqtdan (30 daq / 1 soat)
+  beri jim turganlar. Hozir gaplashayotganlarga (shu vaqt ichida yozishganlarga) — YO'Q.
+* 🌙 Kechqurun: avval bugun gaplashganlar (kunduzgi tartibda), ular tugasa — kechagi, keyin eskiroqlar.
+Baza: faqat belgilangan sanadan (28.08.2026) beri o'zi yozgan lidlar; davr — oxirgi N kun yoki sana oralig'i
+(lidlar haftalar o'tib eskiradi). «Gaplashdi» — mijoz yoki xodim yozgan
+(Push xabarlari hisobga kirmaydi). Har papkaga son chegarasi; ⚡/💊 yo'q; stavkasi tugamagan yangi lidga yo'q;
+3 soat ichida qayta yo'q.
 """
 from __future__ import annotations
 
@@ -11,7 +18,7 @@ import json
 import logging
 import random
 import time
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
 from . import people as P
@@ -25,6 +32,7 @@ log = logging.getLogger("push")
 MIN_REPEAT = 180
 SPEEDS = {"fast": (1.0, 2.0), "normal": (2.0, 3.0), "slow": (3.0, 5.0)}
 PROGRESS_EVERY = 5
+SLOTS = ("morning", "day", "evening")
 
 
 def _hm(raw: str) -> int | None:
@@ -35,31 +43,24 @@ def _hm(raw: str) -> int | None:
         return None
 
 
-def in_quiet(frm: str, to: str, minute: int) -> bool:
-    a, b = _hm(frm or ""), _hm(to or "")
-    if a is None or b is None or a == b:
-        return False
-    return a <= minute < b if a < b else (minute >= a or minute < b)
+def push_times(db: Database) -> list[str]:                 # eski sozlama (endi ishlatilmaydi)
+    return []
 
 
-def push_times(db: Database) -> list[str]:
-    out = []
-    for part in (db.get("push_times") or "").replace(";", ",").replace(" ", ",").split(","):
-        if _hm(part) is not None:
-            t = parse_hhmm(part)
-            out.append(f"{t.hour:02d}:{t.minute:02d}")
-    return sorted(set(out))
+def slot_bounds(db: Database) -> tuple[int, int]:
+    """(ertalab tugashi, kechqurun boshlanishi) — daqiqalarda."""
+    m = _hm(db.get("push_morning_until") or "") or 13 * 60
+    e = _hm(db.get("push_evening_from") or "") or 19 * 60
+    return (m, e) if m < e else (13 * 60, 19 * 60)
 
 
-def slot_of(db: Database, minute: int) -> str:
-    """Jadvaldagi 1-vaqt — 'all' (ertalab), oxirgisi — 'evening', o'rtadagilar — 'day'."""
-    times = [_hm(t) for t in push_times(db)]
-    if not times:
-        return "all"
-    idx = max([i for i, t in enumerate(times) if t <= minute] or [0])
-    if idx == 0:
-        return "all"
-    return "evening" if idx == len(times) - 1 and len(times) >= 3 else "day"
+def slot_at(db: Database, minute: int) -> str:
+    m, e = slot_bounds(db)
+    return "morning" if minute < m else ("evening" if minute >= e else "day")
+
+
+def hhmm(minute: int) -> str:
+    return f"{minute // 60:02d}:{minute % 60:02d}"
 
 
 class Pusher:
@@ -83,43 +84,50 @@ class Pusher:
     def has_content(self) -> bool:
         return bool(self.db.get("push_text").strip() or self.media())
 
-    def _period(self) -> tuple[int, int]:
-        lo = 0
+    def base_from(self) -> int:
+        """Baza: shu sanadan beri o'zi (mijoz) yozgan lidlar."""
+        raw = self.db.get("push_base_from") or "2026-08-28"
         try:
-            raw = self.db.get("push_from") or self.db.get("track_from")
-            if raw:
-                lo = int(datetime.combine(parse_date(raw), dtime(0, 0), tzinfo=self.tz).timestamp())
+            return int(datetime.combine(parse_date(raw), dtime(0, 0), tzinfo=self.tz).timestamp())
         except ValueError:
-            lo = 0
-        hi = 2 ** 31
-        if self.db.get("push_to"):
+            return 0
+
+    def window(self, now: int) -> tuple[int, int]:
+        """Davr: lidning oxirgi o'z xabari shu oraliqda bo'lsin (baza sanasidan oldin emas)."""
+        lo, hi = self.base_from(), 2 ** 31
+        days = self.db.get_int("push_days")
+        if days > 0:
+            lo = max(lo, day_start(now, self.tz) - (days - 1) * 86400)
+        for key, edge in (("push_range_from", "lo"), ("push_range_to", "hi")):
+            raw = self.db.get(key)
+            if not raw:
+                continue
             try:
-                hi = int(datetime.combine(parse_date(self.db.get("push_to")) + timedelta(days=1), dtime(0, 0),
-                                          tzinfo=self.tz).timestamp()) - 1
+                d = parse_date(raw)
             except ValueError:
-                pass
+                continue
+            ts = int(datetime.combine(d, dtime(0, 0), tzinfo=self.tz).timestamp())
+            if edge == "lo":
+                lo = max(lo, ts)
+            else:
+                hi = min(hi, ts + 86400 - 1)
         return lo, hi
+
+    def slot(self, now: int | None = None) -> str:
+        now = int(self.clock() if now is None else now)
+        t = datetime.fromtimestamp(now, self.tz)
+        return slot_at(self.db, t.hour * 60 + t.minute)
 
     def _push_emojis(self) -> list[str]:
         return [ch for ch in self.db.get("push_emojis") if not ch.isspace() and ch not in ",;️‍"]
 
     # ------------------------------------------------------------ kimga
-    def audience(self, slot: str = "all", now: int | None = None) -> dict:
+    def audience(self, slot: str | None = None, now: int | None = None) -> dict:
         now = int(self.clock() if now is None else now)
-        lo, hi = self._period()
+        slot = slot if slot in SLOTS else self.slot(now)
         cmap = P.chat_folder_map(self.db)
         folders = {f["id"]: f for f in P.folders(self.db)}
         allowed = {fid for fid, f in folders.items() if f["push_on"]}
-        t_local = datetime.fromtimestamp(now, self.tz)
-        mod = t_local.hour * 60 + t_local.minute
-        quiet = []
-        for fid in sorted(allowed):
-            f = folders[fid]
-            frm, to = (f["quiet_from"], f["quiet_to"]) if f["quiet_from"] and f["quiet_to"] else (
-                self.db.get("push_quiet_from"), self.db.get("push_quiet_to"))
-            if in_quiet(frm, to, mod):
-                quiet.append(fid)
-        allowed -= set(quiet)
         no_account = sorted(fid for fid in allowed if not folders[fid]["push_account_id"])
         allowed -= set(no_account)
         skip, push_e = skip_list(self.db), self._push_emojis()
@@ -127,7 +135,7 @@ class Pusher:
             "SELECT th.*, CASE WHEN th.topic_id<>0 THEN TRIM(COALESCE(t.icon,'') || ' ' || COALESCE(t.title,'')) "
             "ELSE COALESCE(c.title,'') END AS label FROM threads th JOIN chats c ON c.chat_id=th.chat_id "
             "LEFT JOIN topics t ON t.chat_id=th.chat_id AND t.topic_id=th.topic_id "
-            "WHERE th.first_seen IS NOT NULL AND th.first_seen BETWEEN ? AND ?", (lo, hi))
+            "WHERE th.first_seen IS NOT NULL AND th.last_seen BETWEEN ? AND ?", self.window(now))
         rows = [r for r in rows if cmap.get(r["chat_id"]) in allowed and not label_excluded(r["label"], skip)
                 and (not push_e or label_excluded(r["label"], push_e))]
         matched = len(rows)
@@ -135,33 +143,41 @@ class Pusher:
         border = now - fresh_n * 60
         kept = [r for r in rows if r["stavka"] != "on" and (not fresh_n or r["first_seen"] <= border)]
         fresh, rows = len(rows) - len(kept), kept
-        idle = max(0, self.db.get_int("push_idle_minutes"))
-        cooled = 0
-        if idle:
-            kept = [r for r in rows if max(r["last_seen"] or 0, r["last_activity"] or 0) <= now - idle * 60]
-            cooled, rows = len(rows) - len(kept), kept
         repeat = max(MIN_REPEAT, self.db.get_int("push_repeat_minutes"))
         kept = [r for r in rows if not r["last_push_ts"] or r["last_push_ts"] <= now - repeat * 60]
         repeated, rows = len(rows) - len(kept), kept
+
         today = day_start(now, self.tz)
-        yesterday, week_ago = today - 86400, today - 8 * 86400
+        m_end, _e = slot_bounds(self.db)
+        morning_end = today + m_end * 60
+        idle = max(0, self.db.get_int("push_idle_minutes"))
+        quiet_border = now - idle * 60
 
-        def active_today(r) -> bool:
-            return max(r["last_seen"] or 0, r["last_activity"] or 0) >= today
+        def talk(r) -> int:                                 # oxirgi suhbat: mijoz yoki xodim (Push emas)
+            return max(r["last_seen"] or 0, r["last_staff_ts"] or 0)
 
-        slot_skipped = 0
-        if slot == "evening":
-            kept = [r for r in rows if active_today(r)]
-            slot_skipped, rows = len(rows) - len(kept), kept
+        morning_talk = {(x["chat_id"], x["topic_id"]) for x in self.db.all(
+            "SELECT DISTINCT chat_id, topic_id FROM journal WHERE ts BETWEEN ? AND ? AND who IN ('client','staff')",
+            (today, min(morning_end, now)))}
 
-        def bucket(r) -> int:
-            t = r["first_seen"]
-            return 0 if t >= today else 1 if t >= yesterday else 2 if t >= week_ago else 3
+        def group(r) -> int:
+            """0 — ertalab gaplashgan, 1 — jim turgan, 2 — hozirgina yozishgan, 3 — bugun gaplashmagan."""
+            if talk(r) < today:
+                return 3
+            if idle and talk(r) > quiet_border:
+                return 2
+            return 0 if (r["chat_id"], r["topic_id"]) in morning_talk else 1
 
-        def key(r):
-            base = (bucket(r), r["last_push_ts"] is not None, r["last_push_ts"] or 0, -(r["last_seen"] or 0))
-            return ((0 if active_today(r) else 1),) + base if slot == "day" else base
-
+        busy = sum(1 for r in rows if group(r) == 2)
+        rows = [r for r in rows if group(r) != 2]          # hozir gaplashayotganlarga — hech qachon
+        if slot == "morning":
+            rows = [r for r in rows if group(r) == 3]
+            key = (lambda r: (-(r["last_seen"] or 0),))
+        elif slot == "day":
+            rows = [r for r in rows if group(r) < 3]
+            key = (lambda r: (group(r), talk(r)))
+        else:
+            key = (lambda r: (group(r), talk(r) if group(r) < 3 else -(r["last_seen"] or 0)))
         rows.sort(key=key)
         limit = max(0, self.db.get_int("push_limit"))
         by_f: dict[int, list] = {}
@@ -174,9 +190,17 @@ class Pusher:
             quota[fid] = n
             items += [(r, fid) for r in v[:n]]
         items.sort(key=lambda t: key(t[0]))
+        groups = {"morning": 0, "quiet": 0, "recent": 0, "older": 0, "yesterday": 0}
+        yday = today - 86400
+        for r, _fid in items:
+            g = group(r)
+            if g == 3:
+                groups["yesterday" if (r["last_seen"] or 0) >= yday else "older"] += 1
+            else:
+                groups[("morning", "quiet", "recent")[g]] += 1
         return {"items": [(r["chat_id"], r["topic_id"], fid) for r, fid in items], "by_folder": quota,
-                "no_account": no_account, "quiet": quiet, "matched": matched, "fresh": fresh, "cooled": cooled,
-                "repeated": repeated, "slot_skipped": slot_skipped, "limit": limit}
+                "no_account": no_account, "quiet": [], "matched": matched, "fresh": fresh, "cooled": busy,
+                "repeated": repeated, "slot": slot, "groups": groups, "limit": limit}
 
     def delays(self) -> tuple[float, float]:
         return SPEEDS.get(self.db.get("push_speed"), SPEEDS["normal"])
@@ -191,7 +215,7 @@ class Pusher:
             t.cancel()
 
     # ------------------------------------------------------------ yuborish
-    async def run(self, trigger: str = "manual", slot: str = "all", progress=None) -> dict:
+    async def run(self, trigger: str = "manual", slot: str | None = None, progress=None) -> dict:
         if not self.db.flag("push_enabled"):
             return {"status": "disabled"}
         if self.running:
@@ -316,23 +340,6 @@ class Pusher:
         else:
             await bot.send_message(uid, text)
 
-    # ------------------------------------------------------------ jadval
+    # ------------------------------------------------------------ jadval (o'chirilgan: Push faqat qo'lda)
     async def tick_schedule(self, now: int | None = None) -> dict | None:
-        """Avtomat Push: belgilangan vaqt kelganda (bir marta). Natija egasiga yuboriladi."""
-        if not self.db.flag("push_auto") or not self.db.flag("bot_enabled") or self.running:
-            return None
-        now = int(self.clock() if now is None else now)
-        t = datetime.fromtimestamp(now, self.tz)
-        mod = t.hour * 60 + t.minute
-        for hm in push_times(self.db):
-            m = _hm(hm)
-            key = f"{t.date().isoformat()} {hm}"
-            if m <= mod < m + 30 and self.db.get("push_auto_last") < key:
-                self.db.set("push_auto_last", key)
-                if not self.has_content():
-                    await self.notifier.notify_owner("⚠️ Avtomat Push: matn yo'q — yuborilmadi.", key="auto-empty",
-                                                     min_interval=3600)
-                    return None
-                res = await self.run("auto", slot_of(self.db, m))
-                return res
         return None

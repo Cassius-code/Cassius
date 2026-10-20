@@ -28,8 +28,12 @@ async def supervise(name: str, factory, notifier) -> None:
             raise
         except Exception as exc:
             log.exception("%s yiqildi", name)
-            await notifier.notify_owner(f"⚠️ «{name}» xatoga uchradi ({type(exc).__name__}) — o'zi qayta ishga tushadi.",
-                                        key=f"crash-{name}", min_interval=900)
+            from .context import tr
+            ru_name = {"Telegram bot": "Telegram-бот", "Asosiy akkaunt": "Основной аккаунт", "Nazorat": "Контроль"}
+            err = type(exc).__name__
+            await notifier.notify_owner(lambda: (tr(f"⚠️ «{name}» xatoga uchradi ({err}) — o'zi qayta ishga tushadi.",
+                                                    f"⚠️ «{ru_name.get(name, name)}»: сбой ({err}) — перезапустится сам."),
+                                                 None), key=f"crash-{name}", min_interval=900)
         if time.monotonic() - started > 120:
             delay = 3
         await asyncio.sleep(delay)
@@ -111,14 +115,8 @@ async def amain() -> None:
     await panel.set_commands(ctx)
     pool.sync()
 
-    lines = ["✅ <b>RD CONTROL ishga tushdi</b> — /menu"]
-    if note_old:
-        lines.append(note_old)
-    if not cfg.api_id or not cfg.api_hash:
-        lines.append("⚠️ API_ID / API_HASH berilmagan — kuzatuv va Push ishlamaydi.")
-    if not db.get("proyob_group_id"):
-        lines.append("⚠️ «Проёб» guruhi belgilanmagan: botni guruhga qo'shing va u yerda /proyob yozing.")
-    await notifier.notify_owner("\n".join(lines))
+    # yangi xabar emas: egalardagi panel joyida yangilanadi (holat 🟢/🔴 panelning o'zida ko'rinadi)
+    await panel.refresh_panels(ctx, note_old)
 
     sched = Scheduler(ctx)
     tasks = [asyncio.create_task(supervise("Telegram bot", lambda: polling(bot, dp), notifier)),

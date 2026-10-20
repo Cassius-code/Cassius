@@ -5,11 +5,23 @@ Istisno: kassa cheklari va jarima/bonus xabarlari (ularni ega/xodim o'zi hisob u
 """
 from __future__ import annotations
 
+import contextvars
 import sqlite3
 import threading
 from pathlib import Path
 
 from .config import DEFAULTS
+
+# Panel tugmasi bosilganda: shu so'rov bazaga yozdimi (Orqaga — qayta ochish xavfsizmi, bilish uchun)
+EFFECTS: contextvars.ContextVar = contextvars.ContextVar("db_effects", default=None)
+_WRITE = ("INSERT", "UPDATE", "DELETE", "REPLACE")
+
+
+def mark_effect() -> None:
+    c = EFFECTS.get()
+    if c is not None:
+        c[0] += 1
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -200,7 +212,8 @@ CREATE TABLE IF NOT EXISTS prices (id INTEGER PRIMARY KEY AUTOINCREMENT, lo INTE
                                    usd REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER, chat_id INTEGER, msg_id INTEGER, sender_id INTEGER,
-    sender_name TEXT NOT NULL DEFAULT '', raw TEXT, status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT ''
+    sender_name TEXT NOT NULL DEFAULT '', raw TEXT, status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT '',
+    tag TEXT NOT NULL DEFAULT ''              -- hisobot tepasidagi notanish ism (yangi xodim sifatida taklif qilinadi)
 );
 CREATE INDEX IF NOT EXISTS idx_reports_person ON reports(person_id, status);
 CREATE TABLE IF NOT EXISTS checks (
@@ -254,6 +267,9 @@ CREATE TABLE IF NOT EXISTS audit (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_day ON audit(day);
 CREATE INDEX IF NOT EXISTS idx_audit_person ON audit(person_id, day);
+-- boshlang'ich kassa (cheklar yig'indisi, oldingi haftalar): umumiy reytingda yangi cheklar ustiga qo'shiladi.
+-- Nom bo'yicha (xodimlar qayta kiritilsa ham saqlanadi)
+CREATE TABLE IF NOT EXISTS opening (name TEXT PRIMARY KEY COLLATE NOCASE, raw INTEGER NOT NULL);
 -- «✅ Kunni yopish»: yopilgan kunni faqat ega o'zgartira oladi
 CREATE TABLE IF NOT EXISTS closed_days (
     day TEXT PRIMARY KEY, ts INTEGER NOT NULL, actor INTEGER, n INTEGER NOT NULL DEFAULT 0,
@@ -278,6 +294,11 @@ CREATE TABLE IF NOT EXISTS broadcasts (
     total INTEGER NOT NULL DEFAULT 0, sent INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'running'
 );
+-- bir nechta odamga borgan savol/ogohlantirish nusxalari: biri hal qilsa — hammasi o'chadi/yangilanadi
+CREATE TABLE IF NOT EXISTS sent (
+    key TEXT NOT NULL, chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sent_key ON sent(key);
 CREATE TABLE IF NOT EXISTS ignored_msgs (
     chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY (chat_id, msg_id)
 );
@@ -329,10 +350,13 @@ class Database:
 
     # ------------------------------------------------------------ umumiy
     def run(self, sql: str, params=()) -> sqlite3.Cursor:
+        if sql.lstrip()[:7].upper().startswith(_WRITE):
+            mark_effect()
         with self._lock:
             return self.conn.execute(sql, tuple(params))
 
     def many(self, sql: str, rows) -> None:
+        mark_effect()
         with self._lock:
             self.conn.executemany(sql, rows)
 
@@ -354,6 +378,7 @@ class Database:
 
         class _Tx:
             def __enter__(self):
+                mark_effect()
                 db._lock.acquire()
                 db.conn.execute("BEGIN")
                 return db

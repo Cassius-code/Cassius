@@ -249,17 +249,29 @@ def person_by_name_in(db: Database, text: str, kinds=("worker", "self", "pool"))
     return None
 
 
-def split_tag(db: Database, text: str) -> tuple[int | None, str]:
-    """Birinchi qator faqat akkaunt nomi bo'lsa ('Lazarus\\n1950 2600') -> (person_id, qolgani)."""
+NAME_HEAD = re.compile(r"^@?([^\W\d_][\w'’ʻʼ`.\- ]{0,38}?)\s*[:.\-–—]?\s*(?=$|\d|(?:rd|рд)(?![^\W\d_]))(.*)$", re.I)
+
+
+def split_tag(db: Database, text: str) -> tuple[int | None, str, str]:
+    """Hisobot tepasida akkaunt nomi: «Lazarus\n1950 2600», «Baxa 19.10\n1950», «@baxa: rd 19.10\n1950».
+    -> (person_id | None, hisobot qismi, nom). Nom tanilmasa person_id=None, lekin nom qaytadi (yangi xodim)."""
     lines = text.strip().splitlines()
-    if len(lines) >= 2:
-        first = lines[0].strip().rstrip(":.-").strip().lstrip("@").lower()
-        for p in kassa_people(db, active_only=False):
-            if first in (p["name"].lower(), p["username"]) and first:
-                rest = "\n".join(lines[1:])
-                if is_report_like(rest):
-                    return p["id"], rest
-    return None, text
+    if not lines:
+        return None, text, ""
+    m = NAME_HEAD.match(lines[0].strip())
+    if not m:
+        return None, text, ""
+    name = m.group(1).strip().rstrip(":.-–—").strip()
+    low = name.lower().lstrip("@")
+    if not name or low in ("rd", "рд") or TOTAL_RE.search(name) or KIND_RE.search(name):
+        return None, text, ""
+    rest = "\n".join(x for x in [m.group(2).strip()] + lines[1:] if x.strip())
+    if not rest or not is_report_like(rest):
+        return None, text, ""
+    for p in kassa_people(db, active_only=False):
+        if low in (p["name"].lower(), p["username"]):
+            return p["id"], rest, p["name"]
+    return None, rest, name[:40]
 
 
 # ───────────────────────── jarima / bonus / avans matndan («@bayzed штраф 5», «штраф Bayzed 5$», «5 бонус @cred»)
@@ -337,10 +349,86 @@ def amounts_text(amounts) -> str:
     return " ".join(str(a) for a in amounts)
 
 
+# ───────────────────────── boshlang'ich kassa va umumiy reyting
+OPENING_SEED = [("Bayzed", 454559), ("Cred", 421380), ("Cashliy", 323803)]   # egasi bergan: 3 haftalik kassa
+OPENING_SINCE = "2026-10-19"
+
+
+def seed_opening(db: Database) -> None:
+    if db.get("opening_seeded") == "1":
+        return
+    if not db.one("SELECT 1 FROM opening"):
+        db.many("INSERT OR IGNORE INTO opening(name, raw) VALUES(?,?)", OPENING_SEED)
+        if not db.get("opening_since"):
+            db.set("opening_since", OPENING_SINCE)
+    db.set("opening_seeded", "1")
+
+
+def openings(db: Database):
+    return db.all("SELECT * FROM opening ORDER BY raw DESC")
+
+
+def opening_since(db: Database) -> str:
+    return db.get("opening_since") or OPENING_SINCE
+
+
+def parse_openings(text: str) -> list[tuple[str, int]]:
+    """«Bayzed 454559», «🥇 🟢 Bayzed—454,559», «1. Cred: 421 380» -> [(nom, summa)]."""
+    out = []
+    for line in text.splitlines():
+        m = re.match(r"^\W*(?:\d{1,2}[.)]\s*)?\W*?([^\W\d_][\w'’ʻʼ`. \-]*?)\s*[—–\-:=]*\s*(\d[\d\s.,]*)\s*$",
+                     line.strip())
+        if not m:
+            continue
+        name = m.group(1).strip().rstrip("—–-:=").strip()
+        digits = re.sub(r"\D", "", m.group(2))
+        if name and digits and len(digits) <= 10:
+            out.append((name[:40], int(digits)))
+    return out
+
+
+def set_openings(db: Database, items: list[tuple[str, int]], since: str | None = None) -> None:
+    old = {r["name"].lower(): r["raw"] for r in openings(db)}
+    db.run("DELETE FROM opening")
+    db.many("INSERT OR REPLACE INTO opening(name, raw) VALUES(?,?)", items)
+    log(db, "opening", None, since or opening_since(db), None, " ".join(f"{k}={v}" for k, v in old.items()),
+        " ".join(f"{n}={v}" for n, v in items))
+    if since:
+        db.set("opening_since", since)
+    db.set("opening_seeded", "1")
+
+
+def cumulative_rating(db: Database, today: dt.date) -> list[tuple[str, int, int | None]]:
+    """Umumiy reyting: boshlang'ich kassa + shu sanadan beri cheklar yig'indisi. -> [(nom, jami, person_id)]."""
+    since = opening_since(db)
+    tot: dict[str, list] = {}
+    for o in openings(db):
+        tot[o["name"].lower()] = [o["name"], int(o["raw"]), None]
+    for row in db.all("SELECT r.person_id pid, p.name name, p.kassa_kind kind, SUM(ch.amount) raw FROM checks ch "
+                      "JOIN reports r ON r.id=ch.report_id JOIN people p ON p.id=r.person_id WHERE r.status='done' "
+                      "AND ch.skip=0 AND ch.rd BETWEEN ? AND ? GROUP BY r.person_id", (since, iso(today))):
+        if row["kind"] not in ("worker", "self", "pool"):
+            continue
+        k = row["name"].lower()
+        if k in tot:
+            tot[k][1] += int(row["raw"] or 0)
+            tot[k][2] = row["pid"]
+        else:
+            tot[k] = [row["name"], int(row["raw"] or 0), row["pid"]]
+    return sorted(((n, v, pid) for n, v, pid in tot.values() if v > 0), key=lambda x: -x[1])
+
+
 # ───────────────────────── yopilgan kunlar («✅ Kunni yopish»)
 def day_totals(db: Database, day: str) -> tuple[int, int, float]:
     row = db.one("SELECT COUNT(*) n, COALESCE(SUM(ch.amount),0) raw, COALESCE(SUM(ch.usd),0) usd FROM checks ch "
                  "JOIN reports r ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd=?", (iso(day),))
+    return int(row["n"]), int(row["raw"]), r2(row["usd"])
+
+
+def day_totals_range(db: Database, start, end) -> tuple[int, int, float]:
+    row = db.one("SELECT COUNT(*) n, COALESCE(SUM(ch.amount),0) raw, COALESCE(SUM(ch.usd),0) usd FROM checks ch "
+                 "JOIN reports r ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ?",
+                 (iso(start), iso(end)))
     return int(row["n"]), int(row["raw"]), r2(row["usd"])
 
 
@@ -691,7 +779,8 @@ def week_rules(db: Database, week: dt.date) -> dict:
     w0, w1 = iso(week), iso(week + dt.timedelta(days=6))
     ps = {p["id"]: p for p in db.all("SELECT * FROM people")}
     order = {p["id"]: i for i, p in enumerate(P.people(db, active_only=False))}
-    accts = db.all("SELECT r.person_id acct, COUNT(*) n, COALESCE(SUM(ch.usd),0) usd FROM checks ch "
+    accts = db.all("SELECT r.person_id acct, COUNT(*) n, COALESCE(SUM(ch.usd),0) usd, COALESCE(SUM(ch.amount),0) raw "
+                   "FROM checks ch "
                    "JOIN reports r ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? "
                    "AND r.person_id IS NOT NULL GROUP BY r.person_id", (w0, w1))
     payees = {row["pay"] for row in db.all(
@@ -713,7 +802,8 @@ def week_rules(db: Database, week: dt.date) -> dict:
         op = owner_pct_on(db, p["id"], week)
         if kind == "self" and op is None:
             op = 0.0
-        it = {"pid": p["id"], "name": p["name"], "kind": kind, "n": a["n"], "usd": r2(a["usd"]), "wpct": wp,
+        it = {"pid": p["id"], "name": p["name"], "kind": kind, "n": a["n"], "usd": r2(a["usd"]), "raw": int(a["raw"]),
+              "wpct": wp,
               "opct": op, "kshare": kassa_sh.get((p["id"], "partner"), 0.0),
               "kshare_owner": kassa_sh.get((p["id"], "owner"), 0.0), "zp_on": bool(p["zp_on"])}
         items.append(it)
@@ -840,17 +930,17 @@ def delta_pct(cur: float, prev: float) -> float | None:
 
 
 def compare(db: Database, s: dt.date, e: dt.date, today: dt.date) -> dict | None:
-    """Akkauntlar bo'yicha kassa $ : {'cur': {pid: usd}, 'prev': {pid: usd}, 'K', 'PK', 'ps', 'pe', 'partial'}."""
+    """Akkauntlar bo'yicha kassa (cheklar yig'indisi): {'cur': {pid: raw}, 'prev': {pid: raw}, 'K', 'PK', ...}."""
     rr = compare_ranges(s, e, today)
     if rr is None:
         return None
     (cs, ce), (ps, pe) = rr
     def per(a, b):
         out: dict[int, float] = {}
-        for row in db.all("SELECT r.person_id acct, SUM(ch.usd) usd FROM checks ch JOIN reports r ON r.id=ch.report_id "
+        for row in db.all("SELECT r.person_id acct, SUM(ch.amount) raw FROM checks ch JOIN reports r ON r.id=ch.report_id "
                           "WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? GROUP BY r.person_id",
                           (iso(a), iso(b))):
-            out[row["acct"]] = r2(row["usd"] or 0)
+            out[row["acct"]] = float(row["raw"] or 0)
         return out
     cur, prev = per(cs, ce), per(ps, pe)
     return {"cur": cur, "prev": prev, "K": r2(sum(cur.values())), "PK": r2(sum(prev.values())), "ps": ps, "pe": pe,
@@ -879,13 +969,13 @@ def month_data(db: Database, year: int, month: int, today: dt.date) -> dict:
         if a <= today:
             weeks.append({"s": a, "e": z, "n": n, "raw": raw, "usd": usd})
         ws += dt.timedelta(days=7)
-    best = db.one("SELECT ch.rd d, SUM(ch.usd) usd FROM checks ch JOIN reports r ON r.id=ch.report_id "
+    best = db.one("SELECT ch.rd d, SUM(ch.amount) usd FROM checks ch JOIN reports r ON r.id=ch.report_id "
                   "WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? GROUP BY ch.rd ORDER BY usd DESC LIMIT 1",
                   (iso(first), iso(last)))
     days_n = db.scalar("SELECT COUNT(DISTINCT ch.rd) FROM checks ch JOIN reports r ON r.id=ch.report_id "
                        "WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ?", (iso(first), iso(last)))
     return {"first": first, "last": last, "end": end, "b": b, "weeks": weeks, "cmp": compare(db, first, last, today),
-            "best": (best["d"], r2(best["usd"] or 0)) if best and best["d"] else None, "days": days_n}
+            "best": (best["d"], int(best["usd"] or 0)) if best and best["d"] else None, "days": days_n}
 
 
 # ───────────────────────── HISOB-KITOB

@@ -93,25 +93,29 @@ async def on_worker_cb(ctx, cb, data: str) -> None:
 async def notify_request(ctx, rid: int) -> None:
     db = ctx.db
     q = db.one("SELECT * FROM requests WHERE id=?", (rid,))
-    lang = ctx.lang()
-    L = (lambda uz, ru: ru if lang == "ru" else uz)
-    who = f"{h(q['name'])}" + (f" · @{h(q['arg'])}" if q["arg"] else "") + f" · <code>{q['tg_id']}</code>"
-    if q["kind"] == "zp":
-        p = P.by_tg(db, q["tg_id"])
-        text = ui.join(f"<b>💰 {L('OYLIK SO‘ROVI', 'ЗАПРОС ЗАРПЛАТЫ')}</b>", "", card(
-            [f"👤 {h(p['name']) if p else who}", L("Xodim o'z hisobini ko'rmoqchi. Yuborilsinmi?",
-                                                   "Сотрудник хочет увидеть свой расчёт. Отправить?")]))
-        markup = kb([(L("👀 Ko'rish", "👀 Посмотреть"), f"rq:{rid}:v")],
-                    [(L("✅ Yuborish", "✅ Отправить"), f"rq:{rid}:y"), (L("✖️ Rad etish", "✖️ Отказать"), f"rq:{rid}:n")])
-    else:
-        text = ui.join(f"<b>📨 {L('KIRISH SO‘ROVI', 'ЗАПРОС ДОСТУПА')}</b>", "", card(
-            [f"👤 {who}", L("Kim bu?", "Кто это?")]))
-        markup = kb([(L("👤 Xodimga bog'lash", "👤 Привязать к сотруднику"), f"rq:{rid}:p")],
-                    [(L("➕ Yangi xodim", "➕ Новый сотрудник"), f"rq:{rid}:new")],
-                    [(L("👮 Admin (👁 ko'radi)", "👮 Админ (👁 просмотр)"), f"rq:{rid}:av"),
-                     (L("👮 Admin (🛠 to'liq)", "👮 Админ (🛠 полный)"), f"rq:{rid}:af")],
-                    [(L("✖️ Rad etish", "✖️ Отказать"), f"rq:{rid}:n")])
-    await ctx.notifier.notify_owner(text, markup)
+
+    def build():                                           # har egaga o'z tilida
+        lang = ctx.lang()
+        L = (lambda uz, ru: ru if lang == "ru" else uz)
+        who = f"{h(q['name'])}" + (f" · @{h(q['arg'])}" if q["arg"] else "") + f" · <code>{q['tg_id']}</code>"
+        if q["kind"] == "zp":
+            p = P.by_tg(db, q["tg_id"])
+            text = ui.join(f"<b>💰 {L('OYLIK SO‘ROVI', 'ЗАПРОС ЗАРПЛАТЫ')}</b>", "", card(
+                [f"👤 {h(p['name']) if p else who}", L("Xodim o'z hisobini ko'rmoqchi. Yuborilsinmi?",
+                                                       "Сотрудник хочет увидеть свой расчёт. Отправить?")]))
+            markup = kb([(L("👀 Ko'rish", "👀 Посмотреть"), f"rq:{rid}:v")],
+                        [(L("✅ Yuborish", "✅ Отправить"), f"rq:{rid}:y"), (L("✖️ Rad etish", "✖️ Отказать"),
+                                                                            f"rq:{rid}:n")])
+        else:
+            text = ui.join(f"<b>📨 {L('KIRISH SO‘ROVI', 'ЗАПРОС ДОСТУПА')}</b>", "", card(
+                [f"👤 {who}", L("Kim bu?", "Кто это?")]))
+            markup = kb([(L("👤 Xodimga bog'lash", "👤 Привязать к сотруднику"), f"rq:{rid}:p")],
+                        [(L("➕ Yangi xodim", "➕ Новый сотрудник"), f"rq:{rid}:new")],
+                        [(L("👮 Admin (👁 ko'radi)", "👮 Админ (👁 просмотр)"), f"rq:{rid}:av"),
+                         (L("👮 Admin (🛠 to'liq)", "👮 Админ (🛠 полный)"), f"rq:{rid}:af")],
+                        [(L("✖️ Rad etish", "✖️ Отказать"), f"rq:{rid}:n")])
+        return text, markup
+    await ctx.notifier.send_keyed(ctx.notifier.owner_ids(), build, key=f"rq:{rid}")
 
 
 async def _tell(ctx, tg_id: int, text: str) -> bool:
@@ -126,6 +130,17 @@ async def _tell(ctx, tg_id: int, text: str) -> bool:
 # ───────────────────────── ega so'rovni hal qiladi (panel ekrani)
 @screen("rq", "owner")
 async def request_screen(ctx, r: Req):
+    """So'rov hal bo'lsa — boshqa egalardagi nusxasi o'chadi (bu xabar panelga aylanadi)."""
+    rid = int(r.args[0])
+    res = await _request_screen(ctx, r)
+    q = ctx.db.one("SELECT status FROM requests WHERE id=?", (rid,))
+    if q is None or q["status"] != "open":
+        here = ((r.chat_id, getattr(r.message, "message_id", 0)),)
+        await ctx.notifier.resolve(f"rq:{rid}", skip=here)
+    return res
+
+
+async def _request_screen(ctx, r: Req):
     db = ctx.db
     rid, op = int(r.args[0]), (r.args[1] if len(r.args) > 1 else "")
     q = db.one("SELECT * FROM requests WHERE id=?", (rid,))

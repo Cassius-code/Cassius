@@ -1,17 +1,19 @@
-"""📣 Push: matn/media, papkalar (akkaunt, soni, tinch vaqt), jadval (avtomat), sozlamalar, yuborish, jurnal."""
+"""📣 Push: matn/media, papkalar (akkaunt, soni), sozlamalar, yuborish (soatga qarab tartib), jurnal."""
 from __future__ import annotations
 
 import json
 import os
 import re
+import logging
 import uuid
 
 from . import people as P
 from . import ui
-from .push import push_times
+from .push import hhmm, slot_bounds
 from .timeutil import fmt, parse_date, parse_hhmm, parse_minutes, parse_number
 from .ui import Req, card, grid, h, kb, nav, on_input, onoff, screen, title, must
 
+log = logging.getLogger("panel_push")
 MAX_MEDIA = 20 * 1024 * 1024
 SPEED_UZ = {"fast": "tez 1–2 s", "normal": "oddiy 2–3 s", "slow": "ehtiyot 3–5 s"}
 SPEED_RU = {"fast": "быстро 1–2 с", "normal": "обычно 2–3 с", "slow": "осторожно 3–5 с"}
@@ -31,6 +33,32 @@ def state_icon(ctx, acc_id) -> str:
     return {"online": "🟢", "connecting": "🟡", "starting": "🟡", "paused": "⏸"}.get(st, "🔴")
 
 
+def dstr(iso: str) -> str:
+    try:
+        return parse_date(iso).strftime("%d.%m.%Y")
+    except (ValueError, TypeError):
+        return iso or "—"
+
+
+def slot_info(ctx, r: Req, slot: str) -> tuple[str, str]:
+    """(nom, qoida) — hozirgi vaqt bo'lagi uchun."""
+    m, e = slot_bounds(ctx.db)
+    idle = ctx.db.get_int("push_idle_minutes")
+    if slot == "morning":
+        return (r.L(f"🌅 Ertalabki push (… {hhmm(m)})", f"🌅 Утренний push (… {hhmm(m)})"),
+                r.L("Bugun gaplashmaganlarga: kecha yozganlardan boshlab eskiroqlariga.",
+                    "Тем, с кем сегодня не общались: начиная со вчерашних — к более старым."))
+    if slot == "day":
+        return (r.L(f"☀️ Kunduzgi push ({hhmm(m)}–{hhmm(e)})", f"☀️ Дневной push ({hhmm(m)}–{hhmm(e)})"),
+                r.L(f"Faqat bugun gaplashganlarga: 1) ertalab gaplashganlar, 2) {idle} daq dan beri jim turganlar. "
+                    "Hozir gaplashayotganlarga yuborilmaydi.",
+                    f"Только тем, с кем сегодня общались: 1) утренние, 2) молчат {idle}+ мин. Тем, кто сейчас "
+                    "в переписке, — не отправляется."))
+    return (r.L(f"🌙 Kechki push ({hhmm(e)} …)", f"🌙 Вечерний push ({hhmm(e)} …)"),
+            r.L("Avval bugun gaplashganlar (kunduzgi tartibda), ular tugasa — kechagi, keyin eskiroqlar.",
+                "Сначала сегодняшние (как днём), потом вчерашние и старше."))
+
+
 @screen("u", "full")
 async def push_menu(ctx, r: Req):
     db, pu = ctx.db, ctx.pusher
@@ -45,26 +73,61 @@ async def push_menu(ctx, r: Req):
         n = f["push_limit"] or db.get_int("push_limit")
         plan.append(f"📁 {h(f['name'])} → {state_icon(ctx, f['push_account_id'])} {h(acc_name(ctx, f['push_account_id']))}"
                     f" · <b>{n or r.L('hammasi', 'все')}</b>")
-    auto = (r.L("🟢 avtomat: ", "🟢 авто: ") + ", ".join(push_times(db))) if db.flag("push_auto") else \
-        r.L("⚪ avtomat o'ch", "⚪ авто выкл")
+    name, rule = slot_info(ctx, r, pu.slot())
+    base = db.get("push_base_from") or "2026-08-28"
     parts = [title("📣", "PUSH", r.L("issiq lidlarga xabar", "сообщение горячим лидам")), "",
              card([f"<b>{r.L('Matn', 'Текст')}</b>", preview] +
                   ([f"📎 {kinds.get(media['kind'], media['kind'])}"] if media else [])),
-             card([f"<b>{r.L('Reja', 'План')}</b>"] + (plan or [r.L("Push yoqilgan papka yo'q", "Нет папок с Push")]) +
-                  [f"⏰ {auto}"])]
+             card([f"<b>{r.L('Hozir', 'Сейчас')}: {name}</b>", f"<i>{rule}</i>"]),
+             card([f"<b>{r.L('Papkalar', 'Папки')}</b>"] + (plan or [r.L("Push yoqilgan papka yo'q", "Нет папок с Push")]) +
+                  [f"📅 {r.L('Baza', 'База')}: {dstr(base)} {r.L('dan beri yozganlar', 'и позже')}"])]
     if pu.running:
         parts.append(card([f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')}… {h(pu.progress_text)}"]))
     rows = []
     if pu.running:
-        rows.append([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux")])
+        rows.append([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux", "danger")])
     else:
-        rows += grid([(r.L("🚀 Yuborish", "🚀 Разослать"), "us"), (r.L("🧪 Test (o'zimga)", "🧪 Тест (себе)"), "ut")])
+        rows += grid([(r.L("🚀 Yuborish", "🚀 Разослать"), "us", "success"), (r.L("🧪 Test (o'zimga)", "🧪 Тест (себе)"), "ut")])
     rows += grid([(r.L("✏️ Matn", "✏️ Текст"), "ue"), (r.L("📎 Media", "📎 Медиа"), "um"),
                   (r.L("📋 Shablonlar", "📋 Шаблоны"), "ul"), (r.L("📁 Papkalar", "📁 Папки"), "uf"),
-                  (r.L("⏰ Jadval", "⏰ Расписание"), "uj"), (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "uo"),
-                  (r.L("🧾 Jurnal", "🧾 Журнал"), "uh")])
+                  (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "uo"), (r.L("🧾 Jurnal", "🧾 Журнал"), "uh")])
     rows.append(nav(r))
-    return ui.join(*parts), kb(*rows)
+    cap = f"✏️ {preview}" + (f"\n📎 {kinds.get(media['kind'], media['kind'])}" if media else "")
+    return ui.rich(ui.join(*parts), push_card(ctx, r, pu, preview, media, kinds), cap), kb(*rows)
+
+
+def push_card(ctx, r: Req, pu, preview: str, media, kinds) -> list | None:
+    """Rasm-kartochka: hozirgi vaqt bo'lagi, kimga nechta, papkalar. Hisoblab bo'lmasa — None (matn qoladi)."""
+    from . import panel_cards as PC
+    db = ctx.db
+    try:
+        aud = pu.audience()
+    except Exception:
+        log.exception("Push kartochkasi")
+        return None
+    slot = aud["slot"]
+    g = aud["groups"]
+    m, e = slot_bounds(db)
+    idle = db.get_int("push_idle_minutes")
+    slot_name = {"morning": r.L(f"Ertalab · {hhmm(m)} gacha", f"Утро · до {hhmm(m)}"),
+                 "day": r.L(f"Kunduzi · {hhmm(m)}–{hhmm(e)}", f"День · {hhmm(m)}–{hhmm(e)}"),
+                 "evening": r.L(f"Kechqurun · {hhmm(e)} dan", f"Вечер · с {hhmm(e)}")}[slot]
+    groups = {"morning": [(r.L("Kechagilar", "Вчерашние"), str(g["yesterday"]), "", None, "🌅", None),
+                          (r.L("Eskiroqlar", "Старше"), str(g["older"]), "", None, "🗓", None)],
+              "day": [(r.L("Ertalabkilar", "Утренние"), str(g["morning"]), "", None, "☀️", None),
+                      (r.L("Jim turganlar", "Молчат"), str(g["quiet"]), f"{idle}+ {r.L('daq', 'мин')}", None, "🤫",
+                       None)],
+              "evening": [(r.L("Bugungilar", "Сегодняшние"), str(g["morning"] + g["quiet"]), "", None, "🌙", None),
+                          (r.L("Kecha va eski", "Вчера и ранее"), str(g["yesterday"] + g["older"]), "", None, "🗓",
+                           None)]}[slot]
+    folders = {f["id"]: f for f in P.folders(db)}
+    frows = [(f["name"], f"{aud['by_folder'].get(fid, 0)} {r.L('lid', 'лид.')}", "📁")
+             for fid, f in folders.items() if f["push_on"]]
+    accs = db.all("SELECT id FROM accounts WHERE paused=0")
+    online = sum(1 for a in accs if ctx.pool and ctx.pool.state_of(a["id"]) == "online")
+    n = len(aud["items"])
+    return PC.push(r, slot, slot_name, online, len(accs), groups, n, aud["cooled"], pu.estimate_minutes(n), frows,
+                   (pu.progress_text or "…") if pu.running else None)
 
 
 # ───────────────────────── yuborish
@@ -73,25 +136,31 @@ async def start_preview(ctx, r: Req):
     pu = ctx.pusher
     if not pu.has_content():
         return r.L("⚠️ Avval matn yoki media qo'shing", "⚠️ Сначала добавьте текст или медиа")
-    aud = pu.audience("all")
+    aud = pu.audience()
     n = len(aud["items"])
     folders = {f["id"]: f for f in P.folders(ctx.db)}
+    name, rule = slot_info(ctx, r, aud["slot"])
+    g = aud["groups"]
+    order = {"morning": [(r.L("kecha yozganlar", "вчерашние"), g["yesterday"]), (r.L("eskiroqlar", "старше"), g["older"])],
+             "day": [(r.L("ertalab gaplashganlar", "утренние"), g["morning"]), (r.L("jim turganlar", "молчат"), g["quiet"])],
+             "evening": [(r.L("bugun gaplashganlar", "сегодняшние"), g["morning"] + g["quiet"]),
+                         (r.L("kechagilar", "вчерашние"), g["yesterday"]), (r.L("eskiroqlar", "старше"), g["older"])]}
+    steps = [f"{i + 1}) {a} — <b>{b}</b>" for i, (a, b) in enumerate(order[aud["slot"]])]
     lines = [f"📁 {h(folders[fid]['name'])} → <b>{q}</b>" for fid, q in aud["by_folder"].items() if q]
-    skipped = [(r.L("yangi (stavka)", "новые (ставка)"), aud["fresh"]), (r.L("yaqinda yozishgan", "недавно писали"),
-                                                                        aud["cooled"]),
+    skipped = [(r.L("hozir gaplashayotgan", "сейчас в переписке"), aud["cooled"]),
+               (r.L("yangi / stavkada", "новые / в ставке"), aud["fresh"]),
                (r.L("yaqinda Push olgan", "уже получали"), aud["repeated"])]
     sk = ", ".join(f"{a} {b}" for a, b in skipped if b)
-    info = [r.L(f"Qabul qiluvchilar: <b>{n}</b>", f"Получателей: <b>{n}</b>"),
-            r.L(f"Vaqt: ≈ <b>{pu.estimate_minutes(n)} daq</b>", f"Время: ≈ <b>{pu.estimate_minutes(n)} мин</b>")]
+    info = [f"<b>{name}</b>", f"<i>{rule}</i>", ""] + steps + [
+        "", (r.L(f"Jami: <b>{n}</b> · ≈ {pu.estimate_minutes(n)} daq", f"Всего: <b>{n}</b> · ≈ {pu.estimate_minutes(n)} мин")
+             if n else r.L("Hozir yuboriladigan lid yo'q.", "Сейчас некому отправлять."))]
     if sk:
         info.append(r.L("O'tkazildi: ", "Пропущено: ") + sk)
     if aud["no_account"]:
         info.append("⚠️ " + r.L("Akkauntsiz papkalar: ", "Папки без аккаунта: ") +
                     h(", ".join(folders[f]["name"] for f in aud["no_account"])))
-    if aud["quiet"]:
-        info.append("🌙 " + r.L("Tinch vaqtda: ", "Тихое время: ") + h(", ".join(folders[f]["name"] for f in aud["quiet"])))
     text = ui.join(title("🚀", r.L("PUSHNI TASDIQLANG", "ПОДТВЕРДИТЕ PUSH")), "", card(info), card(lines) if lines else "")
-    rows = [[(r.L("✅ Boshlash", "✅ Начать"), "usy")]] if n else []
+    rows = [[(r.L("✅ Boshlash", "✅ Начать"), "usy", "success")]] if n else []
     rows.append(nav(r, "u"))
     return text, kb(*rows)
 
@@ -101,7 +170,7 @@ async def start_run(ctx, r: Req):
     pu = ctx.pusher
     if pu.running:
         return r.L("⏳ Push allaqachon ketyapti", "⏳ Рассылка уже идёт")
-    chat_id, mid = r.chat_id, r.message.message_id
+    chat_id = r.chat_id
 
     async def progress(sent, failed, total):
         pu.progress_text = f"{sent}/{total}" + (f" · ✖️{failed}" if failed else "")
@@ -109,15 +178,15 @@ async def start_run(ctx, r: Req):
             await ui.show(ctx.bot, chat_id, ui.join(title("📣", "PUSH"), "", card(
                 [f"⏳ {r.L('Yuborilmoqda', 'Идёт рассылка')}: <b>{sent}/{total}</b>" +
                  (f" · ✖️ {failed}" if failed else "")])), kb([(r.L("⏹ To'xtatish", "⏹ Остановить"), "ux")]),
-                edit_id=mid)
+                styled=True)
         except Exception:
             pass
 
     async def job():
-        res = await pu.run("manual", "all", progress)
+        res = await pu.run("manual", None, progress)
         pu.progress_text = ""
         await ui.show(ctx.bot, chat_id, report_text(ctx, r, res), kb([("📣 Push", "u"), (r.L("⌂ Menyu", "⌂ Меню"), "m")]),
-                      edit_id=mid)
+                      styled=True)
 
     ui.bg(job())
     return ui.join(title("📣", "PUSH"), "", card([r.L("⏳ Boshlandi…", "⏳ Начинаю…")])), \
@@ -339,22 +408,14 @@ async def folder_card(ctx, r: Req):
             return title("🔢", h(f["name"])) + "\n\n" + card(
                 [r.L("Shu papkaga bir martada nechta? <code>0</code> — umumiy sondan.",
                      "Сколько за раз этой папке? <code>0</code> — общее число.")]), ui.cancel_kb(r, f"uf:{fid}")
-        elif op == "q":
-            ui.ask(r, "folder_quiet", f"uf:{fid}", fid=fid)
-            return title("🌙", h(f["name"])) + "\n\n" + card(
-                [r.L("Push YUBORILMAYDIGAN vaqt: <code>21:00 09:00</code>. <code>0</code> — umumiy vaqt.",
-                     "Когда НЕ слать Push: <code>21:00 09:00</code>. <code>0</code> — общее время.")]), \
-                ui.cancel_kb(r, f"uf:{fid}")
+        ui.view(r, f"uf:{fid}")
     f = must(P.folder(db, fid))
-    quiet = f"{f['quiet_from']}–{f['quiet_to']}" if f["quiet_from"] else r.L("umumiy", "общее")
     lines = [f"📣 Push — {onoff(r, f['push_on'])}",
              f"📲 {r.L('Akkaunt', 'Аккаунт')} — {state_icon(ctx, f['push_account_id'])} {h(acc_name(ctx, f['push_account_id']))}",
-             f"🔢 {r.L('Soni', 'Количество')} — <b>{f['push_limit'] or r.L('umumiy', 'общее')}</b>",
-             f"🌙 {r.L('Tinch vaqt', 'Тихое время')} — {quiet}"]
+             f"🔢 {r.L('Soni', 'Количество')} — <b>{f['push_limit'] or r.L('umumiy', 'общее')}</b>"]
     rows = grid([((r.L("⛔ Push o'ch", "⛔ Выкл. Push") if f["push_on"] else r.L("✅ Push yoq", "✅ Вкл. Push")),
                   f"uf:{fid}:o"), (f"📲 {r.L('Akkaunt', 'Аккаунт')}", f"uf:{fid}:a"),
-                 (f"🔢 {r.L('Soni', 'Количество')}", f"uf:{fid}:n"), (f"🌙 {r.L('Tinch vaqt', 'Тихое время')}",
-                                                                      f"uf:{fid}:q")])
+                 (f"🔢 {r.L('Soni', 'Количество')}", f"uf:{fid}:n")])
     rows.append(nav(r, "uf"))
     return ui.join(title("📁", h(f["name"]), "Push"), "", card(lines)), kb(*rows)
 
@@ -369,74 +430,6 @@ async def folder_push_n(ctx, r: Req, fid: int):
     return await folder_card(ctx, r)
 
 
-def _quiet(r: Req, text: str):
-    raw = text.strip()
-    if raw in ("0", "-", ""):
-        return "", ""
-    parts = re.findall(r"\d{1,2}[:.]\d{2}", raw)
-    if len(parts) != 2:
-        return None
-    try:
-        a, b = parse_hhmm(parts[0]), parse_hhmm(parts[1])
-    except ValueError:
-        return None
-    return f"{a.hour:02d}:{a.minute:02d}", f"{b.hour:02d}:{b.minute:02d}"
-
-
-@on_input("folder_quiet")
-async def folder_quiet(ctx, r: Req, fid: int):
-    q = _quiet(r, r.text)
-    if q is None:
-        return r.L("⚠️ Masalan: 21:00 09:00", "⚠️ Например: 21:00 09:00")
-    P.set_folder(ctx.db, fid, quiet_from=q[0], quiet_to=q[1])
-    r.args = [str(fid)]
-    return await folder_card(ctx, r)
-
-
-# ───────────────────────── jadval
-@screen("uj", "full")
-async def schedule(ctx, r: Req):
-    db = ctx.db
-    if r.args and r.args[0] == "t":
-        db.toggle("push_auto")
-    lines = [f"⏰ {r.L('Avtomat Push', 'Авто-Push')} — {onoff(r, db.flag('push_auto'))}",
-             f"🕒 {r.L('Vaqtlar', 'Время')} — <b>{', '.join(push_times(db)) or '—'}</b>",
-             r.L("1-vaqt: hamma lidlar · o'rtadagi: bugun yozganlar oldinda · oxirgisi: faqat bugun yozganlar.",
-                 "1-е время: все лиды · среднее: сегодняшние вперёд · последнее: только сегодняшние.")]
-    if db.get("push_auto_last"):
-        lines.append(r.L("Oxirgisi: ", "Последний: ") + h(db.get("push_auto_last")))
-    rows = [[((r.L("⛔ Avtomatni o'chirish", "⛔ Выключить авто") if db.flag("push_auto") else
-               r.L("✅ Avtomatni yoqish", "✅ Включить авто")), "uj:t")],
-            [(r.L("🕒 Vaqtlarni o'zgartirish", "🕒 Изменить время"), "ujt")], nav(r, "u")]
-    return ui.join(title("⏰", r.L("PUSH JADVALI", "РАСПИСАНИЕ PUSH")), "", card(lines)), kb(*rows)
-
-
-@screen("ujt", "full")
-async def schedule_ask(ctx, r: Req):
-    ui.ask(r, "push_times", "uj")
-    return title("🕒", r.L("VAQTLAR", "ВРЕМЯ")) + "\n\n" + card(
-        [r.L("Vaqtlarni yuboring, masalan <code>10:30 15:00 20:00</code>.",
-             "Пришлите время, например <code>10:30 15:00 20:00</code>.")]), ui.cancel_kb(r, "uj")
-
-
-@on_input("push_times")
-async def schedule_set(ctx, r: Req):
-    parts = re.findall(r"\d{1,2}[:.]\d{2}", r.text)
-    good = []
-    for p in parts:
-        try:
-            t = parse_hhmm(p)
-            good.append(f"{t.hour:02d}:{t.minute:02d}")
-        except ValueError:
-            pass
-    if not good:
-        return r.L("⚠️ Masalan: 10:30 15:00 20:00", "⚠️ Например: 10:30 15:00 20:00")
-    ctx.db.set("push_times", ",".join(sorted(set(good))))
-    r.args = []
-    return await schedule(ctx, r)
-
-
-# ───────────────────────── sozlamalar
 @screen("uo", "full")
 async def settings(ctx, r: Req):
     db = ctx.db
@@ -444,40 +437,77 @@ async def settings(ctx, r: Req):
         order = ["slow", "normal", "fast"]
         cur = db.get("push_speed") if db.get("push_speed") in order else "normal"
         db.set("push_speed", order[(order.index(cur) + 1) % 3])
+        ui.view(r, "uo")
     speeds = SPEED_RU if r.lang == "ru" else SPEED_UZ
-    per = f"{db.get('push_from') or db.get('track_from') or '—'} — {db.get('push_to') or r.L('bugun', 'сегодня')}"
-    quiet = f"{db.get('push_quiet_from')}–{db.get('push_quiet_to')}" if db.get("push_quiet_from") else "—"
     mins = r.L("daq", "мин")
+    m, e = slot_bounds(db)
     lines = [f"🔢 {r.L('Har papkaga', 'На каждую папку')} — <b>{db.get('push_limit')}</b>",
-             f"📅 {r.L('Lidlar davri', 'Период лидов')} — {h(per)}",
              f"⚡ {r.L('Tezlik', 'Скорость')} — {speeds.get(db.get('push_speed'), db.get('push_speed'))}",
+             f"🕒 {r.L('Kun bo‘laklari', 'Части дня')} — 🌅 … {hhmm(m)} · ☀️ {hhmm(m)}–{hhmm(e)} · 🌙 {hhmm(e)} …",
+             f"⏳ {r.L('Jim turgan deb hisoblash', 'Считать «молчит»')} — {db.get_int('push_idle_minutes')} {mins}",
+             f"📅 {r.L('Baza', 'База')} — {dstr(db.get('push_base_from') or '2026-08-28')} "
+             f"{r.L('dan beri o‘zi yozgan lidlar', 'и позже (лиды, писавшие сами)')}",
+             f"🗓 {r.L('Davr', 'Период')} — {period_text(ctx, r)}",
              f"🆕 {r.L('Yangi lidga yo‘q', 'Новым лидам нет')} — {db.get('push_newlead_minutes')} {mins}",
-             f"💬 {r.L('Yaqinda yozishganlarga yo‘q', 'Недавно писавшим нет')} — {db.get('push_idle_minutes')} {mins}",
              f"🔁 {r.L('Qayta yubormaslik', 'Не повторять')} — {db.get('push_repeat_minutes')} {mins}",
-             f"🌙 {r.L('Umumiy tinch vaqt', 'Общее тихое время')} — {quiet}",
              f"🔥 {r.L('Faqat shu belgili', 'Только с иконкой')} — {h(db.get('push_emojis') or r.L('hammasi', 'все'))}",
              f"🚫 {r.L('Chiqarilgan', 'Исключены')} — {h(db.get('skip_emojis'))}"]
-    btn = [(f"🔢 {r.L('Soni', 'Количество')}", "uoi:push_limit"), (f"📅 {r.L('Davr', 'Период')}", "uoi:period"),
-           (f"⚡ {r.L('Tezlik', 'Скорость')}", "uo:speed"), (f"🆕 {r.L('Yangi lid', 'Новый лид')}", "uoi:push_newlead_minutes"),
-           (f"💬 {r.L('Yaqinda yozgan', 'Недавно писали')}", "uoi:push_idle_minutes"),
-           (f"🔁 {r.L('Takror', 'Повтор')}", "uoi:push_repeat_minutes"),
-           (f"🌙 {r.L('Tinch vaqt', 'Тихое время')}", "uoi:quiet"), (f"🔥 {r.L('Belgilar', 'Иконки')}", "uoi:push_emojis"),
+    btn = [(f"🔢 {r.L('Soni', 'Количество')}", "uoi:push_limit"), (f"⚡ {r.L('Tezlik', 'Скорость')}", "uo:speed"),
+           (f"🕒 {r.L('Kun bo‘laklari', 'Части дня')}", "uoi:slots"),
+           (f"⏳ {r.L('Jim turgan', 'Молчит')}", "uoi:push_idle_minutes"),
+           (f"🗓 {r.L('Davr', 'Период')}", "upd"),
+           (f"📅 {r.L('Baza', 'База')}", "uoi:push_base_from"), (f"🆕 {r.L('Yangi lid', 'Новый лид')}", "uoi:push_newlead_minutes"),
+           (f"🔁 {r.L('Takror', 'Повтор')}", "uoi:push_repeat_minutes"), (f"🔥 {r.L('Belgilar', 'Иконки')}", "uoi:push_emojis"),
            (f"🚫 {r.L('Chiqarilgan', 'Исключены')}", "uoi:skip_emojis")]
     return ui.join(title("⚙️", r.L("PUSH SOZLAMALARI", "НАСТРОЙКИ PUSH")), "", card(lines)), kb(*grid(btn), nav(r, "u"))
 
 
+def period_text(ctx, r: Req) -> str:
+    db = ctx.db
+    a, b = db.get("push_range_from"), db.get("push_range_to")
+    if a or b:
+        return f"{dstr(a) if a else '…'} – {dstr(b) if b else r.L('bugun', 'сегодня')}"
+    days = db.get_int("push_days")
+    return r.L(f"oxirgi {days} kun", f"последние {days} дн.") if days > 0 else r.L("hammasi (bazadan)", "все (с базы)")
+
+
+@screen("upd", "full")
+async def period_screen(ctx, r: Req):
+    db = ctx.db
+    if r.args:
+        v = r.args[0]
+        db.set("push_range_from", "")
+        db.set("push_range_to", "")
+        db.set("push_days", "0" if v == "all" else v)
+        ui.view(r, "upd")
+    cur = db.get_int("push_days") if not (db.get("push_range_from") or db.get("push_range_to")) else -1
+    opts = [("7", r.L("7 kun", "7 дней")), ("14", r.L("14 kun", "14 дней")), ("30", r.L("30 kun", "30 дней")),
+            ("60", r.L("60 kun", "60 дней")), ("all", r.L("Hammasi", "Все"))]
+    btn = [(("✅ " if (k == "all" and cur == 0) or (k.isdigit() and int(k) == cur) else "") + t, f"upd:{k}")
+           for k, t in opts]
+    lines = [r.L("Lidlar haftalar o'tib eskiradi. Push faqat shu davrda o'zi yozgan lidlarga ketadi.",
+                 "Лиды со временем остывают. Push — только тем, кто сам писал в этот период."),
+             f"{r.L('Hozir', 'Сейчас')}: <b>{period_text(ctx, r)}</b>"]
+    rows = grid(btn, 3) + [[(r.L("📆 Sana oralig'i", "📆 Даты"), "uoi:range")], nav(r, "uo")]
+    return ui.join(title("🗓", r.L("PUSH DAVRI", "ПЕРИОД PUSH")), "", card(lines)), kb(*rows)
+
+
 PROMPTS = {
     "push_limit": ("Har papkaga bir martada nechta? <code>0</code> — hammasi.", "Сколько за раз на папку? <code>0</code> — все."),
-    "period": ("Davr: <code>26.08.2026 14.10.2026</code> yoki bitta sana (o'sha kundan). <code>*</code> — tozalash.",
-               "Период: <code>26.08.2026 14.10.2026</code> или одна дата (с неё). <code>*</code> — сброс."),
+    "slots": ("Ertalab qachon tugaydi va kechqurun qachon boshlanadi: <code>13:00 19:00</code>.",
+              "Когда кончается утро и начинается вечер: <code>13:00 19:00</code>."),
+    "push_idle_minutes": ("Kunduzgi push: necha daqiqadan beri yozishmasa «jim turgan» hisoblanadi? (<code>30</code>, "
+                          "<code>60</code>). Hozirgina yozishganlar oxirida bo'ladi.",
+                          "Дневной push: сколько минут без переписки считать «молчит»? (<code>30</code>, <code>60</code>). "
+                          "Только что писавшие — в конце."),
+    "range": ("Sana oralig'i: <code>01.10.2026 20.10.2026</code> yoki bitta sana (o'sha kundan bugungacha).",
+              "Даты: <code>01.10.2026 20.10.2026</code> или одна дата (с неё по сегодня)."),
+    "push_base_from": ("Baza: qaysi sanadan beri o'zi yozgan lidlar? Masalan <code>28.08.2026</code>.",
+                       "База: с какой даты лиды, писавшие сами? Например <code>28.08.2026</code>."),
     "push_newlead_minutes": ("Yangi lidga necha daqiqa Push yubormaslik? (<code>60</code>, <code>2 soat</code>)",
                              "Сколько минут не слать новым лидам? (<code>60</code>, <code>2ч</code>)"),
-    "push_idle_minutes": ("Oxirgi xabardan necha daqiqa o'tmaguncha yozmaslik? <code>0</code> — tekshirmaslik.",
-                          "Сколько минут после последнего сообщения не писать? <code>0</code> — не проверять."),
     "push_repeat_minutes": ("Push olganlarga necha daqiqa qayta yubormaslik? (kamida 180)",
                             "Сколько минут не слать повторно? (минимум 180)"),
-    "quiet": ("Push yuborilmaydigan umumiy vaqt: <code>21:00 09:00</code>. <code>0</code> — yo'q.",
-              "Общее время без Push: <code>21:00 09:00</code>. <code>0</code> — нет."),
     "push_emojis": ("Faqat shu belgili lidlarga (masalan <code>🔥</code>). <code>*</code> — hammasiga.",
                     "Только лидам с иконкой (например <code>🔥</code>). <code>*</code> — всем."),
     "skip_emojis": ("Chiqarilgan belgilar (zaderjka va Push'da hisobga olinmaydi), masalan <code>⚡ 💊</code>.",
@@ -488,6 +518,9 @@ PROMPTS = {
 @screen("uoi", "full")
 async def setting_ask(ctx, r: Req):
     key = r.args[0]
+    if key not in PROMPTS:
+        r.args = []
+        return await settings(ctx, r)
     ui.ask(r, "push_setting", "uo", key=key)
     uz, ru = PROMPTS[key]
     return title("⚙️", r.L("SOZLAMA", "НАСТРОЙКА")) + "\n\n" + card([r.L(uz, ru)]), ui.cancel_kb(r, "uo")
@@ -501,21 +534,37 @@ async def setting_set(ctx, r: Req, key: str):
         if v is None or not 0 <= v <= 5000:
             return r.L("⚠️ 0–5000", "⚠️ 0–5000")
         db.set(key, str(int(v)))
-    elif key == "period":
-        if text in ("*", "0", "-"):
-            db.set("push_from", "")
-            db.set("push_to", "")
-        else:
-            found = re.findall(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{2,4}", text)
-            try:
-                a = parse_date(found[0]) if found else None
-                b = parse_date(found[1]) if len(found) > 1 else None
-            except ValueError:
-                a = None
-            if a is None:
-                return r.L("⚠️ Masalan: 26.08.2026 14.10.2026", "⚠️ Например: 26.08.2026 14.10.2026")
-            db.set("push_from", a.isoformat())
-            db.set("push_to", b.isoformat() if b else "")
+    elif key == "slots":
+        parts = re.findall(r"\d{1,2}[:.]\d{2}", text)
+        try:
+            a, b = (parse_hhmm(parts[0]), parse_hhmm(parts[1])) if len(parts) == 2 else (None, None)
+        except ValueError:
+            a = b = None
+        if a is None or b is None or (a.hour, a.minute) >= (b.hour, b.minute):
+            return r.L("⚠️ Masalan: 13:00 19:00", "⚠️ Например: 13:00 19:00")
+        db.set("push_morning_until", f"{a.hour:02d}:{a.minute:02d}")
+        db.set("push_evening_from", f"{b.hour:02d}:{b.minute:02d}")
+    elif key == "range":
+        found = re.findall(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{2,4}", text)
+        try:
+            a = parse_date(found[0]) if found else None
+            b = parse_date(found[1]) if len(found) > 1 else None
+        except ValueError:
+            a = None
+        if a is None or (b is not None and b < a):
+            return r.L("⚠️ Masalan: 01.10.2026 20.10.2026", "⚠️ Например: 01.10.2026 20.10.2026")
+        db.set("push_range_from", a.isoformat())
+        db.set("push_range_to", b.isoformat() if b else "")
+        db.set("push_days", "0")
+    elif key == "push_base_from":
+        found = re.findall(r"\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{2,4}", text)
+        try:
+            d = parse_date(found[0]) if found else None
+        except ValueError:
+            d = None
+        if d is None:
+            return r.L("⚠️ Masalan: 28.08.2026", "⚠️ Например: 28.08.2026")
+        db.set("push_base_from", d.isoformat())
     elif key in ("push_newlead_minutes", "push_idle_minutes", "push_repeat_minutes"):
         try:
             v = parse_minutes(text)
@@ -524,12 +573,6 @@ async def setting_set(ctx, r: Req, key: str):
         if key == "push_repeat_minutes":
             v = max(180, v)
         db.set(key, str(v))
-    elif key == "quiet":
-        q = _quiet(r, text)
-        if q is None:
-            return r.L("⚠️ Masalan: 21:00 09:00", "⚠️ Например: 21:00 09:00")
-        db.set("push_quiet_from", q[0])
-        db.set("push_quiet_to", q[1])
     elif key in ("push_emojis", "skip_emojis"):
         db.set(key, "" if text in ("*", "0", "-") else " ".join(ch for ch in text if not ch.isspace() and ch != ","))
     r.args = []

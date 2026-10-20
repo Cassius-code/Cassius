@@ -49,13 +49,81 @@ async def settings(ctx, r: Req):
            (r.L("🔎 Chat qidirish", "🔎 Поиск чата"), "sx")]
     if r.owner:
         btn.append((r.L("🧮 Zp hisoblash", "🧮 Расчёт зп"), "kzm"))
+        btn.append((r.L("🧹 Tozalash", "🧹 Очистка"), "sz"))
     rows = grid(btn)
     rows.append([((r.L("💸 Jarimalarni o'chirish", "💸 Выключить штрафы") if db.flag("fines_enabled") else
                    r.L("💸 Jarimalarni yoqish", "💸 Включить штрафы")), "sfn")])
     rows.append([((r.L("⛔ Botni to'xtatish", "⛔ Остановить бота") if db.flag("bot_enabled") else
-                   r.L("▶️ Botni yoqish", "▶️ Включить бота")), "so")])
+                   r.L("▶️ Botni yoqish", "▶️ Включить бота")), "so", "danger" if db.flag("bot_enabled") else "success")])
     rows.append(nav(r))
-    return ui.join(title("⚙️", r.L("SOZLAMALAR", "НАСТРОЙКИ")), "", card(lines)), kb(*rows)
+    text = ui.join(title("⚙️", r.L("SOZLAMALAR", "НАСТРОЙКИ")), "", card(lines))
+    from . import panel_cards as PC
+    alive = db.flag("bot_enabled")
+    ub_ok = bool(ub and ub.state == "online")
+    online = sum(1 for a in accs if ctx.pool and ctx.pool.state_of(a["id"]) == "online")
+    zp = {"button": r.L("tugma bilan", "по кнопке"), "auto": r.L("avtomatik", "авто"),
+          "off": r.L("o'chiq", "выкл")}[zp_mode(db)]
+    srows = [(r.L("Asosiy akkaunt", "Основной аккаунт"), (ub.me_label if ub and ub.me_label else "")[:22] or
+              (r.L("ulangan", "подключён") if ub_ok else r.L("ulanmagan", "не подключён")), "🔑"),
+             (r.L("Push akkauntlar", "Push-аккаунты"), f"{online} / {len(accs)}", "📲"),
+             (r.L("Avto-jarimalar", "Авто-штрафы"), PC.onoff(r, db.flag("fines_enabled")), "💸"),
+             (r.L("Zp hisoblash", "Расчёт зп"), zp, "🧮"),
+             (r.L("Ishga kelish", "Приход"), PC.onoff(r, db.flag("attendance_enabled")), "🙋"),
+             (r.L("Tanaffus", "Перерывы"), PC.onoff(r, db.flag("breaks_enabled")), "☕")]
+    chips = [(r.L("Bot", "Бот"), alive), (r.L("Akkaunt", "Аккаунт"), ub_ok),
+             ("«Проёб»", bool(db.get("proyob_group_id")))]
+    return ui.rich(text, PC.settings(r, alive, srows, chips)), kb(*rows)
+
+
+WIPE = {"kassa": ("🧾", "Kassa yozuvlari", "Записи кассы",
+                  "cheklar, hisobotlar, jarima/bonus/avans, to'lovlar, ulushlar, haftalik foizlar, tarix",
+                  "чеки, отчёты, штрафы/бонусы/авансы, выплаты, доли, недельные проценты, история"),
+        "people": ("👥", "Xodimlar (kassa ham)", "Сотрудники (и касса)",
+                   "hamma xodimlar, foizlari, papkadagi o'rni, ishga kelish — va hamma kassa yozuvlari",
+                   "все сотрудники, проценты, места в папках, приход — и все записи кассы"),
+        "push": ("📲", "Push akkauntlar", "Push-аккаунты", "Push akkauntlar (qayta kirasiz)",
+                 "Push-аккаунты (войдёте заново)"),
+        "all": ("🧹", "Hammasi", "Всё", "kassa, xodimlar va Push akkauntlar", "касса, сотрудники и Push-аккаунты")}
+
+
+@screen("sz", "owner")
+async def wipe_screen(ctx, r: Req):
+    db = ctx.db
+    a = r.args
+    keep = r.L("Qoladi: prays, sozlamalar, papkalar, chatlar, adminlar, asosiy akkaunt, boshlang'ich kassa.",
+               "Остаётся: прайс, настройки, папки, чаты, админы, основной аккаунт, начальная касса.")
+    if a and a[0] in WIPE and len(a) > 1 and a[1] == "y":
+        P.wipe(db, a[0])
+        from .kassa import log
+        log(db, "wipe", None, None, None, "", a[0])
+        for pfx in ("qr:", "qa:", "qp:", "sup:", "dup:", "kn:", "kcl:", "adjmiss:"):
+            for row in db.all("SELECT DISTINCT key FROM sent WHERE key LIKE ?", (pfx + "%",)):
+                if a[0] != "push":
+                    await ctx.notifier.resolve(row["key"])
+        ctx.tracker.reload()
+        if ctx.userbot is not None:
+            ctx.userbot.reload_ids()
+        if ctx.pool is not None:
+            ctx.pool.sync()
+        icon, uz, ru, _du, _dr = WIPE[a[0]]
+        await ui.toast(ctx.bot, r.chat_id, r.L(f"🧹 Tozalandi: {uz}", f"🧹 Очищено: {ru}"), 6)
+        r.args = []
+        return await settings(ctx, r)
+    if a and a[0] in WIPE:
+        icon, uz, ru, du, dr = WIPE[a[0]]
+        return ui.join(title(icon, r.L("ROSTDAN HAM O'CHIRILSINMI?", "ТОЧНО УДАЛИТЬ?"), r.L(uz, ru)), "",
+                       card([r.L(f"O'chadi: {du}.", f"Удалится: {dr}."), keep,
+                             r.L("Qaytarib bo'lmaydi. Kerak bo'lsa avval ⚙️ → 💾 Zaxira nusxa oling.",
+                                 "Вернуть нельзя. Если нужно — сначала ⚙️ → 💾 Резервная копия.")])), \
+            kb([(r.L("🧹 Ha, o'chirish", "🧹 Да, удалить"), f"sz:{a[0]}:y")], [(r.L("✖️ Yo'q", "✖️ Нет"),
+                                                                              ui.back_data("sz"))])
+    counts = [f"🧾 {r.L('Cheklar', 'Чеки')} — <b>{db.scalar('SELECT COUNT(*) FROM checks')}</b>",
+              f"👥 {r.L('Xodimlar', 'Сотрудники')} — <b>{db.scalar('SELECT COUNT(*) FROM people')}</b>",
+              f"📲 Push — <b>{db.scalar('SELECT COUNT(*) FROM accounts')}</b>"]
+    rows = [[(f"{v[0]} {r.L(v[1], v[2])}", f"sz:{k}")] for k, v in WIPE.items()]
+    rows.append(nav(r, "s"))
+    return ui.join(title("🧹", r.L("TOZALASH", "ОЧИСТКА"), r.L("boshidan kiritish uchun", "чтобы ввести заново")),
+                   "", card(counts), card([keep])), kb(*rows)
 
 
 @screen("sfn", "full")

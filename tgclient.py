@@ -131,8 +131,12 @@ class TgAccount:
             except Exception as exc:
                 self.state = "offline"
                 log.exception("%s: ulanish xatosi", self.title())
-                await self.notifier.notify_owner(f"⚠️ {self.title()}: uzildi ({type(exc).__name__}). Qayta ulanyapman.",
-                                                 key=f"down-{self.title()}", min_interval=1800)
+                from .context import tr
+                ttl, err = self.title(), type(exc).__name__
+                await self.notifier.notify_owner(
+                    lambda: (tr(f"⚠️ {ttl}: uzildi ({err}). Qayta ulanyapman.",
+                                f"⚠️ {ttl.replace('Asosiy akkaunt', 'Основной аккаунт')}: связь потеряна ({err}). "
+                                "Переподключаюсь."), None), key=f"down-{self.title()}", min_interval=1800)
                 await self._disconnect()
                 await self._sleep_or_wake(backoff)
                 backoff = min(backoff * 2, 300)
@@ -145,14 +149,23 @@ class TgAccount:
         await client.connect()
         if not await client.is_user_authorized():
             self.state = "unauthorized"
-            await self.notifier.notify_owner(f"🔑 {self.title()}: seans yaroqsiz — Sozlamalar → Akkauntlar orqali "
-                                             "qaytadan ulang.", key=f"unauth-{self.title()}", min_interval=3600)
+            from .context import tr
+            ttl = self.title()
+            await self.notifier.notify_owner(lambda: (tr(
+                f"🔑 {ttl}: seans yaroqsiz — ⚙️ Sozlamalar → akkauntlar orqali qaytadan ulang.",
+                f"🔑 {ttl.replace('Asosiy akkaunt', 'Основной аккаунт')}: сессия недействительна — войдите заново: "
+                "⚙️ Настройки → аккаунты."), None), key=f"unauth-{self.title()}", min_interval=3600)
             await self._disconnect()
             await self._sleep_or_wake(300)
             return
         me = await client.get_me()
         self.me_id, self.me_label = int(me.id), me_label(me)
         self.state = "online"
+        for k in (f"down-{self.title()}", f"unauth-{self.title()}"):     # ulandi — eski ogohlantirish chatdan ketadi
+            try:
+                await self.notifier.resolve(k)
+            except Exception:
+                pass
         await self.on_online(client)
         failures, last_ping = 0, time.monotonic()
         while True:

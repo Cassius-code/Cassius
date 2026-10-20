@@ -58,11 +58,26 @@ async def control(ctx, r: Req):
         rows.append([(f"💸 {r.L('Jarima qoidasi', 'Правила штрафа')}", "cfn")])
     rows += grid([(f"⏳ {r.L('Kutayotganlar', 'Ожидают')}", "cw"), (f"🔍 {r.L('Lidni tekshirish', 'Проверить лид')}", "cc")])
     if r.can("full"):
-        rows.append([((r.L("⛔ Zaderjkani o'chirish", "⛔ Выключить контроль") if db.flag("delay_enabled")
-                       else r.L("✅ Zaderjkani yoqish", "✅ Включить контроль")), "ct")])
+        on = db.flag("delay_enabled")
+        rows.append([((r.L("⛔ Zaderjkani o'chirish", "⛔ Выключить контроль") if on
+                       else r.L("✅ Zaderjkani yoqish", "✅ Включить контроль")), "ct", "danger" if on else "success")])
         rows.append([(f"🧾 {r.L('Qarorlar jurnali (fayl)', 'Журнал решений (файл)')}", "cj")])
     rows.append(nav(r))
-    return text, kb(*rows)
+    from . import panel_cards as PC
+    from .timeutil import day_start
+    d0 = day_start(int(ctx.clock()), ctx.tz)
+    delays = db.scalar("SELECT COUNT(*) FROM alerts WHERE created_ts>=? AND status<>'void'", (d0,))
+    stv = db.scalar("SELECT COUNT(*) FROM threads WHERE stavka='on'")
+    if db.flag("fines_enabled"):
+        from .kassa_view import money
+        n, _forgive, _grace = ctx.tracker.fine_rules()
+        fine = f"{n}+ {r.L('lid', 'лид.')} · {money(db.get_float('fine_amount'))} $"
+    else:
+        fine = PC.onoff(r, False)
+    blocks = PC.control(r, db.flag("delay_enabled"), waiting, delays, stv, str(db.get("limit_minutes")),
+                        work_hours(ctx), db.flag("stavka_enabled"), need, fine)
+    caption = "" if group else r.L("⚠️ «Проёб» guruhi belgilanmagan (Sozlamalar)", "⚠️ Группа «Проёб» не задана (Настройки)")
+    return ui.rich(text, blocks, caption), kb(*rows)
 
 
 def fine_line(ctx, r: Req) -> str:

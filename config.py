@@ -8,6 +8,9 @@ from pathlib import Path
 # Panel orqali o'zgaradigan sozlamalar (boshlang'ich qiymatlar). Kalitlar bazadagi settings jadvalida.
 DEFAULTS: dict[str, str] = {
     "lang": "uz",                    # panel tili: uz / ru
+    "theme": "graphite",             # rasm-panel mavzusi (har admin o'zinikini tanlaydi: theme:{id})
+    "cards": "1",                    # rasm-panel (bosh ekranlar rasm bo'lib) — 0: faqat matn
+    "btn_style": "1",                # tugmalar: oq belgilar + qalin harflar — 0: oddiy emoji
     "bot_enabled": "1",              # bosh yoqgich: 0 — bot hech narsa qilmaydi (panel ishlaydi)
     # ── nazorat (zaderjka)
     "delay_enabled": "1",
@@ -51,7 +54,13 @@ DEFAULTS: dict[str, str] = {
     "push_from": "",
     "push_to": "",
     "push_newlead_minutes": "60",
-    "push_idle_minutes": "0",
+    "push_idle_minutes": "60",       # kunduzgi push: shuncha daqiqa yozishmagan — «jim turgan»
+    "push_base_from": "2026-08-28",  # baza: shu sanadan beri o'zi yozgan lidlar
+    "push_days": "0",                # davr: oxirgi N kun (0 — bazadan beri hammasi)
+    "push_range_from": "",           # yoki aniq sana oralig'i
+    "push_range_to": "",
+    "push_morning_until": "13:00",   # 🌅 ertalabki push shu vaqtgacha
+    "push_evening_from": "19:00",    # 🌙 kechki push shu vaqtdan
     "push_repeat_minutes": "180",
     "push_quiet_from": "",
     "push_quiet_to": "",
@@ -59,7 +68,8 @@ DEFAULTS: dict[str, str] = {
     "push_times": "10:30,15:00,20:00",
     "push_auto_last": "",            # oxirgi avtomat Push (sana+vaqt kaliti)
     # ── kassa
-    "zp_mode": "button",             # button — hafta «🧮 Haftani hisoblash» bilan; auto — doim; off — o'zingiz hisoblaysiz
+    "zp_mode": "button",
+    "kassa_notify": "0",             # har hisobotga alohida xabar (chat toza tursin — odatda o'chiq)             # button — hafta «🧮 Haftani hisoblash» bilan; auto — doim; off — o'zingiz hisoblaysiz
     # ── hisobotlar
     "report_enabled": "0",           # egasi: hisobot faqat buyruq bilan (/hisobot), avtomat yuborilmaydi
     "report_time": "23:30",

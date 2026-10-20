@@ -62,8 +62,8 @@ async def kassa_menu(ctx, r: Req):
     day = K.calc(db, t, t)
     pend = len(K.pending_reports(db)) + db.scalar("SELECT COUNT(*) FROM adj WHERE pending=1")
     cmp = K.compare(db, K.week_start(t), K.week_start(t) + dt.timedelta(days=6), t)
-    lines = [f"📅 {r.L('Bugun', 'Сегодня')} — {num(day['n'])} {r.L('chek', 'чек.')} · <b>{money(day['K'])} $</b>",
-             f"🗓 {r.L('Shu hafta', 'Эта неделя')} — {num(week['n'])} {r.L('chek', 'чек.')} · <b>{money(week['K'])} $</b>"
+    lines = [f"📅 {r.L('Bugun', 'Сегодня')} — {num(day['n'])} {r.L('chek', 'чек.')} · <b>{num(day['raw'])}</b>",
+             f"🗓 {r.L('Shu hafta', 'Эта неделя')} — {num(week['n'])} {r.L('chek', 'чек.')} · <b>{num(week['raw'])}</b>"
              + (arrow(cmp["K"], cmp["PK"]) if cmp else "")]
     if cmp and cmp["PK"]:
         lines.append(cmp_note(cmp, r.lang))
@@ -80,17 +80,36 @@ async def kassa_menu(ctx, r: Req):
         lines.append(f"⏳ {r.L('Yopilmagan kunlar', 'Незакрытые дни')} — <b>{', '.join(dm(d) for d in open_days)}</b>")
     if pend:
         lines.append(f"❓ {r.L('Javob kutayotgan savollar', 'Открытые вопросы')} — <b>{pend}</b>")
-    items = [(r.L("📊 Hisobot", "📊 Отчёт"), "kr"), (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc"),
+    items = [(r.L("📊 Hisobot", "📊 Отчёт"), "kr"), (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc", "success"),
              (r.L("🗓 Oy yakuni", "🗓 Итоги месяца"), "km"), (r.L("🏆 Reyting", "🏆 Рейтинг"), "kg"),
              (r.L("❓ Savollar", "❓ Вопросы") + (f" ({pend})" if pend else ""), "kq"),
              (r.L("💲 Prays", "💲 Прайс"), "kp"), (r.L("📜 Tarix", "📜 История"), "kh"), ("📄 PDF", "kf")]
     if r.owner:
-        items = [(r.L("🧮 Haftani hisoblash", "🧮 Рассчитать неделю"), "kz"),
+        items = [(r.L("🧮 Haftani hisoblash", "🧮 Рассчитать неделю"), "kz", "success"),
                  (r.L("📋 To'lov ro'yxati", "📋 Ведомость выплат"), "kpay")] + items + \
             [(r.L("🤝 Ulushlar", "🤝 Доли"), "ksh")]
     rows = grid(items)
     rows.append(nav(r))
-    return ui.join(title("💵", r.L("KASSA", "КАССА")), "", card(lines)), kb(*rows)
+    top = K.cumulative_rating(db, t)[:3]
+    if top:                                                  # umumiy reyting — top 3, ixcham
+        medal = ["🥇", "🥈", "🥉"]
+        lines += ["", f"🏆 <i>{r.L('Reyting (hammasi)', 'Рейтинг (всего)')}</i>"] + \
+            [f"{medal[i]} {h(n)} <i>{num(v)}</i>" for i, (n, v, _p) in enumerate(top)]
+    from . import panel_cards as PC
+    cash = None
+    if K.zp_mode(db) != "off":
+        cash = money(sum(x["zp"] for x in week["rows"].values() if x["kind"] == "worker" and x["zp_on"]))
+    notes = []
+    if pst["weeks"]:
+        notes.append((r.L("O'tgan hafta hisoblanmagan", "Прошлая неделя не рассчитана"), wlabel(prev_w), "🧮"))
+    if open_days:
+        notes.append((r.L("Yopilmagan kunlar", "Незакрытые дни"), ", ".join(dm(d) for d in open_days[-3:]), "⏳"))
+    if pend:
+        notes.append((r.L("Javob kutayotgan savollar", "Открытые вопросы"), str(pend), "❓"))
+    income = money(week["owner"]["income"]) if r.owner and zst["ready"] else None
+    blocks = PC.kassa(r, t, day["raw"], day["n"], week["raw"], PC.delta(cmp["K"], cmp["PK"]) if cmp else "",
+                      cash, zst["ready"], income, top, notes)
+    return ui.rich(ui.join(title("💵", r.L("KASSA", "КАССА")), "", card(lines)), blocks), kb(*rows)
 
 
 # ───────────────────────── hisobot
@@ -130,7 +149,7 @@ def recent_days(ctx, n: int) -> list[str]:
 
 
 def days_in(db, s: dt.date, e: dt.date):
-    return db.all("SELECT ch.rd d, COUNT(*) n, COALESCE(SUM(ch.usd),0) usd FROM checks ch JOIN reports r "
+    return db.all("SELECT ch.rd d, COUNT(*) n, COALESCE(SUM(ch.amount),0) raw FROM checks ch JOIN reports r "
                   "ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? "
                   "GROUP BY ch.rd ORDER BY ch.rd DESC LIMIT 40", (s.isoformat(), e.isoformat()))
 
@@ -141,7 +160,7 @@ async def days_list(ctx, r: Req):
     s, e = range_of(ctx, key)
     rows_ = days_in(ctx.db, s, e)
     shut = K.closed_days(ctx.db, s, e)
-    btn = [(f"{'🔒' if x['d'] in shut else '📅'} {dm(x['d'])} · {x['n']} · {money(x['usd'])} $", f"kdd:{x['d']}")
+    btn = [(f"{'🔒' if x['d'] in shut else '📅'} {dm(x['d'])} · {x['n']} · {num(x['raw'])}", f"kdd:{x['d']}")
            for x in rows_]
     text = ui.join(title("📅", r.L("KUNLAR", "ДНИ"), plabel(s, e)), "",
                    card([r.L("Kunni bosing → akkauntlar → cheklar. 🔒 — yopilgan kun.",
@@ -162,10 +181,9 @@ def day_text(ctx, r: Req, day: str) -> tuple[str, list]:
         if row is None or not row["n"] or not visible_acct(r, row):
             continue
         tag = f" <i>({r.L('umumiy', 'общий')})</i>" if row["kind"] == "pool" else ""
-        lines.append(f"{h(row['p']['name'])}{tag} · {num(row['n'])} {r.L('chek', 'чек.')} · {num(row['raw'])} · "
-                     f"<b>{money(row['usd'])} $</b>")
-        for payee, usd in row["paid_out"].items():
-            lines.append(f"   🔁 {h(b['names'].get(payee, '?'))}: {money(usd)} $")
+        lines.append(f"{h(row['p']['name'])}{tag} · {num(row['n'])} {r.L('chek', 'чек.')} · <b>{num(row['raw'])}</b>")
+        for payee in row["paid_out"]:
+            lines.append(f"   🔁 {r.L('ishlagan', 'работал')}: {h(b['names'].get(payee, '?'))}")
         if row["unassigned"]:
             lines.append(f"   ⚠️ {row['unassigned']} {r.L('chekda kim ishlagani belgilanmagan', 'чек(ов) без исполнителя')}")
         if row["noprice"]:
@@ -174,8 +192,7 @@ def day_text(ctx, r: Req, day: str) -> tuple[str, list]:
         btn.append((f"🧾 {row['p']['name']}", f"kxd:{i}:{day}"))
     parts = []
     if lines:
-        lines.append(f"<b>{r.L('Jami', 'Итого')}</b> · {num(tn)} {r.L('chek', 'чек.')} · {num(traw)} · "
-                     f"<b>{money(tusd)} $</b>")
+        lines.append(f"<b>{r.L('Jami', 'Итого')}</b> · {num(tn)} {r.L('chek', 'чек.')} · <b>{num(traw)}</b>")
         parts.append(card([f"<b>💵 {r.L('Kassa', 'Касса')}</b>"] + lines))
     else:
         parts.append(r.L("<i>Bu kunda chek yo'q.</i>", "<i>За этот день чеков нет.</i>"))
@@ -185,11 +202,11 @@ def day_text(ctx, r: Req, day: str) -> tuple[str, list]:
     c = K.closed(db, day)
     if c is not None:
         when = dt.datetime.fromtimestamp(c["ts"], ctx.tz).strftime("%d.%m %H:%M")
-        info.append(f"🔒 <b>{r.L('Kun yopilgan', 'День закрыт')}</b> · {when} · {money(c['usd'])} $")
-        n, _raw, usd = K.day_totals(db, day)
-        if abs(usd - c["usd"]) >= 0.01 or n != c["n"]:
-            info.append(f"✏️ {r.L('Yopilgandan keyin o‘zgardi', 'Изменён после закрытия')}: {money(c['usd'])} → "
-                        f"<b>{money(usd)} $</b>")
+        info.append(f"🔒 <b>{r.L('Kun yopilgan', 'День закрыт')}</b> · {when} · {num(c['raw'])}")
+        n, raw, _usd = K.day_totals(db, day)
+        if raw != c["raw"] or n != c["n"]:
+            info.append(f"✏️ {r.L('Yopilgandan keyin o‘zgardi', 'Изменён после закрытия')}: {num(c['raw'])} → "
+                        f"<b>{num(raw)}</b>")
     else:
         info.append(f"⏳ {r.L('Kun ochiq', 'День открыт')}")
     pend = len(K.pending_reports(db)) + db.scalar("SELECT COUNT(*) FROM adj WHERE pending=1")
@@ -227,9 +244,9 @@ async def close_menu(ctx, r: Req):
     db = ctx.db
     btn = []
     for d in recent_days(ctx, 10):
-        n, _raw, usd = K.day_totals(db, d)
+        n, raw, _usd = K.day_totals(db, d)
         mark = "🔒" if K.is_closed(db, d) else ("⏳" if n else "·")
-        btn.append((f"{mark} {dm(d)} · {n} · {money(usd)} $", f"kdd:{d}"))
+        btn.append((f"{mark} {dm(d)} · {n} · {num(raw)}", f"kdd:{d}"))
     hint = (r.L("Hamma hisobotlar tushgach kunni oching va «🔒 Kunni yopish» ni bosing. Yopilgan kunni faqat siz "
                 "o'zgartira olasiz; yopilgan kunga yangi hisobot kelsa, sizga xabar keladi.",
                 "Когда все отчёты пришли — откройте день и нажмите «🔒 Закрыть день». Закрытый день меняете только "
@@ -259,20 +276,22 @@ async def open_do(ctx, r: Req):
 
 @screen("kcl", "owner")
 async def closed_report(ctx, r: Req):
-    """Yopilgan kunga yangi hisobot keldi: qolsinmi?"""
+    """Yopilgan kunga yangi hisobot keldi: qolsinmi? (hamma egadagi nusxa birga yangilanadi)"""
     db = ctx.db
     rid, op = int(r.args[0]), r.args[1]
-    rep = K.report(db, rid)
-    if rep is None:
-        return await _edit_q(ctx, r, r.L("ℹ️ Hisobot o'chirilgan.", "ℹ️ Отчёт удалён."))
+    key = f"kcl:{rid}"
+    if K.report(db, rid) is None:
+        await ctx.notifier.resolve(key)
+        return r.L("ℹ️ Hisobot o'chirilgan.", "ℹ️ Отчёт удалён.")
     if op == "x":
         K.set_report_status(db, rid, "excluded")
-        return await _edit_q(ctx, r, r.L("🚫 Hisobga olinmadi.", "🚫 Не учитывается."),
-                             kb([(r.L("↩️ Qaytarish", "↩️ Вернуть"), f"kcl:{rid}:r")]))
+        await ctx.notifier.resolve(key, r.L("🚫 Hisobga olinmadi.", "🚫 Не учитывается."),
+                                   kb([(r.L("↩️ Qaytarish", "↩️ Вернуть"), f"kcl:{rid}:r")]))
+        return r.L("🚫 Hisobga olinmadi", "🚫 Не учитывается")
     if op == "r":
         K.set_report_status(db, rid, "done")
-    return await _edit_q(ctx, r, r.L("✅ Hisobda qoldi.", "✅ Оставлено в расчёте."),
-                         kb([(r.L("🚫 Hisobga olinmasin", "🚫 Не учитывать"), f"kcl:{rid}:x")]))
+    await ctx.notifier.resolve(key)
+    return r.L("✅ Hisobda qoldi", "✅ Оставлено в расчёте")
 
 
 def clip(text: str, limit: int = 3900) -> str:
@@ -307,10 +326,78 @@ async def report_date(ctx, r: Req):
 
 @screen("kg", "full")
 async def rating_menu(ctx, r: Req):
+    if r.args and r.args[0] == "all":
+        return rating_all(ctx, r)
     if r.args:
         s, e = range_of(ctx, r.args[0])
         return rating(K.calc(ctx.db, s, e), s, e, r.lang), kb(nav(r, "kg"))
-    return title("🏆", r.L("REYTING", "РЕЙТИНГ"), r.L("qaysi davr?", "за какой период?")), periods(r, "kg", "k")
+    markup = periods(r, "kg", "k")
+    rows = [[(r.L("♾ Hammasi (boshidan)", "♾ Всё (с начала)"), "kg:all")]] + \
+        [[(b.text, b.callback_data) for b in row] for row in markup.inline_keyboard]
+    return title("🏆", r.L("REYTING", "РЕЙТИНГ"), r.L("qaysi davr?", "за какой период?")), kb(*rows)
+
+
+def rating_all(ctx, r: Req):
+    items = K.cumulative_rating(ctx.db, today(ctx))
+    since = K.opening_since(ctx.db)
+    medal = ["🥇", "🥈", "🥉"]
+    lines = [f"{medal[i] if i < 3 else f'{i + 1}.'} {h(n)} — <b>{num(v)}</b>" for i, (n, v, _pid) in enumerate(items)]
+    has_open = bool(K.openings(ctx.db))
+    sub = (r.L(f"boshlang'ich kassa + {dm(since)} dan beri", f"начальная касса + с {dm(since)}") if has_open else
+           r.L(f"{dm(since)} dan beri", f"с {dm(since)}"))
+    text = ui.join(title("🏆", r.L("REYTING · HAMMASI", "РЕЙТИНГ · ВСЁ"), sub), "",
+                   card(lines) if lines else r.L("<i>Ma'lumot yo'q.</i>", "<i>Данных нет.</i>"),
+                   card([r.L("Kassa — cheklar yig'indisi (zp emas).", "Касса — сумма чеков (не зп).")]))
+    rows = []
+    if r.owner:
+        rows.append([(r.L("📌 Boshlang'ich kassa", "📌 Начальная касса"), "kgo")])
+    rows.append(nav(r, "kg"))
+    return text, kb(*rows)
+
+
+@screen("kgo", "owner")
+async def opening_screen(ctx, r: Req):
+    db = ctx.db
+    if r.args and r.args[0] == "x":
+        K.set_openings(db, [])
+        r.args = []
+    items = K.openings(db)
+    since = K.opening_since(db)
+    ui.ask(r, "opening_set", "kg:all")
+    lines = [f"{h(o['name'])} — <b>{num(o['raw'])}</b>" for o in items] or [r.L("<i>yo'q</i>", "<i>нет</i>")]
+    hint = [r.L(f"Oldingi haftalar kassasi (cheklar yig'indisi). Umumiy reytingda {dm(since)} dan keyingi cheklar shu "
+                "raqamlar ustiga qo'shiladi. Haftalik hisob va zp ga ta'sir qilmaydi.",
+                f"Касса прошлых недель (сумма чеков). В общем рейтинге чеки с {dm(since)} прибавляются к этим числам. "
+                "На недельный расчёт и зп не влияет."),
+            "",
+            r.L("O'zgartirish: har qatorga ism va summa yozing (yoki reyting xabarini shu yerga tashlang):",
+                "Изменить: в каждой строке имя и сумма (или перешлите сюда сообщение рейтинга):"),
+            "<code>Bayzed 454559\nCred 421380</code>",
+            r.L("Oxiriga sanani qo'shsangiz (<code>dan 19.10</code>) — shu kundan hisoblanadi.",
+                "Можно добавить дату (<code>с 19.10</code>) — считать с этого дня.")]
+    rows = [[(r.L("🗑 Tozalash", "🗑 Очистить"), "kgo:x")]] if items else []
+    rows.append([(r.L("✖️ Bekor qilish", "✖️ Отмена"), ui.back_data("kg:all"))])
+    return ui.join(title("📌", r.L("BOSHLANG'ICH KASSA", "НАЧАЛЬНАЯ КАССА"), r.L(f"{dm(since)} dan", f"с {dm(since)}")),
+                   "", card(lines), card(hint)), kb(*rows)
+
+
+@on_input("opening_set", "owner")
+async def opening_set(ctx, r: Req):
+    import re as _re
+    items = K.parse_openings(r.text)
+    since = None
+    m = _re.search(r"(?:dan|с|from)\s*(\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?)|(\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?)\s*(?:dan|с)",
+                   r.text, _re.I)
+    if m:
+        ds = K.parse_dates(m.group(1) or m.group(2), today(ctx))
+        since = ds[0].isoformat() if ds else None
+        items = [(n, v) for n, v in items if not _re.fullmatch(r"(?:dan|с|from)", n, _re.I)]
+    if not items:
+        return r.L("⚠️ Masalan: Bayzed 454559", "⚠️ Например: Bayzed 454559")
+    K.set_openings(ctx.db, items, since)
+    ui.WAIT.pop(r.uid, None)
+    r.args = ["all"]
+    return await rating_menu(ctx, r)
 
 
 @screen("kgx", "full")
@@ -471,26 +558,26 @@ async def month_report(ctx, r: Req):
     b, cmp = md["b"], md["cmp"]
     ch = r.L("chek", "чек.")
     head = [f"<b>💵 {r.L('Kassa', 'Касса')}</b>",
-            f"{num(b['n'])} {ch} · {num(b['raw'])} · <b>{money(b['K'])} $</b>" + (arrow(cmp["K"], cmp["PK"]) if cmp else "")]
+            f"{num(b['n'])} {ch} · <b>{num(b['raw'])}</b>" + (arrow(cmp["K"], cmp["PK"]) if cmp else "")]
     note = cmp_note(cmp, r.lang)
     if note:
         head.append(note)
     if md["days"]:
         head.append(f"📆 {r.L('Ish kunlari', 'Рабочих дней')}: {md['days']} · {r.L('kuniga o‘rtacha', 'в среднем в день')} "
-                    f"{money(b['K'] / md['days'])} $")
+                    f"{num(b['raw'] / md['days'])}")
     if md["best"]:
-        head.append(f"🏅 {r.L('Eng yaxshi kun', 'Лучший день')}: {dm(md['best'][0])} — {money(md['best'][1])} $")
+        head.append(f"🏅 {r.L('Eng yaxshi kun', 'Лучший день')}: {dm(md['best'][0])} — {num(md['best'][1])}")
     parts = [card(head)]
     wl = [f"<b>📅 {r.L('Haftalar', 'Недели')}</b>"]
     for wk in md["weeks"]:
-        wl.append(f"{plabel(wk['s'], wk['e'])} · {num(wk['n'])} {ch} · <b>{money(wk['usd'])} $</b>")
+        wl.append(f"{plabel(wk['s'], wk['e'])} · {num(wk['n'])} {ch} · <b>{num(wk['raw'])}</b>")
     if len(wl) > 1:
         parts.append(card(wl))
     top = sorted([x for x in b["rows"].values() if x["n"] and x["kind"] in ("worker", "self", "pool")
-                  and visible_acct(r, x)], key=lambda x: -x["usd"])[:5]
+                  and visible_acct(r, x)], key=lambda x: -x["raw"])[:5]
     if top:
         medal = ["🥇", "🥈", "🥉", "4.", "5."]
-        parts.append(card([f"<b>🏆 {r.L('Top', 'Топ')}</b>"] + [f"{medal[i]} {h(x['p']['name'])} — <b>{money(x['usd'])} $</b>"
+        parts.append(card([f"<b>🏆 {r.L('Top', 'Топ')}</b>"] + [f"{medal[i]} {h(x['p']['name'])} — <b>{num(x['raw'])}</b>"
                                                               f" · {num(x['n'])} {ch}" for i, x in enumerate(top)]))
     zp = [x for x in b["rows"].values() if x["kind"] == "worker" and x["total"] is not None and K.has_data(x)]
     mz = K.zp_state(db, md["first"], md["last"], t)
@@ -606,6 +693,14 @@ def hist_line(ctx, r: Req, a, names: dict) -> str:
         t = f"✅ {who}: {r.L('to‘landi', 'выплачено')} {day} {r.L('gacha', 'по')}" + (f" · {new} $" if new else "")
     elif k == "paid_undo":
         t = f"↩️ {who}: {r.L('to‘lov bekor qilindi', 'выплата отменена')} ({day})"
+    elif k == "rep_del":
+        t = f"🗑 {pd}: {r.L('hisobot o‘chirildi', 'отчёт удалён')} ({h(old)})"
+    elif k == "person_del":
+        t = f"🗑 {r.L('Xodim o‘chirildi', 'Сотрудник удалён')}: {h(old)}"
+    elif k == "wipe":
+        t = f"🧹 {r.L('Tozalandi', 'Очищено')}: {h(new)}"
+    elif k == "opening":
+        t = f"📌 {r.L('Boshlang‘ich kassa', 'Начальная касса')}: {h(new) or '—'}"
     elif k == "day_close":
         t = f"🔒 {day} {r.L('yopildi', 'закрыт')}"
     elif k == "day_open":
@@ -705,10 +800,12 @@ async def price_set(ctx, r: Req, pid: int = 0, rid: int = 0):
     for rr in K.pending_reports(ctx.db):
         if K.report_needs(ctx.db, rr) is None:
             await F.finalize(ctx, rr)
+    if rid and K.report(ctx.db, rid) is not None:
+        return F.report_panel(ctx, r, rid) or await F.report_done_panel(ctx, r, rid)
     return await prices(ctx, r)
 
 
-# ───────────────────────── savollar (alohida xabarlar; tugma o'sha xabarni o'zgartiradi)
+# ───────────────────────── savollar (bir nechta adminga boradi: biri javob bersa — hammadagi nusxa o'chadi)
 @screen("kq", "full")
 async def questions(ctx, r: Req):
     n = await F.repeat_questions(ctx)
@@ -716,6 +813,10 @@ async def questions(ctx, r: Req):
         return r.L("😊 Ochiq savol yo'q", "😊 Открытых вопросов нет")
     await ui.toast(ctx.bot, r.chat_id, r.L(f"❓ {n} ta savol pastda", f"❓ {n} вопрос(а) ниже"))
     return None
+
+
+def _in_panel(r: Req) -> bool:
+    return r.message is not None and ui.panel_id(r.chat_id) == getattr(r.message, "message_id", None)
 
 
 async def _edit_q(ctx, r: Req, text: str, markup=None):
@@ -727,8 +828,46 @@ async def _edit_q(ctx, r: Req, text: str, markup=None):
 
 
 @screen("qok", "full")
-async def q_ok(ctx, r: Req):
-    await _edit_q(ctx, r, r.L("👌 Ikkalasi qoldi.", "👌 Оставил оба."))
+async def q_ok(ctx, r: Req):                                 # eski xabarlar uchun
+    try:
+        await ctx.bot.delete_message(r.chat_id, r.message.message_id)
+    except Exception:
+        await _edit_q(ctx, r, "👌")
+    return None
+
+
+@screen("qn", "full")
+async def q_dismiss(ctx, r: Req):
+    """Ma'lumot xabari: «👌» — hammadagi nusxa o'chadi."""
+    await ctx.notifier.resolve(f"{r.args[0]}:{r.args[1]}")
+    try:
+        await ctx.bot.delete_message(r.chat_id, r.message.message_id)
+    except Exception:
+        pass
+    return None
+
+
+async def _next(ctx, r: Req, rid: int, note: str):
+    """Javobdan keyin: panelda — keyingi savol yoki «qabul qilindi»; xabarda — nusxalar o'chadi, keyingi savol."""
+    if _in_panel(r):
+        await ctx.notifier.resolve(f"qr:{rid}")
+        nxt = F.report_panel(ctx, r, rid)
+        if nxt is not None:
+            await ui.toast(ctx.bot, r.chat_id, note)
+            return nxt
+        return await F.report_done_panel(ctx, r, rid)
+    await F.advance(ctx, rid)
+    return note
+
+
+def _adopt_tagged(ctx, name: str, pid: int) -> list[int]:
+    """Shu nom bilan kelgan boshqa ochiq hisobotlar ham shu odamga."""
+    out = []
+    for rr in ctx.db.all("SELECT id FROM reports WHERE person_id IS NULL AND status='pending' AND lower(tag)=lower(?)",
+                         (name,)):
+        ctx.db.run("UPDATE reports SET person_id=? WHERE id=?", (pid, rr["id"]))
+        out.append(rr["id"])
+    return out
 
 
 @screen("qr", "full")
@@ -736,55 +875,109 @@ async def q_report(ctx, r: Req):
     db = ctx.db
     rid, op, arg = int(r.args[0]), r.args[1], r.args[2]
     rep = K.report(db, rid)
+    key = f"qr:{rid}"
     if op == "r":                                           # eski hisobotni qaytarish
         K.set_report_status(db, rid, "done")
-        return await _edit_q(ctx, r, r.L("↩️ Eski hisobot qaytarildi (ikkalasi sanaladi).",
-                                         "↩️ Старый отчёт возвращён (считаются оба)."))
+        await ctx.notifier.resolve(f"sup:{rid}")
+        return r.L("↩️ Eski hisobot qaytarildi (ikkalasi sanaladi).", "↩️ Старый отчёт возвращён (считаются оба).")
     if op == "u":
         K.set_report_status(db, rid, "replaced")
-        return await _edit_q(ctx, r, r.L("✅ Takror olib tashlandi.", "✅ Повтор убран."))
+        await ctx.notifier.resolve(f"dup:{rid}")
+        return r.L("✅ Takror olib tashlandi.", "✅ Повтор убран.")
     if rep is None or rep["status"] == "done" and op not in ("o",):
-        return await _edit_q(ctx, r, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
+        await ctx.notifier.resolve(key)
+        return r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено.")
     if op == "x":
         K.delete_report(db, rid)
-        return await _edit_q(ctx, r, r.L("🚫 Bu xabar hisobga olinmaydi.", "🚫 Сообщение не учитывается."))
-    if op == "p":
+        await ctx.notifier.resolve(key)
+        if _in_panel(r):
+            from .panel import main_menu
+            await ui.toast(ctx.bot, r.chat_id, r.L("🚫 Hisobga olinmaydi", "🚫 Не учитывается"))
+            return await main_menu(ctx, r)
+        return r.L("🚫 Bu xabar hisobga olinmaydi.", "🚫 Сообщение не учитывается.")
+    if op in ("p", "n"):
         if rep["person_id"] is not None:
-            return await _edit_q(ctx, r, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
-        db.run("UPDATE reports SET person_id=? WHERE id=?", (int(arg), rid))
-        p = must(P.person(db, int(arg)))
+            return await _next(ctx, r, rid, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
         sid = rep["sender_id"]
-        if sid and P.admin_level(db, ctx.cfg.owner_ids, sid) == "" and not P.by_tg(db, sid) and p["kassa_kind"] == "worker" \
-                and not p["tg_id"]:
-            P.update_person(db, p["id"], tg_id=sid)          # keyingi safar o'zi taniydi
-        await _edit_q(ctx, r, f"✅ {h(p['name'])}")
-    elif op == "d":
+        stranger = bool(sid) and P.admin_level(db, ctx.cfg.owner_ids, sid) == "" and not P.by_tg(db, sid)
+        if op == "n":                                       # yangi xodim: hisobot tepasidagi ism yoki yuborgan odam
+            name = (rep["tag"] or rep["sender_name"] or "").strip()[:40]
+            if not name:
+                return r.L("⚠️ Ism topilmadi", "⚠️ Имя не найдено")
+            pid = P.add_person(db, name, "", sid if stranger and not rep["tag"] else None)
+            K.make_kassa_person(db, pid, "worker", 0, K.week_start(today(ctx)).isoformat())
+            note = r.L(f"➕ {h(name)} qo'shildi", f"➕ {h(name)} добавлен")
+        else:
+            pid = int(arg)
+            p = must(P.person(db, pid))
+            if stranger and p["kassa_kind"] == "worker" and not p["tg_id"] and not rep["tag"]:
+                P.update_person(db, p["id"], tg_id=sid)          # keyingi safar o'zi taniydi
+            note = f"✅ {h(p['name'])}"
+        db.run("UPDATE reports SET person_id=? WHERE id=?", (pid, rid))
+        if rep["tag"]:
+            for other in _adopt_tagged(ctx, rep["tag"], pid):
+                if other != rid:
+                    await F.advance(ctx, other)
+        return await _next(ctx, r, rid, note)
+    if op == "d":
         db.run("UPDATE checks SET rd=? WHERE report_id=? AND rd IS NULL", (arg, rid))
-        await _edit_q(ctx, r, f"✅ {arg[8:10]}.{arg[5:7]}")
-    elif op == "$":
+        return await _next(ctx, r, rid, f"✅ {arg[8:10]}.{arg[5:7]}")
+    if op == "$":
         ui.ask(r, "price", "k", pid=0, rid=rid)
+        if _in_panel(r):
+            return title("💲", f"{num(int(arg))} — " + r.L("necha $?", "сколько $?")) + "\n\n" + card(
+                [r.L("Sonni yozing, masalan <code>12</code>. Praysga qo'shiladi.",
+                     "Напишите число, например <code>12</code>. Добавится в прайс.")]), ui.cancel_kb(r, f"krv:{rid}")
         await _edit_q(ctx, r, r.L(f"💲 {num(int(arg))} — necha $? Javob sifatida sonni yozing (masalan 12).",
                                   f"💲 {num(int(arg))} — сколько $? Напишите число (например 12)."))
         return None
-    elif op == "o":
+    if op == "o":
         if K.report_needs(db, rid) != ("op", None):
-            return await _edit_q(ctx, r, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
+            return await _next(ctx, r, rid, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
         K.set_pay_report(db, rid, int(arg))
-        await _edit_q(ctx, r, f"✅ {h(P.person(db, int(arg))['name'])}")
-    await F.advance(ctx, rid)
+        return await _next(ctx, r, rid, f"✅ {h(P.person(db, int(arg))['name'])}")
     return None
+
+
+@screen("krv", "full")
+async def report_view(ctx, r: Req):
+    rid = int(r.args[0])
+    if K.report(ctx.db, rid) is None:
+        raise ui.Gone()
+    return F.report_panel(ctx, r, rid) or await F.report_done_panel(ctx, r, rid)
+
+
+@screen("krm", "full")
+async def report_remove(ctx, r: Req):
+    db = ctx.db
+    rid = int(r.args[0])
+    rep = K.report(db, rid)
+    if rep is None:
+        raise ui.Gone()
+    days = K.report_days(db, rid)
+    if (msg := locked(ctx, r, *days)):
+        return msg
+    K.log(db, "rep_del", rep["person_id"], days[0] if days else None, rid, K.amounts_text(K.amounts_of(db, rid)), "")
+    K.delete_report(db, rid)
+    await ctx.notifier.resolve(f"qr:{rid}")
+    await ui.toast(ctx.bot, r.chat_id, r.L("↩️ Hisobot o'chirildi", "↩️ Отчёт удалён"))
+    from .panel import main_menu
+    return await main_menu(ctx, r)
 
 
 @screen("qa", "full")
 async def q_adj(ctx, r: Req):
     db = ctx.db
     aid, op, arg = int(r.args[0]), r.args[1], r.args[2]
+    key = f"qa:{aid}"
     a = K.adj(db, aid)
     if a is None or not a["pending"]:
-        return await _edit_q(ctx, r, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
+        await ctx.notifier.resolve(key)
+        return r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено.")
     if op == "x":
         db.run("DELETE FROM adj WHERE id=?", (aid,))
-        return await _edit_q(ctx, r, r.L("✖️ Bekor qilindi.", "✖️ Отменено."))
+        await ctx.notifier.resolve(key)
+        return r.L("✖️ Bekor qilindi.", "✖️ Отменено.")
     if op == "p":
         db.run("UPDATE adj SET person_id=? WHERE id=?", (int(arg), aid))
     elif op == "k":
@@ -792,9 +985,10 @@ async def q_adj(ctx, r: Req):
     a = must(K.adj(db, aid))
     if a["person_id"] and a["kind"]:
         db.run("UPDATE adj SET pending=0 WHERE id=?", (aid,))
+        K.log(db, "adj_add", a["person_id"], a["day"], aid, a["source"], f"{a['kind']} {float(a['usd']):g}")
+        await ctx.notifier.resolve(key)
         word = {"fine": r.L("jarima", "штраф"), "bonus": r.L("bonus", "бонус"), "adv": r.L("avans", "аванс")}[a["kind"]]
-        return await _edit_q(ctx, r, f"✅ {h(P.person(db, a['person_id'])['name'])}: {word} {money(a['usd'])} $")
-    await _edit_q(ctx, r, "…")
+        return f"✅ {h(P.person(db, a['person_id'])['name'])}: {word} {money(a['usd'])} $"
     await F.ask_adj(ctx, aid)
     return None
 
@@ -802,8 +996,11 @@ async def q_adj(ctx, r: Req):
 @screen("qp", "full")
 async def q_pool(ctx, r: Req):
     pool, day, who = int(r.args[0]), r.args[1], int(r.args[2])
+    if (msg := locked(ctx, r, day)):
+        return msg
     K.set_pay_day(ctx.db, pool, day, who)
-    return await _edit_q(ctx, r, f"✅ {day[8:10]}.{day[5:7]}: {h(P.person(ctx.db, who)['name'])}")
+    await ctx.notifier.resolve(f"qp:{pool}:{day}")
+    return f"✅ {day[8:10]}.{day[5:7]}: {h(P.person(ctx.db, who)['name'])}"
 
 
 # ───────────────────────── cheklar (kun bo'yicha tuzatish)
@@ -1108,7 +1305,7 @@ def rule_lines(r: Req, w: dict, names: dict, partner: str) -> list[str]:
             head += f" <i>({r.L('umumiy', 'общий')})</i>"
         elif it["kind"] == "self":
             head += f" <i>({you.lower()})</i>"
-        head += f" · {money(it['usd'])} $" + (" ❓" if miss else "")
+        head += f" · {num(it['raw'])} · {money(it['usd'])} $" + (" ❓" if miss else "")
         if it["kind"] == "worker":
             rest = 100 - (it["wpct"] or 0) - (it["opct"] or 0) - it["kshare"]
             parts = [f"{h(it['name'])} {pc(it['wpct'])}" if it["zp_on"] else

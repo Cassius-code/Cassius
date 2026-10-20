@@ -13,15 +13,15 @@ from . import kassa_flow
 from . import people as P
 from . import ui
 from .attendance import norm
-from .kassa_view import rating_plain
+from .kassa_view import num, rating_plain
 from .reports import weekly_group
 from .timeutil import local_date
-from .ui import Req, card, h, kb, screen, title
+from .ui import Req, card, h, kb, screen
 
 log = logging.getLogger("group")
 
 GROUPS = {"group", "supergroup"}
-TOP_CMDS = {"top": "td", "topyest": "yd", "topweek": "tw", "toplast": "lw"}
+TOP_CMDS = {"top": "td", "topyest": "yd", "topweek": "tw", "toplast": "lw", "topall": "all"}
 REACT = {"arrived": "👍", "break_start": "👌", "break_end": "👍", "break_end_late": "👍"}
 
 
@@ -93,7 +93,14 @@ def build_router(ctx) -> Router:
         if not staff:
             return
         cmd = (message.text or "").split()[0].split("@")[0].lstrip("/").lower()
-        s, e = K.period_range(TOP_CMDS.get(cmd, "td"), local_date(ctx.clock(), ctx.tz))
+        t = local_date(ctx.clock(), ctx.tz)
+        if TOP_CMDS.get(cmd) == "all":
+            items = K.cumulative_rating(ctx.db, t)
+            medal = ["🥇", "🥈", "🥉"]
+            lines = [f"{medal[i] if i < 3 else f'{i + 1}.'} {n} — {num(v)}" for i, (n, v, _p) in enumerate(items)]
+            await reply(message, "\n".join(["🏆 Рейтинг кассы — всего", ""] + (lines or ["данных нет"])))
+            return
+        s, e = K.period_range(TOP_CMDS.get(cmd, "td"), t)
         await reply(message, rating_plain(K.calc(ctx.db, s, e), s, e))
 
     # ───────────── «✅ Выполнено»
@@ -178,22 +185,39 @@ def build_router(ctx) -> Router:
             return
         if is_proyob(ctx, ev.chat.id):
             return
-        lang = ctx.lang()
-        L = (lambda uz, ru: ru if lang == "ru" else uz)
-        text = ui.join(f"<b>➕ {L('BOT GURUHGA QO‘SHILDI', 'БОТА ДОБАВИЛИ В ГРУППУ')}</b>", "", card(
-            [f"👥 {h(ev.chat.title or '')} · <code>{ev.chat.id}</code>",
-             L("Shu guruh «Проёб» bo'lsinmi? (xodimlar, kassa cheklari, zaderjkalar shu yerda)",
-               "Сделать эту группу «Проёб»? (сотрудники, чеки кассы, задержки — здесь)")]))
-        await ctx.notifier.notify_owner(text, kb([(L("✅ Ha, «Проёб»", "✅ Да, «Проёб»"), f"sgset:{ev.chat.id}")],
-                                                 [(L("✖️ Yo'q", "✖️ Нет"), "m")]))
+        def build():                                       # har egaga o'z tilida
+            lang = ctx.lang()
+            L = (lambda uz, ru: ru if lang == "ru" else uz)
+            text = ui.join(f"<b>➕ {L('BOT GURUHGA QO‘SHILDI', 'БОТА ДОБАВИЛИ В ГРУППУ')}</b>", "", card(
+                [f"👥 {h(ev.chat.title or '')} · <code>{ev.chat.id}</code>",
+                 L("Shu guruh «Проёб» bo'lsinmi? (xodimlar, kassa cheklari, zaderjkalar shu yerda)",
+                   "Сделать эту группу «Проёб»? (сотрудники, чеки кассы, задержки — здесь)")]))
+            return text, kb([(L("✅ Ha, «Проёб»", "✅ Да, «Проёб»"), f"sgset:{ev.chat.id}")],
+                            [(L("✖️ Yo'q", "✖️ Нет"), f"sgno:{ev.chat.id}")])
+        await ctx.notifier.send_keyed(ctx.notifier.owner_ids(), build, key=f"grp:{ev.chat.id}")
 
     return r
 
 
 @screen("sgset", "owner")
 async def set_group(ctx, r: Req):
-    ctx.db.set("proyob_group_id", r.args[0])
-    return ui.join(title("✅", r.L("«ПРОЁБ» BELGILANDI", "«ПРОЁБ» ЗАДАНА")), "", card(
-        [f"<code>{h(r.args[0])}</code>", r.L("Botni guruhda admin qiling — shunda hamma xabarni ko'radi.",
-                                            "Сделайте бота админом группы — так он видит все сообщения.")])), \
-        kb([(r.L("⌂ Menyu", "⌂ Меню"), "m")])
+    """Bitta ega «Ha» desa — boshqa egalardagi savol ham o'chadi."""
+    gid = r.args[0]
+    if not ctx.notifier.has_key(f"grp:{gid}") and ctx.db.get("proyob_group_id") == gid:
+        return r.L("✅ Allaqachon belgilangan", "✅ Уже задана")
+    ctx.db.set("proyob_group_id", gid)
+    await ctx.notifier.resolve(f"grp:{gid}")
+    await ui.toast(ctx.bot, r.chat_id, r.L("✅ «Проёб» belgilandi. Botni guruhda admin qiling.",
+                                           "✅ «Проёб» задана. Сделайте бота админом группы."), 8)
+    from .panel import main_menu
+    return await main_menu(ctx, r)
+
+
+@screen("sgno", "owner")
+async def skip_group(ctx, r: Req):
+    await ctx.notifier.resolve(f"grp:{r.args[0]}")
+    try:
+        await ctx.bot.delete_message(r.chat_id, r.message.message_id)
+    except Exception:
+        pass
+    return None

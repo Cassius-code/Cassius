@@ -149,6 +149,49 @@ def merge_people(db: Database, keep: int, drop: int) -> None:
         db.conn.execute("DELETE FROM people WHERE id=?", (drop,))
 
 
+def person_usage(db: Database, pid: int) -> dict:
+    """O'chirishdan oldin: shu odamga bog'liq kassa yozuvlari soni."""
+    return {"checks": db.scalar("SELECT COUNT(*) FROM checks ch JOIN reports r ON r.id=ch.report_id WHERE r.person_id=?",
+                                (pid,)),
+            "adj": db.scalar("SELECT COUNT(*) FROM adj WHERE person_id=?", (pid,)),
+            "worked": db.scalar("SELECT COUNT(*) FROM checks WHERE pay=?", (pid,)),
+            "payouts": db.scalar("SELECT COUNT(*) FROM payouts WHERE person_id=?", (pid,))}
+
+
+def delete_person(db: Database, pid: int) -> None:
+    """Xodimni butunlay o'chirish: uning akkaunt cheklari, jarima/bonus/avans, foizlari, papkalari ham."""
+    with db.tx():
+        c = db.conn
+        rids = [r[0] for r in c.execute("SELECT id FROM reports WHERE person_id=?", (pid,))]
+        for rid in rids:
+            c.execute("DELETE FROM checks WHERE report_id=?", (rid,))
+        c.execute("DELETE FROM reports WHERE person_id=?", (pid,))
+        c.execute("UPDATE checks SET pay=NULL WHERE pay=?", (pid,))
+        for table, col in (("adj", "person_id"), ("pct", "person_id"), ("folder_people", "person_id"),
+                           ("attendance", "person_id"), ("breaks", "person_id"), ("transfers", "from_id"),
+                           ("transfers", "to_id"), ("shares", "from_id"), ("shares", "to_id"),
+                           ("payouts", "person_id"), ("owner_pct", "acct")):
+            c.execute(f"DELETE FROM {table} WHERE {col}=?", (pid,))
+        c.execute("DELETE FROM people WHERE id=?", (pid,))
+
+
+def wipe(db: Database, what: str) -> None:
+    """🧹 Tozalash: kassa | people (kassa ham) | push. Prays, sozlamalar, papkalar, chatlar, adminlar qoladi."""
+    with db.tx():
+        c = db.conn
+        if what in ("kassa", "people", "all"):
+            for t in ("checks", "reports", "adj", "transfers", "shares", "payouts", "audit", "closed_days", "weeks",
+                      "owner_pct"):
+                c.execute(f"DELETE FROM {t}")
+            c.execute("DELETE FROM requests WHERE kind='zp'")
+        if what in ("people", "all"):
+            for t in ("people", "pct", "folder_people", "attendance", "breaks"):
+                c.execute(f"DELETE FROM {t}")
+        if what in ("push", "all"):
+            c.execute("DELETE FROM accounts")
+            c.execute("UPDATE folders SET push_account_id=NULL")
+
+
 def is_day_off(p, weekday: int) -> bool:
     return str(weekday) in (p["days_off"] or "")
 

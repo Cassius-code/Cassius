@@ -32,6 +32,7 @@ def first_run(db, now: int, tz) -> None:
     if old_rate is not None and not db.get("late_fine") and old_rate["value"] not in ("", "0"):
         db.set("late_fine", old_rate["value"])
     K.seed_prices(db)
+    K.seed_opening(db)
 
 
 def make_backup(ctx) -> tuple[bytes, str]:
@@ -129,12 +130,12 @@ class Scheduler:
         if t.time() < at or db.get("report_last") >= day:
             return
         db.set("report_last", day)
-        lang = ctx.lang()
         owners = ctx.notifier.owner_ids()
-        await ctx.notifier._send_many(owners, summary(ctx, t.date(), t.date(), lang, owner=True))
+        d = t.date()
+        await ctx.notifier._send_many(owners, lambda: (summary(ctx, d, d, ctx.lang(), owner=True), None))
         others = [u for u in ctx.notifier.staff_ids() if u not in owners]
         if others:
-            await ctx.notifier._send_many(others, summary(ctx, t.date(), t.date(), lang, owner=False))
+            await ctx.notifier._send_many(others, lambda: (summary(ctx, d, d, ctx.lang(), owner=False), None))
 
     # ------------------------------------------------------------ haftalik xulosa («Проёб», ruscha, pulsiz)
     async def weekly(self, now: int) -> None:
@@ -158,7 +159,7 @@ class Scheduler:
             return
         db.set("backup_last", str(now))
         data, name = await asyncio.to_thread(make_backup, ctx)
-        ru = ctx.lang() == "ru"
+        ru = ctx.lang(ctx.cfg.main_owner) == "ru"
         cap = ("💾 Еженедельная копия базы. Храните — из неё можно всё восстановить." if ru else
                "💾 Haftalik baza nusxasi. Saqlab qo'ying — undan hammasini tiklash mumkin.")
         try:

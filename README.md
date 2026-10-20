@@ -19,7 +19,13 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Kech qolish: o'zingiz kiritasiz, masalan `0.5` (har daqiqa) yoki `10=2, 30=5`.
 - **🙋 Ishga kelish.** Xodim «Проёб»ga «доброе утро» yozadi. Ish boshlanib 15 daqiqada yozmasa, eslatma boradi.
 - **☕ Tanaffus.** «атайду» / «перерыв» — boshlanadi, «тут» — tugaydi. Vaqt oshsa, faqat eslatma boradi.
-- **💵 Kassa.** «Проёб»dagi cheklar, jarima, bonus, avanslar.
+- **💵 Kassa.** Kassa — cheklar yig'indisi (1950 + 2600 = 4 550); zp — $ da. «Проёб»dagi cheklar, jarima, bonus, avanslar.
+  - **Hisobotni botning o'ziga yozish mumkin:** tepasida ism bilan, masalan `Baxa` / `rd 19.10` / `1950` / `2600`.
+    Ism notanish bo'lsa — «➕ Yangi xodim: Baxa» tugmasi chiqadi (shunday tanishtirasiz). Jarima ham:
+    `@ivan штраф 5`. Guruhda ham xuddi shunday.
+  - Bosh menyuda — 💰 **Cash**: shu haftaning jami oyligi ($). Kassa bo'limida — cheklar yig'indisi va 🏆 top 3.
+  - **🏆 Umumiy reyting** kassa bo'limida: boshlang'ich (oldingi haftalar) kassa + 19.10 dan keyingi cheklar.
+    Guruhda `/topall`. Boshlang'ich raqamlar: 🏆 Reyting → ♾ Hammasi → 📌.
   - **🧮 Haftani hisoblash.** Hafta (Du–Ya) tugagach bosasiz. Bot o'tgan haftadagi foizlarni ko'rsatadi:
     «Bayzed: Bayzed 41% · Siz 14% · Artur qolgani». O'zgarmagan bo'lsa — bitta tugma. O'zgargan bo'lsa —
     ismni bosib yangi sonni yozasiz (masalan `41 14`). Yangi xodim bo'lsa, bot o'zi so'raydi.
@@ -34,8 +40,23 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   - Zp hisoblash usuli: **tugma bilan** (odatiy) / **avtomatik** / **o'chiq** (o'zingiz hisoblaysiz).
   - Pul amallari (to'landi, avans, ulushlar, foizlar) — faqat siz. Adminlar cheklarni tuzatadi.
   - Xodim faqat o'z zp sini ko'radi, so'rov avval sizga keladi. Daromadingizni faqat siz ko'rasiz.
-- **📣 Push.** Har papka o'z akkauntidan yuboradi, faqat qo'lda.
+- **📣 Push.** Har papka o'z akkauntidan, faqat qo'lda (🚀). Kimga va qaysi tartibda — soatga qarab:
+  🌅 ertalab (13:00 gacha) — bugun gaplashmaganlar, kechagidan boshlab eskiroqlariga;
+  ☀️ kunduzi — faqat bugun gaplashganlar: ertalabkilar → jim turganlar (30/60 daq) → hozirgina yozishganlar;
+  🌙 kechqurun (19:00 dan) — avval bugungilar, keyin kechagi va eskiroqlar.
+  Baza — 28.08.2026 dan beri o'zi yozgan lidlar. Vaqtlar va sana: 📣 Push → ⚙️ Sozlamalar.
 - **📊 Hisobotlar.** Faqat buyruq bilan: shaxsiy chatda `/hisobot`, guruhda `/statistika` (🥇🥈🥉 bilan).
+- **🌐 Til.** Har admin o'z tilini tanlaydi (bosh menyuning pastida). Savol va ogohlantirishlar ham har kimga
+  o'z tilida boradi.
+- **🎨 Ko'rinish.** Bosh ekranlar (menyu, Nazorat, Kassa, Push, Xodimlar, xodim kartasi, Hisobotlar, Sozlamalar)
+  premium rasm-panel bo'lib chiqadi. 10 ta mavzu: Black Gold, Royal Navy, Emerald, Bordo, Amethyst, Mocha,
+  Platinum (odatiy), Rose Gold, Ivory, Aurora. Bosh menyu → 🎨 Mavzu — bosing, darhol almashadi; har admin
+  o'zinikini tanlaydi. Tugmalar: oq belgilar (◆ ✦ ❖) va qalin harflar (𝗡𝗮𝘇𝗼𝗿𝗮𝘁); muhim amallar yashil/qizil.
+  Raqam yoziladigan joylar va uzun ro'yxatlar oddiy matn. Rasm kerak bo'lmasa: 🎨 → 🖼 Rasm-panel: o'chiq.
+- **🧼 Toza chat.** Chatda doim bitta panel. «‹ Orqaga» — oldingi ekranga. Savol bir nechta egaga borsa —
+  biringiz javob bersangiz, boshqalardagi nusxa o'chadi. Har hisobotga alohida xabar kelmaydi (guruhda 👌).
+- **👥 Xodimlar.** ➕ qo'shish, ⚙️ → 🗑 O'chirish (yoki 🗄 Arxiv). ⚙️ Sozlamalar → 🧹 Tozalash: kassa / xodimlar /
+  Push akkauntlarni o'chirib, boshidan kiritish (prays va boshlang'ich kassa qoladi).
 
 Bot mijoz va xodim xabarlarining matnini o'qimaydi va saqlamaydi. Faqat kim yozgani va qachon yozgani
 olinadi.
@@ -56,6 +77,7 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 3. iPhone «Fayllar» ilovasida ZIP ni bosing — papka ochiladi.
 4. github.com → ➕ → New repository → nom (masalan `rdcontrol`) → Private → Create.
 5. «uploading an existing file» → papkadagi hamma fayllarni tanlang (`kassa_bot_uchun` dan tashqari) → Commit.
+   Shrift fayllari (`.otf`, `.ttf`) ham kerak — panel rasmlari ular bilan chiroyli chiqadi.
 
 **C. Eski botlarni to'xtatish** (bir akkaunt ikki joyda ishlamasligi kerak)
 - Railway → eski zaderjka servisi → Deployments → oxirgi deploy → ⋮ → Remove.
@@ -102,7 +124,8 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 - «Проёб» guruhi:
   - `/proyob` — shu guruhni «Проёб» qilish
   - `/statistika` — hafta xulosasi va eng yaxshilar
-  - `/top` — bugungi kassa, `/topyest` — kecha, `/topweek` — shu hafta, `/toplast` — o'tgan hafta
+  - `/top` — bugungi kassa, `/topyest` — kecha, `/topweek` — shu hafta, `/toplast` — o'tgan hafta,
+    `/topall` — hammasi (boshlang'ich kassa bilan)
     (faqat ega yoki admin yoza oladi)
   - `/id` — guruh ID si
 

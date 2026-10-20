@@ -30,7 +30,7 @@ W = {
     "own": ("o'z akkaunti", "свой аккаунт"), "rating": ("REYTING", "РЕЙТИНГ"),
     "check": ("Tekshiruv", "Проверка"), "all_ok": ("hammasi taqsimlandi", "всё распределено"),
     "transfers": ("o'tkazmalar", "переносы"), "vs": ("solishtirish", "сравнение"),
-    "rest": ("qoldig'i", "остаток"), "after_artur": ("Arturdan keyin", "После Артура"),
+    "rest": ("qoldig'i", "остаток"), "worked": ("ishlagan", "работал"), "by_price": ("prays bo'yicha", "по прайсу"), "after_artur": ("Arturdan keyin", "После Артура"),
     "pshares": ("ulushlar (Artur to'laydi)", "доли (платит Артур)"),
     "not_calc": ("🧮 Zp hali hisoblanmagan", "🧮 Зп ещё не рассчитана"),
     "zp_off_all": ("🧮 Zp hisoblash o'chiq — o'zingiz hisoblaysiz", "🧮 Расчёт зп выключен — считаете сами"),
@@ -140,7 +140,8 @@ def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[
 
 
 def kassa_line(r: dict, lang: str) -> str:
-    return f"{num(r['n'])} {w('checks', lang)} · {num(r['raw'])} · <b>{money(r['usd'])} $</b>"
+    """Kassa = cheklar yig'indisi (asosiy raqam); $ — prays bo'yicha (zp shundan)."""
+    return f"{num(r['n'])} {w('checks', lang)} · <b>{num(r['raw'])}</b>"
 
 
 def arrow(cur: float, prev: float | None) -> str:
@@ -157,8 +158,8 @@ def cmp_note(cmp: dict | None, lang: str) -> str | None:
     if not cmp or not cmp["PK"]:
         return None
     ps, pe = cmp["ps"], cmp["pe"]
-    uz = f"↑↓ — {label(ps, pe)} ga nisbatan ({money(cmp['PK'])} $)"
-    ru = f"↑↓ — к {label(ps, pe)} ({money(cmp['PK'])} $)"
+    uz = f"↑↓ — {label(ps, pe)} ga nisbatan ({num(cmp['PK'])})"
+    ru = f"↑↓ — к {label(ps, pe)} ({num(cmp['PK'])})"
     return f"<i>{ru if lang == 'ru' else uz}</i>"
 
 
@@ -199,7 +200,7 @@ def overall(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, cmp: dict |
     if not kl:
         return "\n".join(parts + [w("no_data", lang)])
     up = arrow(cmp["K"], cmp["PK"]) if cmp else ""
-    kl.append(f"<b>{w('total', lang)}</b> · {num(tn)} {w('checks', lang)} · {num(traw)} · <b>{money(tusd)} $</b>{up}")
+    kl.append(f"<b>{w('total', lang)}</b> · {num(tn)} {w('checks', lang)} · <b>{num(traw)}</b>{up}")
     note = cmp_note(cmp, lang)
     if note:
         kl.append(note)
@@ -235,7 +236,7 @@ def owner_card(b: dict, lang: str) -> str:
     names = b["names"]
     ptag = f" {pct(o['partner_pct'])}" if o["partner_pct"] is not None else ""
     lines = [f"<b>💼 {w('you', lang)}</b> · <i>{w('only_you', lang)}</i>",
-             f"{w('kassa', lang)}: <b>{money(o['K'])} $</b>",
+             f"{w('kassa', lang)}: <b>{num(b['raw'])}</b> → {money(o['K'])} $ <i>({w('by_price', lang)})</i>",
              f"{w('partner', lang)}{ptag}: {money(o['partner_share'])} $"
              + (f" + {w('fines_pl', lang)} {money(o['pf'])}" if o["pf"] else "")
              + (f" − {w('bonuses_pl', lang)} {money(o['pb'])}" if o["pb"] else "")
@@ -321,7 +322,7 @@ def person_view(b: dict, r: dict, s: dt.date, e: dt.date, lang: str, owner: bool
             lines.append(f"⚠️ {r['unassigned']} {w('unassigned', lang)}")
         names = b["names"]
         for payee, usd in r["paid_out"].items():
-            lines.append(f"🔁 {h(names.get(payee, '?'))}: {money(usd)} $")
+            lines.append(f"🔁 {w('worked', lang)}: {h(names.get(payee, '?'))}")
         parts.append(card(lines))
     zl = zp_lines(b, r, lang, owner, zp)
     if zl:

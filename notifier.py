@@ -80,19 +80,66 @@ class Notifier:
         return ids
 
     async def _send_many(self, ids, text, kb=None, key: str = "", min_interval: int = 0, html: bool = True):
+        """key berilsa: shu kalitli eski xabarlar o'chadi (chat toza), yangilari eslab qolinadi — keyin resolve()."""
         now = time.time()
         if key and min_interval and now - self._last.get(key, 0) < min_interval:
             return []
         if key:
             self._last[key] = now
+            await self.resolve(key)
         out = []
+        from .context import LANG, user_lang
         for uid in ids:
             try:
-                out.append(await self._call(self.bot.send_message, chat_id=uid, text=text, reply_markup=kb,
-                                            parse_mode="HTML" if html else None, disable_web_page_preview=True))
+                t, k = text, kb
+                if callable(text):                        # har kimga o'z tilida
+                    tok = LANG.set(user_lang(self.db, uid))
+                    try:
+                        t, k = text()
+                    finally:
+                        LANG.reset(tok)
+                msg = await self._call(self.bot.send_message, chat_id=uid, text=t, reply_markup=k,
+                                       parse_mode="HTML" if html else None, disable_web_page_preview=True)
+                out.append(msg)
+                if key:
+                    self.db.run("INSERT INTO sent(key, chat_id, msg_id, ts) VALUES(?,?,?,?)",
+                                (key, uid, msg.message_id, int(now)))
             except Exception as exc:
                 log.info("Xabar yuborilmadi %s: %s", uid, exc)
         return out
+
+    async def send_keyed(self, ids, text: str, kb=None, key: str = "", html: bool = True):
+        return await self._send_many(ids, text, kb, key=key, html=html)
+
+    def has_key(self, key: str) -> bool:
+        return self.db.one("SELECT 1 FROM sent WHERE key=? LIMIT 1", (key,)) is not None
+
+    async def resolve(self, key: str, text: str | None = None, kb=None, skip: tuple = ()) -> int:
+        """Hamma nusxa: text yo'q — o'chiriladi; text bor — shu matnga almashtiriladi (kb bilan yoki tugmasiz).
+        skip — (chat_id, msg_id) ro'yxati: bu nusxalarga tegilmaydi (masalan, panelga aylangan xabar)."""
+        rows = self.db.all("SELECT chat_id, msg_id FROM sent WHERE key=?", (key,))
+        for row in rows:
+            if (row["chat_id"], row["msg_id"]) in skip:
+                continue
+            if text is None:
+                try:
+                    await self.bot.delete_message(row["chat_id"], row["msg_id"])
+                    continue
+                except Exception:
+                    pass
+            try:
+                await self.bot.edit_message_text(text or "✅", chat_id=row["chat_id"], message_id=row["msg_id"],
+                                                 reply_markup=kb if text else None, parse_mode="HTML",
+                                                 disable_web_page_preview=True)
+            except Exception:
+                pass
+        if text is None or kb is None:
+            self.db.run("DELETE FROM sent WHERE key=?", (key,))
+        return len(rows)
+
+    def forget(self, chat_id: int, msg_id: int) -> None:
+        """Xabar panelga aylandi — endi u savol nusxasi emas."""
+        self.db.run("DELETE FROM sent WHERE chat_id=? AND msg_id=?", (chat_id, msg_id))
 
     async def notify_owner(self, text: str, kb=None, key: str = "", min_interval: int = 0, html: bool = True):
         return await self._send_many(self.owner_ids(), text, kb, key, min_interval, html)
