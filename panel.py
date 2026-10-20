@@ -45,8 +45,11 @@ def level_of(ctx, uid: int | None) -> str:
 
 
 def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", message=None) -> Req:
+    from .context import LANG
+    lang = ctx.lang(uid)
+    LANG.set(lang)                  # shu so'rov davomida chiqadigan hamma matn (savollar ham) — shu admin tilida
     return Req(uid=uid, chat_id=chat_id, level=level_of(ctx, uid), data=data, args=data.split(":")[1:] if data else [],
-               text=text, message=message, lang=ctx.lang(uid))
+               text=text, message=message, lang=lang)
 
 
 # ───────────────────────── bosh menyu

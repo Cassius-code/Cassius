@@ -59,7 +59,19 @@ async def settings(ctx, r: Req):
     rows.append([((r.L("⛔ Botni to'xtatish", "⛔ Остановить бота") if db.flag("bot_enabled") else
                    r.L("▶️ Botni yoqish", "▶️ Включить бота")), "so")])
     rows.append(nav(r))
+    from datetime import datetime
+    started = datetime.fromtimestamp(ctx.started, ctx.tz)
+    lines.append(f"🖥 {r.L('Server', 'Сервер')} — <code>{h(server_name())}</code> · "
+                 f"{r.L('ishga tushgan', 'запущен')} {started:%d.%m %H:%M}")
     return ui.join(title("⚙️", r.L("SOZLAMALAR", "НАСТРОЙКИ")), "", card(lines)), kb(*rows)
+
+
+def server_name() -> str:
+    """Qaysi nusxa javob beryapti (Railway servisi). Ikki xil chiqsa — bot ikki joyda ishlayapti."""
+    import socket
+    name = os.environ.get("RAILWAY_SERVICE_NAME") or "bot"
+    rid = os.environ.get("RAILWAY_REPLICA_ID") or os.environ.get("RAILWAY_DEPLOYMENT_ID") or socket.gethostname()
+    return f"{name} · {rid[:6]}"
 
 
 WIPE = {"kassa": ("🧾", "Kassa yozuvlari", "Записи кассы",

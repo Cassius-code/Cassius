@@ -173,10 +173,22 @@ def has_rd(text: str) -> bool:
     return bool(RD_FIND.search(text))
 
 
+PHONE_RE = re.compile(r"\+\s*\d[\d\s\-()]{7,}")
+
+
+def is_phone(text: str) -> bool:
+    """«+1 470 514 4558», «+998 90 123 45 67» — telefon raqami, chek emas."""
+    for line in text.strip().splitlines():
+        m = PHONE_RE.fullmatch(line.strip())
+        if m and 10 <= len(re.sub(r"\D", "", line)) <= 15:
+            return True
+    return False
+
+
 def is_report_like(text: str) -> bool:
-    """Xabar faqat raqam/sana/Rd/ajratgichdan iborat bo'lsa — hisobot. Boshqa gap o'qilmaydi."""
+    """Xabar faqat raqam/sana/Rd/ajratgichdan iborat bo'lsa — hisobot. Boshqa gap o'qilmaydi. Telefon raqami — yo'q."""
     t = RD_WORD.sub(" ", text.strip())
-    return bool(t.strip()) and re.fullmatch(r"[\d\s,.;+=:/\-–—]+", t) is not None
+    return bool(t.strip()) and re.fullmatch(r"[\d\s,.;+=:/\-–—]+", t) is not None and not is_phone(text)
 
 
 def line_amounts(line: str) -> list[int]:

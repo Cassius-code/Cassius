@@ -426,6 +426,17 @@ async def journal_file(ctx, r: Req):
 
 
 # ───────────────────────── papkalar
+def folder_leads(ctx, fid: int) -> dict:
+    """Papkadagi lidlar (o'zi yozganlar, baza sanasidan beri): jami, 7 kunda, bugun."""
+    from .timeutil import day_start
+    db, now = ctx.db, int(ctx.clock())
+    base = ctx.pusher.base_from() if ctx.pusher else 0
+    q = ("SELECT COUNT(*) FROM threads th JOIN chats c ON c.chat_id=th.chat_id "
+         "WHERE c.folder_id=? AND th.first_seen IS NOT NULL AND th.last_seen>=?")
+    return {"all": db.scalar(q, (fid, base)), "week": db.scalar(q, (fid, max(base, now - 7 * 86400))),
+            "today": db.scalar(q, (fid, max(base, day_start(now, ctx.tz))))}
+
+
 @screen("cf", "full")
 async def folders(ctx, r: Req):
     db = ctx.db
@@ -433,11 +444,14 @@ async def folders(ctx, r: Req):
     for f in P.folders(db):
         ppl = len(P.folder_people(db, f["id"]))
         chats = db.scalar("SELECT COUNT(*) FROM chats WHERE folder_id=?", (f["id"],))
+        leads = folder_leads(ctx, f["id"])["all"]
         mark = "" if f["delay_on"] else " ⛔"
-        rows.append([(f"📁 {f['name']} · 👤{ppl} · 💬{chats}{mark}", f"cfo:{f['id']}")])
+        rows.append([(f"📁 {f['name']} · 👤{ppl} · 💬{chats} · 🔥{leads}{mark}", f"cfo:{f['id']}")])
     missing = getattr(ctx.userbot, "missing_folders", []) if ctx.userbot else []
     note = [r.L("Papka nomi Telegram'dagi papka nomi bilan bir xil bo'lsin — chatlar o'zi qo'shiladi.",
-                "Название папки = названию папки в Telegram — чаты подтянутся сами.")]
+                "Название папки = названию папки в Telegram — чаты подтянутся сами."),
+            r.L("👤 xodimlar · 💬 chatlar · 🔥 lidlar (o'zi yozganlar). Yangilash — «🔄 Telegram'dan».",
+                "👤 сотрудники · 💬 чаты · 🔥 лиды (писали сами). Обновить — «🔄 Из Telegram».")]
     if missing:
         note.append("⚠️ " + r.L("Telegram'da topilmadi: ", "Нет в Telegram: ") + h(", ".join(missing)))
     rows += [[(r.L("➕ Papka qo'shish", "➕ Добавить папку"), "cfa"), (r.L("🔄 Telegram'dan", "🔄 Из Telegram"), "cfs")],
@@ -482,9 +496,12 @@ async def folder_card(ctx, r: Req):
         return await folders(ctx, r)
     ppl = P.folder_people(db, fid)
     chats = db.scalar("SELECT COUNT(*) FROM chats WHERE folder_id=?", (fid,))
+    lc = folder_leads(ctx, fid)
     lines = [f"👤 {r.L('Xodimlar', 'Сотрудники')} — " + (h(", ".join(P.mention(p) for p in ppl)) or
                                                          r.L("belgilanmagan ⚠️", "не назначены ⚠️")),
              f"💬 {r.L('Chatlar', 'Чаты')} — <b>{chats}</b>",
+             f"🔥 {r.L('Lidlar', 'Лиды')} — <b>{lc['all']}</b> · {r.L('7 kunda', 'за 7 дней')} <b>{lc['week']}</b>"
+             f" · {r.L('bugun', 'сегодня')} <b>{lc['today']}</b>",
              f"🚨 {r.L('Zaderjka nazorati', 'Контроль задержек')} — {onoff(r, f['delay_on'])}",
              f"💸 {r.L('Jarima', 'Штраф')} — {folder_fine_text(ctx, r, f)}"
              + ("" if ctx.db.flag("fines_enabled") else r.L(" · ⚪ jarimalar o'chiq", " · ⚪ штрафы выключены"))]
@@ -494,8 +511,11 @@ async def folder_card(ctx, r: Req):
                                                                                        "✅ Вкл. контроль")),
                   f"cfd:{fid}"),
                  (f"✏️ {r.L('Nomi', 'Название')}", f"cfr:{fid}"), (f"🗑 {r.L('O‘chirish', 'Удалить')}", f"cfx:{fid}")])
+    rows.append([(r.L("🔄 Telegram'dan yangilash", "🔄 Обновить из Telegram"), "cfs")])
     rows.append(nav(r, "cf"))
-    return ui.join(title("📁", h(f["name"])), "", card(lines)), kb(*rows)
+    return ui.join(title("📁", h(f["name"])), "", card(lines),
+                   r.L("<i>🔥 Lidlar — baza sanasidan beri o'zi yozganlar (📣 Push → ⚙️ dagi sana).</i>",
+                       "<i>🔥 Лиды — писали сами с даты базы (📣 Push → ⚙️).</i>")), kb(*rows)
 
 
 @screen("cfd", "full")

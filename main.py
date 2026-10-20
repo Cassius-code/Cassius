@@ -40,6 +40,32 @@ async def supervise(name: str, factory, notifier) -> None:
         delay = min(delay * 2, 120)
 
 
+class ConflictWatch(logging.Handler):
+    """Shu token bilan ikkinchi bot ham ishlayapti (Railway'da ikkita servis / eski deploy) — Telegram xabarlarni
+    ikkalasiga bo'lib beradi: tugma bir botda, yozilgan raqam boshqasida. Egaga darhol aytiladi."""
+
+    def __init__(self, notifier):
+        super().__init__(logging.ERROR)
+        self.notifier = notifier
+
+    def emit(self, record):
+        try:
+            if "TelegramConflictError" not in record.getMessage():
+                return
+            from .context import tr
+            from .panel_settings import server_name
+            me = server_name()
+            asyncio.get_running_loop().create_task(self.notifier.notify_owner(lambda: (tr(
+                "⚠️ Bot ikki joyda ishlayapti: shu token bilan ikkinchi nusxa bor (Railway'da ikkinchi servis yoki "
+                f"eski deploy). Bu xabar «{me}» nusxasidan. Ikkinchisini o'chiring — aks holda yozganlaringiz "
+                "yo'qolib qoladi.",
+                "⚠️ Бот запущен дважды: с этим токеном работает вторая копия (второй сервис в Railway или старый "
+                f"деплой). Это сообщение от копии «{me}». Остановите вторую — иначе ваши сообщения теряются."),
+                None), key="conflict", min_interval=1800))
+        except Exception:
+            pass
+
+
 async def polling(bot, dp) -> None:
     await bot.delete_webhook(drop_pending_updates=False)
     await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types(), handle_signals=False)
@@ -109,6 +135,8 @@ async def amain() -> None:
     ctx = Ctx(cfg=cfg, db=db, tz=tz, bot=bot, notifier=notifier, tracker=tracker, att=att, userbot=userbot,
               pool=pool, pusher=pusher)
 
+    watch = ConflictWatch(notifier)
+    logging.getLogger("aiogram.dispatcher").addHandler(watch)
     dp = Dispatcher()
     dp.include_router(group.build_router(ctx))
     dp.include_router(panel.build_router(ctx))
@@ -141,6 +169,7 @@ async def amain() -> None:
         await userbot._disconnect()
         await bot.session.close()
     finally:
+        logging.getLogger("aiogram.dispatcher").removeHandler(watch)
         db.close()
 
 
