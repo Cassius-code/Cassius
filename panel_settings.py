@@ -2,6 +2,7 @@
 ma'lumotini ko'chirish, zaxira nusxa, chat qidirish, botni to'xtatish."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -12,6 +13,8 @@ from . import ui
 from .tgclient import LoginFlow
 from .timeutil import parse_number
 from .ui import Req, card, grid, h, kb, nav, on_input, onoff, screen, title
+
+log = logging.getLogger("settings")
 
 STATE_UZ = {"online": "🟢 ulangan", "connecting": "🟡 ulanmoqda…", "starting": "🟡 ishga tushmoqda…",
             "offline": "🔴 aloqa yo'q", "unauthorized": "🔴 qayta kirish kerak", "no_session": "⚪ ulanmagan",
@@ -185,66 +188,205 @@ async def main_logout(ctx, r: Req):
         kb([(r.L("✅ Ha", "✅ Да"), "smo:y"), (r.L("✖️ Yo'q", "✖️ Нет"), "sm")])
 
 
+LOGIN_TTL = 15 * 60                                       # kod shu vaqtgacha amal qiladi
+
+
+def _login_key(uid: int) -> str:
+    return f"login:{uid}"
+
+
+def _login_save(ctx, uid: int, flow, target: str) -> None:
+    """Kirish jarayoni bazada ham: bot yangilanib qayta ishga tushsa, kod baribir qabul qilinadi."""
+    import json
+    st = dict(flow.state(), target=target, ts=int(time.time()))
+    ui.quiet_store(lambda: ctx.db.set(_login_key(uid), json.dumps(st)))
+
+
+def _login_forget(ctx, uid: int) -> None:
+    def go():
+        ctx.db.run("DELETE FROM settings WHERE key=?", (_login_key(uid),))
+        ctx.db._cache.pop(_login_key(uid), None)
+    ui.quiet_store(go)
+
+
+async def _login_flow(ctx, uid: int):
+    """Xotirada bo'lmasa — bazadan tiklanadi (bot qayta ishga tushgan bo'lsa)."""
+    import json
+    flow = ctx.login.get(uid)
+    if flow is not None:
+        return flow
+    raw = ctx.db.get(_login_key(uid))
+    if not raw:
+        return None
+    try:
+        st = json.loads(raw)
+    except ValueError:
+        return None
+    if time.time() - st.get("ts", 0) > LOGIN_TTL or not st.get("s"):
+        _login_forget(ctx, uid)
+        return None
+    flow = await LoginFlow.resume(ctx.cfg.api_id, ctx.cfg.api_hash, st)
+    ctx.login[uid] = flow
+    return flow
+
+
+def login_error(r: Req, exc: Exception, stage: str) -> str:
+    """Telegram xatosi — tushunarli so'z bilan."""
+    name = type(exc).__name__
+    sec = getattr(exc, "seconds", None)
+    known = {
+        "PhoneNumberInvalidError": r.L("Raqam noto'g'ri. Masalan: +998901234567", "Неверный номер. Пример: +998901234567"),
+        "PhoneNumberBannedError": r.L("Bu raqam Telegram'da bloklangan", "Этот номер заблокирован в Telegram"),
+        "PhoneCodeInvalidError": r.L("Kod noto'g'ri. Qaytadan yozing", "Неверный код. Напишите ещё раз"),
+        "PhoneCodeEmptyError": r.L("Kod yozilmadi", "Код не указан"),
+        "PhoneCodeExpiredError": r.L("Kod eskirdi. «🔄 Yangi kod» ni bosing", "Код устарел. Нажмите «🔄 Новый код»"),
+        "PasswordHashInvalidError": r.L("Parol noto'g'ri. Qaytadan yozing", "Неверный пароль. Напишите ещё раз"),
+        "ApiIdInvalidError": r.L("Railway'dagi API_ID / API_HASH noto'g'ri", "Неверные API_ID / API_HASH в Railway"),
+        "FloodWaitError": r.L(f"Telegram kutishni so'radi: {(sec or 60) // 60 + 1} daqiqa",
+                              f"Telegram просит подождать: {(sec or 60) // 60 + 1} мин"),
+    }
+    msg = known.get(name) or (r.L("Kod yuborilmadi", "Код не отправлен") if stage == "phone" else
+                              r.L("Kirib bo'lmadi", "Не удалось войти")) + f" ({h(name)})"
+    return "⚠️ " + msg
+
+
+def _phone_screen(r: Req, target: str, err: str = ""):
+    what = r.L("asosiy akkaunt", "основной аккаунт") if target == "main" else r.L("yangi Push akkaunt",
+                                                                                   "новый Push-аккаунт")
+    return title("📲", r.L("ULASH", "ПОДКЛЮЧЕНИЕ"), what) + "\n\n" + card(
+        ([err, ""] if err else []) +
+        [r.L("Telefon raqamini yuboring, masalan <code>+998901234567</code>.",
+             "Пришлите номер телефона, например <code>+998901234567</code>.")]), ui.cancel_kb(r, "s")
+
+
+def _code_screen(r: Req, phone: str, err: str = ""):
+    return title("🔐", r.L("KOD", "КОД"), h(phone)) + "\n\n" + card(
+        ([err, ""] if err else []) +
+        [r.L("Telegram yuborgan kodni <b>bo'shliq bilan</b> yozing: <code>1 2 3 4 5</code>",
+             "Напишите код из Telegram <b>через пробелы</b>: <code>1 2 3 4 5</code>"),
+         r.L("<i>Kodni bo'shliqsiz yozsangiz yoki forward qilsangiz, Telegram uni bekor qiladi.</i>",
+             "<i>Если написать код без пробелов или переслать — Telegram его отменит.</i>")]), \
+        kb([(r.L("🔄 Yangi kod", "🔄 Новый код"), "smr")], [(r.L("✖️ Bekor qilish", "✖️ Отмена"), "smx")])
+
+
+def _pass_screen(r: Req, err: str = ""):
+    return title("🔐", r.L("PAROL", "ПАРОЛЬ")) + "\n\n" + card(
+        ([err, ""] if err else []) +
+        [r.L("Ikki bosqichli parolni yuboring (xabar darhol o'chiriladi).",
+             "Пришлите пароль двухэтапной проверки (сообщение сразу удалится).")]), \
+        kb([(r.L("✖️ Bekor qilish", "✖️ Отмена"), "smx")])
+
+
 @screen("sml", "full")
 async def login_start(ctx, r: Req):
     target = r.args[0] if r.args else "main"
     if not (ctx.cfg.api_id and ctx.cfg.api_hash):
         return r.L("⚠️ Railway'da API_ID va API_HASH berilmagan", "⚠️ В Railway не заданы API_ID и API_HASH")
     ui.ask(r, "login_phone", "s", target=target)
-    what = r.L("asosiy akkaunt", "основной аккаунт") if target == "main" else r.L("yangi Push akkaunt",
-                                                                                   "новый Push-аккаунт")
-    return title("📲", r.L("ULASH", "ПОДКЛЮЧЕНИЕ"), what) + "\n\n" + card(
-        [r.L("Telefon raqamini yuboring, masalan <code>+998901234567</code>.",
-             "Пришлите номер телефона, например <code>+998901234567</code>.")]), ui.cancel_kb(r, "s")
+    return _phone_screen(r, target)
 
 
 @on_input("login_phone")
 async def login_phone(ctx, r: Req, target: str):
-    phone = re.sub(r"[^\d+]", "", r.text)
-    if len(phone) < 9:
-        return r.L("⚠️ Raqam noto'g'ri", "⚠️ Неверный номер")
+    contact = getattr(r.message, "contact", None)          # «📎 → Kontakt» bilan yuborilgan raqam ham bo'ladi
+    phone = re.sub(r"[^\d+]", "", r.text or (getattr(contact, "phone_number", "") or ""))
+    if len(re.sub(r"\D", "", phone)) < 9:
+        ui.ask(r, "login_phone", "s", target=target)
+        return _phone_screen(r, target, r.L("⚠️ Raqam noto'g'ri", "⚠️ Неверный номер"))
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    old = ctx.login.pop(r.uid, None)
+    if old is not None:
+        await old.cancel()
     flow = LoginFlow(ctx.cfg.api_id, ctx.cfg.api_hash)
     try:
         await flow.start(phone)
     except Exception as exc:
         await flow.cancel()
-        return r.L(f"⚠️ Kod yuborilmadi: {h(type(exc).__name__)}", f"⚠️ Код не отправлен: {h(type(exc).__name__)}")
+        ui.ask(r, "login_phone", "s", target=target)
+        return _phone_screen(r, target, login_error(r, exc, "phone"))
     ctx.login[r.uid] = flow
+    _login_save(ctx, r.uid, flow, target)
     ui.ask(r, "login_code", "s", target=target)
-    return title("🔐", r.L("KOD", "КОД")) + "\n\n" + card(
-        [r.L("Telegram yuborgan kodni <b>bo'shliq bilan</b> yozing: <code>1 2 3 4 5</code> "
-             "(aks holda Telegram kodni bloklaydi).",
-             "Напишите код из Telegram <b>через пробелы</b>: <code>1 2 3 4 5</code> (иначе Telegram заблокирует код).")]), \
-        ui.cancel_kb(r, "s")
+    return _code_screen(r, phone)
+
+
+@screen("smr", "full")
+async def login_resend(ctx, r: Req):
+    """🔄 Yangi kod — o'sha raqamga qaytadan."""
+    import json
+    raw = ctx.db.get(_login_key(r.uid))
+    st = json.loads(raw) if raw else {}
+    phone, target = st.get("phone") or "", st.get("target") or "main"
+    if not phone:
+        ui.ask(r, "login_phone", "s", target=target)
+        return _phone_screen(r, target)
+    old = ctx.login.pop(r.uid, None)
+    if old is not None:
+        await old.cancel()
+    flow = LoginFlow(ctx.cfg.api_id, ctx.cfg.api_hash)
+    try:
+        await flow.start(phone)
+    except Exception as exc:
+        await flow.cancel()
+        ui.ask(r, "login_code", "s", target=target)
+        return _code_screen(r, phone, login_error(r, exc, "phone"))
+    ctx.login[r.uid] = flow
+    _login_save(ctx, r.uid, flow, target)
+    ui.ask(r, "login_code", "s", target=target)
+    return _code_screen(r, phone, r.L("📨 Yangi kod yuborildi", "📨 Новый код отправлен"))
+
+
+@screen("smx", "full")
+async def login_cancel(ctx, r: Req):
+    flow = ctx.login.pop(r.uid, None)
+    if flow is not None:
+        await flow.cancel()
+    _login_forget(ctx, r.uid)
+    return await settings(ctx, r)
 
 
 @on_input("login_code")
 async def login_code(ctx, r: Req, target: str):
-    flow = ctx.login.get(r.uid)
+    try:
+        flow = await _login_flow(ctx, r.uid)
+    except Exception as exc:
+        flow = None
+        log.warning("Kirishni tiklab bo'lmadi: %s", type(exc).__name__)
     if flow is None:
-        return r.L("⚠️ Qaytadan boshlang", "⚠️ Начните заново")
+        _login_forget(ctx, r.uid)
+        ui.ask(r, "login_phone", "s", target=target)
+        return _phone_screen(r, target, r.L("⚠️ Kod eskirdi — raqamni qaytadan yuboring",
+                                            "⚠️ Код устарел — пришлите номер ещё раз"))
     code = re.sub(r"\D", "", r.text)
     try:
         res = await flow.submit_code(code)
     except Exception as exc:
-        return r.L(f"⚠️ Kod noto'g'ri: {h(type(exc).__name__)}", f"⚠️ Неверный код: {h(type(exc).__name__)}")
+        ui.ask(r, "login_code", "s", target=target)
+        return _code_screen(r, flow.phone, login_error(r, exc, "code"))
     if res == "password":
+        _login_save(ctx, r.uid, flow, target)
         ui.ask(r, "login_pass", "s", target=target)
-        return title("🔐", r.L("PAROL", "ПАРОЛЬ")) + "\n\n" + card(
-            [r.L("Ikki bosqichli parolni yuboring (xabar darhol o'chiriladi).",
-                 "Пришлите пароль двухэтапной проверки (сообщение сразу удалится).")]), ui.cancel_kb(r, "s")
+        return _pass_screen(r)
     return await login_done(ctx, r, target)
 
 
 @on_input("login_pass")
 async def login_pass(ctx, r: Req, target: str):
-    flow = ctx.login.get(r.uid)
+    try:
+        flow = await _login_flow(ctx, r.uid)
+    except Exception:
+        flow = None
     if flow is None:
-        return r.L("⚠️ Qaytadan boshlang", "⚠️ Начните заново")
+        _login_forget(ctx, r.uid)
+        ui.ask(r, "login_phone", "s", target=target)
+        return _phone_screen(r, target, r.L("⚠️ Vaqt o'tib ketdi — raqamni qaytadan yuboring",
+                                            "⚠️ Время вышло — пришлите номер ещё раз"))
     try:
         await flow.submit_password(r.text)
     except Exception as exc:
-        return r.L(f"⚠️ Parol noto'g'ri: {h(type(exc).__name__)}", f"⚠️ Неверный пароль: {h(type(exc).__name__)}")
+        ui.ask(r, "login_pass", "s", target=target)
+        return _pass_screen(r, login_error(r, exc, "pass"))
     return await login_done(ctx, r, target)
 
 
@@ -252,6 +394,7 @@ async def login_done(ctx, r: Req, target: str):
     flow = ctx.login.pop(r.uid)
     session = flow.session_string()
     await flow.cancel()
+    _login_forget(ctx, r.uid)
     if target == "main":
         await ctx.userbot.set_session(session)
         await ui.toast(ctx.bot, r.chat_id, r.L("✅ Asosiy akkaunt ulandi", "✅ Основной аккаунт подключён"))

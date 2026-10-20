@@ -22,10 +22,110 @@ LEVELS = {"": 0, "view": 1, "full": 2, "owner": 3}
 SCREENS: dict[str, tuple] = {}         # prefiks -> (fn, level)
 INPUTS: dict[str, tuple] = {}          # amal -> (fn, level)
 PANEL: dict[int, int] = {}             # chat_id -> panel xabari id
-WAIT: dict[int, dict] = {}             # user_id -> {"act", "data", "back"}
+WAIT: "_Wait"                          # user_id -> {"act", "data", "back"} — pastda, bazada ham saqlanadi
 HIST: dict[int, list] = {}             # user_id -> [{"data", "text", "markup", "safe", "ask"}]
 STORE = None                           # Database: panel xabari id si qayta ishga tushganda ham esda qolsin
 _bg: set = set()
+
+
+# ───────────────────────── kiritish holati (bazada ham)
+WAIT_TTL = 30 * 60                     # bot qayta ishga tushsa, 30 daqiqagacha bo'lgan kiritish davom etadi
+
+
+def quiet_store(fn):
+    """Xizmat yozuvi (kiritish holati) — «amal bajarildi» deb hisoblanmasin (Orqaga tarixiga ta'sir qilmasin)."""
+    from .db import EFFECTS
+    token = EFFECTS.set(None)
+    try:
+        return fn()
+    except Exception:
+        log.exception("Holatni saqlashda xato")
+        return None
+    finally:
+        EFFECTS.reset(token)
+
+
+def _enc(v):
+    import datetime as _dt
+    if isinstance(v, _dt.date):
+        return {"__date__": v.isoformat()}
+    raise TypeError(type(v).__name__)
+
+
+def _dec(d: dict):
+    import datetime as _dt
+    return _dt.date.fromisoformat(d["__date__"]) if set(d) == {"__date__"} else d
+
+
+class _Wait(dict):
+    """Kiritish kutilmoqda: user_id -> holat. Xotirada va bazada (settings «wait:<id>»): bot yangilanib qayta
+    ishga tushsa ham, yarim qolgan kiritish (masalan, akkauntga kirish kodi) yo'qolmaydi."""
+
+    @staticmethod
+    def _load(uid):
+        import json
+        import time as _t
+        if STORE is None:
+            return None
+        raw = quiet_store(lambda: STORE.get(f"wait:{uid}"))
+        if not raw:
+            return None
+        try:
+            st = json.loads(raw, object_hook=_dec)
+        except ValueError:
+            return None
+        if _t.time() - st.pop("ts", 0) > WAIT_TTL:
+            _Wait._drop(uid)
+            return None
+        return st
+
+    @staticmethod
+    def _drop(uid):
+        if STORE is None or not quiet_store(lambda: STORE.get(f"wait:{uid}")):
+            return
+
+        def go():
+            STORE.run("DELETE FROM settings WHERE key=?", (f"wait:{uid}",))
+            STORE._cache.pop(f"wait:{uid}", None)
+        quiet_store(go)
+
+    def get(self, uid, default=None):
+        if dict.__contains__(self, uid):
+            return dict.get(self, uid)
+        st = self._load(uid)
+        if st is not None:
+            dict.__setitem__(self, uid, st)
+            return st
+        return default
+
+    def __contains__(self, uid):
+        return self.get(uid) is not None
+
+    def __getitem__(self, uid):
+        v = self.get(uid)
+        if v is None:
+            raise KeyError(uid)
+        return v
+
+    def __setitem__(self, uid, st):
+        import json
+        import time as _t
+        dict.__setitem__(self, uid, st)
+        if STORE is not None:
+            try:
+                raw = json.dumps(dict(st, ts=int(_t.time())), default=_enc, ensure_ascii=False)
+            except TypeError:
+                self._drop(uid)                      # saqlab bo'lmaydigan ma'lumot — faqat xotirada
+                return
+            quiet_store(lambda: STORE.set(f"wait:{uid}", raw))
+
+    def pop(self, uid, default=None):
+        v = dict.pop(self, uid, None)
+        self._drop(uid)
+        return default if v is None else v
+
+
+WAIT = _Wait()
 
 
 def screen(prefix: str, level: str = "view"):

@@ -28,6 +28,20 @@ class LoginFlow:
         sent = await self.client.send_code_request(phone)
         self.code_hash = sent.phone_code_hash
 
+    def state(self) -> dict:
+        """Bot qayta ishga tushsa ham kirishni davom ettirish uchun (seans kaliti, raqam, kod xeshi)."""
+        return {"s": self.client.session.save() if self.client else "", "phone": self.phone, "hash": self.code_hash}
+
+    @classmethod
+    async def resume(cls, api_id: int, api_hash: str, st: dict) -> "LoginFlow":
+        from telethon import TelegramClient
+        from telethon.sessions import StringSession
+        flow = cls(api_id, api_hash)
+        flow.client = TelegramClient(StringSession(st.get("s") or ""), api_id, api_hash)
+        await flow.client.connect()
+        flow.phone, flow.code_hash = st.get("phone", ""), st.get("hash", "")
+        return flow
+
     async def submit_code(self, code: str) -> str:
         """'ok' — kirildi, 'password' — ikki bosqichli parol kerak."""
         from telethon import errors

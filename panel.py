@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import re
 from datetime import datetime
 
 from aiogram import F, Router
@@ -334,6 +335,10 @@ def build_router(ctx) -> Router:
                 await message.delete()
             except Exception:
                 pass
+            if re.fullmatch(r"[\d\s\-]{5,15}", req.text or "") and 5 <= len(re.sub(r"\D", "", req.text)) <= 6:
+                await ui.toast(ctx.bot, req.chat_id, req.L(          # kirish kodi — lekin kirish boshlanmagan
+                    "⚠️ Kod kutilmayotgan edi. Akkaunt ulash: ⚙️ Sozlamalar → 🔑 Asosiy akkaunt → 📲 Ulash",
+                    "⚠️ Код не ожидался. Подключение: ⚙️ Настройки → 🔑 Основной аккаунт → 📲 Подключить"), 8)
             await render(req, await main_menu(ctx, req), fresh=True, safe=True)
             return
         entry = ui.INPUTS.get(state["act"])
