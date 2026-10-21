@@ -160,6 +160,15 @@ async def amain() -> None:
              asyncio.create_task(supervise("Nazorat", sched.run, notifier)),
              asyncio.create_task(supervise("Panel", lambda: panel.live_loop(ctx), notifier))]
 
+    async def resume_push() -> None:                      # yangilanish Push'ni uzgan bo'lsa — joyidan davom
+        try:
+            await pusher.resume_interrupted(now)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("Push'ni davom ettirish")
+    tasks.append(asyncio.create_task(resume_push()))
+
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -169,7 +178,8 @@ async def amain() -> None:
             pass
     await stop.wait()
     log.info("To'xtayapman…")
-    pusher.stop()
+    pusher.shutdown()                                     # Push «uzildi» — qayta ishga tushganda joyidan davom etadi
+    await pusher.wait_idle(5)
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)

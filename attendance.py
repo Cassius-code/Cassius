@@ -178,12 +178,40 @@ class Attendance:
                     "ON CONFLICT(day, person_id) DO UPDATE SET arrived_ts=excluded.arrived_ts, late_min=excluded.late_min, "
                     "greet_ts=COALESCE(attendance.greet_ts, excluded.greet_ts)",
                     (day.isoformat(), person["id"], ts, late, ts if via == "greet" else None))
+        self.db.run("UPDATE attendance SET last_act_ts=MAX(COALESCE(last_act_ts, 0), ?) WHERE day=? AND person_id=?",
+                    (ts, day.isoformat(), person["id"]))
+        from . import strict
+        if strict.on(self.db):                             # 🔒 qattiq rejim: kunlik zp ning % i (15/30/50, +10)
+            if late:
+                strict.late_fine(self.db, person, day, late)
+            return "late" if late else "arrived"
         amount = late_fine_amount(self.db.get("late_fine"), late)
         if late and amount > 0 and self.db.flag("fines_enabled"):
             from .kassa import add_adj
             add_adj(self.db, person["id"], "fine", amount, day.isoformat(), source="late",
                     note=f"опоздание {late} мин")
         return "late" if late else "arrived"
+
+    def late_fined(self, person_id: int, day) -> bool:
+        """Kechikish uchun jarima yozilganmi — yozilgan bo'lsa, «Опоздание» xabari «Проёб»da qoladi (o'chmaydi)."""
+        return self.db.one("SELECT 1 FROM adj WHERE person_id=? AND day=? AND source='late'",
+                           (person_id, day.isoformat() if hasattr(day, "isoformat") else str(day))) is not None
+
+    def late_text(self, person, late_min: int, ts: int) -> str:
+        """«Проёб» uchun: 🕘 Опоздание — 25 мин / @ivan · начало работы в 09:25 (по графику 09:00)."""
+        from .gtext import esc
+        from .timeutil import fmt
+        ws = self.work_start()
+        hrs, mins = divmod(max(0, int(late_min or 0)), 60)
+        dur = (f"{hrs} ч {mins:02d} мин" if mins else f"{hrs} ч") if hrs else f"{mins} мин"
+        text = (f"<b>🕘 Опоздание — {dur}</b>\n{esc(P.mention(person))} · начало работы в "
+                f"<b>{fmt(ts, self.tz, '%H:%M')}</b> <i>(по графику {ws.hour:02d}:{ws.minute:02d})</i>")
+        from . import strict
+        if strict.on(self.db):                             # 🔒 qattiq rejim: jarima foizi yoki ogohlantirish
+            note = strict.late_note(self.db, person, local_date(ts, self.tz), int(late_min or 0))
+            if note:
+                text += "\n" + note
+        return text
 
     async def work_seen(self, person, ts: int) -> str | None:
         """Xodim lidga yozdi — demak ishga kelgan (ish boshlanishidan 2 soat oldindan boshlab hisoblanadi).
@@ -193,6 +221,8 @@ class Attendance:
         day = local_date(ts, self.tz)
         if ts < at(day, self.work_start(), self.tz) - 2 * 3600:
             return None                                    # tungi yozishmalar — yangi kunga kelish emas
+        self.db.run("UPDATE attendance SET last_act_ts=MAX(COALESCE(last_act_ts, 0), ?) WHERE day=? AND person_id=?",
+                    (ts, day.isoformat(), person["id"]))   # 🔒 oxirgi faollik (joyida yo'qligini bilish uchun)
         row = self.db.one("SELECT arrived_ts FROM attendance WHERE day=? AND person_id=?", (day.isoformat(), person["id"]))
         if row is not None and row["arrived_ts"]:
             return None
@@ -202,11 +232,9 @@ class Attendance:
         if res == "late":
             row = self.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
                               (day.isoformat(), person["id"]))
-            from .gtext import esc
-            from .timeutil import fmt
             try:
-                await self.notifier.send_group(f"🕘 опоздание · {esc(P.mention(person))} — {row['late_min']} мин "
-                                               f"<i>(начал работу в {fmt(ts, self.tz, '%H:%M')})</i>")
+                await self.notifier.send_group(self.late_text(person, row["late_min"] if row else 0, ts),
+                                               trash=None if self.late_fined(person["id"], day) else "info")
             except Exception as exc:
                 log.warning("Kech qolish xabari yuborilmadi: %s", exc)
         return res
@@ -283,7 +311,7 @@ class Attendance:
             p = P.person(self.db, br["person_id"])
             try:
                 from .gtext import esc
-                await self.notifier.send_group(f"☕ перерыв · {esc(P.mention(p))} — время перерыва вышло!")
+                await self.notifier.send_group(f"☕ перерыв · {esc(P.mention(p))} — время перерыва вышло!", trash="info")
                 self.db.run("UPDATE breaks SET reminded=1 WHERE id=?", (br["id"],))
             except Exception as exc:
                 log.warning("Tanaffus eslatmasi yuborilmadi: %s", exc)
@@ -295,28 +323,24 @@ class Attendance:
         due = at(day, self.work_start(), self.tz) + max(1, self.db.get_int("noshow_minutes", 15)) * 60
         if now < due or now > due + 6 * 3600:
             return
-        missing, working = [], []                          # hali ko'rinmagan / ishlayapti, lekin «доброе утро» yo'q
+        missing = []                                       # hali ko'rinmagan (na «доброе утро», na lidga yozgan)
         for p in self.staff():
             if P.is_day_off(p, day.weekday()):
                 continue
             row = self.db.one("SELECT * FROM attendance WHERE day=? AND person_id=?", (day.isoformat(), p["id"]))
-            if row is not None and (row["greet_ts"] or row["reminded"]):
-                continue
-            (working if row is not None and row["arrived_ts"] else missing).append(p)
-        if not missing and not working:
+            if row is not None and (row["greet_ts"] or row["reminded"] or row["arrived_ts"]):
+                continue                                   # ishlayapti — «доброе утро» deb eslatish shart emas
+            missing.append(p)
+        if not missing:
             return
         from .gtext import mentions, small
-        lines = [small("приход · напишите «доброе утро»")]
-        if missing:
-            lines.append(f"{mentions(missing)} — ещё не видно в работе")
-        if working:
-            lines.append(f"{mentions(working)} — уже работает, но без «доброе утро»")
+        lines = [small("приход · напишите «доброе утро»"), f"{mentions(missing)} — ещё не видно в работе"]
         try:
-            await self.notifier.send_group("\n".join(lines))
+            await self.notifier.send_group("\n".join(lines), trash="info")
         except Exception as exc:
             log.warning("Kelmaganlar eslatmasi yuborilmadi: %s", exc)
             return
-        for p in missing + working:
+        for p in missing:
             self.db.run("INSERT INTO attendance(day, person_id, reminded) VALUES(?,?,1) "
                         "ON CONFLICT(day, person_id) DO UPDATE SET reminded=1", (day.isoformat(), p["id"]))
 

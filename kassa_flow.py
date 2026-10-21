@@ -144,10 +144,10 @@ async def report_done_panel(ctx, r, rid: int):
         await finalize(ctx, rid)
     p = P.person(db, rep["person_id"])
     days = K.report_days(db, rid)
-    rows = db.all("SELECT amount, usd FROM checks WHERE report_id=? AND skip=0", (rid,))
-    usd = sum(x["usd"] or 0 for x in rows)
-    lines = [f"🧾 <b>{h(p['name']) if p else '?'}</b> · {', '.join(d[8:10] + '.' + d[5:7] for d in days)}",
-             f"{len(rows)} {L(ctx, 'chek', 'чек.')} · {num(sum(x['amount'] for x in rows))} · <b>{money(usd)} $</b>"]
+    lines = []
+    for d in days if p else []:
+        lines += ([""] if lines else []) + day_brief(ctx, p["id"], d).split("\n")
+    lines = lines or ["?"]
     btn = [[(L(ctx, "📅 Kun", "📅 День"), f"kdd:{days[0]}") if days else None,
             (f"👤 {p['name']}", f"po:{p['id']}") if p else None],
            [(L(ctx, "↩️ Bekor qilish", "↩️ Отменить"), f"krm:{rid}")], [(L(ctx, "⌂ Menyu", "⌂ Меню"), "m")]]
@@ -314,14 +314,49 @@ async def finalize(ctx, rid: int) -> None:
     shut = [d for d in K.report_days(db, rid) if K.is_closed(db, d)]
     if shut:
         await closed_day_alert(ctx, rid, shut)
+    from . import strict
+    if strict.on(db):                                      # 🔒 kunlik zp ma'lum bo'ldi — foizli jarima summasi
+        try:
+            strict.settle(db, local_date(ctx.clock(), ctx.tz))
+        except Exception:
+            log.exception("Qattiq rejim: jarima summasi")
     if db.get("kassa_notify") != "0":
-        days = K.report_days(db, rid)
-        rows = db.all("SELECT amount, usd FROM checks WHERE report_id=? AND skip=0", (rid,))
-        usd = sum(x["usd"] or 0 for x in rows)
-        text = (f"🧾 <b>{h(p['name'])}</b> · {', '.join(d[8:10] + '.' + d[5:7] for d in days)}\n"
-                f"{len(rows)} {L(ctx, 'chek', 'чек.')} · {num(sum(x['amount'] for x in rows))} · <b>{money(usd)} $</b>")
-        await _send(ctx, _who_can_see(ctx, pid), text, kb([(L(ctx, "👤 Kabinet", "👤 Кабинет"), f"po:{pid}")]),
-                    key=f"kn:{rid}")
+        ids = _who_can_see(ctx, pid)
+        if r["chat_id"] and r["chat_id"] > 0:
+            ids = [u for u in ids if u != r["chat_id"]]   # botga o'zi yozgan — unga «✅ Qabul qilindi» ekrani bor
+        for d in K.report_days(db, rid):
+            def build_brief(d=d):
+                return day_brief(ctx, pid, d), kb([(L(ctx, "👤 Kabinet", "👤 Кабинет"), f"po:{pid}")])
+            await _send(ctx, ids, build_brief, key=f"kb:{pid}:{d}")    # shu kunning eski xulosasi o'chadi
+
+
+def n3(v) -> str:
+    return f"{int(v):,}"                                   # 17,100 — eski kassa botidagidek
+
+
+def day_brief(ctx, pid: int, day: str) -> str:
+    """Xodimning shu kungi xulosasi (eski kassa botidagidek): ism, sana, kassa, RD soni, kassa ($).
+    Shu kunning hamma qabul qilingan hisobotlari bo'yicha. Umumiy akkaunt — kim ishlagani ham."""
+    db = ctx.db
+    p = P.person(db, pid)
+    if p is None:
+        return ""
+    rows = db.all("SELECT c.amount, c.usd, c.pay FROM checks c JOIN reports r ON r.id=c.report_id "
+                  "WHERE r.person_id=? AND r.status='done' AND c.rd=? AND c.skip=0 ORDER BY c.id", (pid, day))
+    ops = []
+    for x in rows:
+        if x["pay"] and x["pay"] != pid and x["pay"] not in ops:
+            ops.append(x["pay"])
+    pool = p["kassa_kind"] == "pool"
+    lines = [f"<b>{h(p['name'])}</b>" + (L(ctx, " (umumiy akkaunt)", " (общий аккаунт)") if pool else ""),
+             f"{L(ctx, 'Sana', 'Дата')}: {day[8:10]}.{day[5:7]}",
+             f"{L(ctx, 'Kassa', 'Касса')}: {n3(sum(x['amount'] for x in rows))}",
+             f"{L(ctx, 'RD soni', 'Кол-во рд')}: {len(rows)}",
+             f"{L(ctx, 'Kassa ($)', 'Касса ($)')}: {money(sum(x['usd'] or 0 for x in rows))}$"]
+    if ops:
+        names = [P.person(db, i) for i in ops]
+        lines.append(f"{L(ctx, 'Ishladi', 'Работал')}: " + ", ".join(h(q["name"]) for q in names if q is not None))
+    return "\n".join(lines)
 
 
 async def closed_day_alert(ctx, rid: int, days: list[str]) -> None:

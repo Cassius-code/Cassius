@@ -28,8 +28,28 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Raqamni bosib o'zgartirasiz (masalan 5 ta lid, 10 daqiqa). Jarima shu kuni ishda bo'lgan xodimlarga yoziladi
   («доброе утро» yoki lidga yozgan); hech kim kelmagan bo'lsa — dam olmayotgan hammaga.
   Kech qolish: o'zingiz kiritasiz, masalan `0.5` (har daqiqa) yoki `10=2, 30=5`.
+- **🧹 «Проёб»ni tozalash.** Zaderjka xabari — xodim javob berganidan 10 daqiqa keyin o'chadi; boshqa avtomat
+  xabarlar (soviyotgan lidlar, kechikish, Push tugadi, jarima, stavka) — 1 soatdan keyin. Vaqtni o'zingiz
+  tanlaysiz: 🚨 Nazorat → 🧹 «Проёб»ni tozalash (0 — o'chmaydi). Jarima yozilgan xabar («💸 штраф», jarimali
+  kechikish) o'chmaydi. Buyruqqa javoblar va doska ham o'chmaydi; hisob botda qoladi. Botga guruhda «Xabarlarni
+  o'chirish» huquqi kerak.
+- **⏰ Javobsiz zaderjka.** «Задержка» chiqqanidan 15 daqiqa o'tib ham javob bo'lmasa (yoki ish kuni tugasa) —
+  o'sha xabarga javob qilib eslatma, xodimlar belgilanadi. Eslatmadan 5 daqiqada javob bo'lmasa — 5 $ jarima
+  o'sha kuni papkada ishlayotgan har xodimga (xabar qoladi). Vaqt va summa: 🚨 Nazorat → ⏰ Javobsiz zaderjka.
+- **🔒 Qattiq rejim** (🚨 Nazorat → 🔒, egasi yoqadi/o'chiradi). Yoqilsa papka jarimasi va daqiqasiga kechikish jarimasi
+  ishlamaydi, o'rniga (jarima = reglamentdagi $ × xodim foizi, masalan $15 × 41% = $6.15):
+  - 🕘 kechikish — o'sha kungi zp dan: 15 daqiqagacha ogohlantirish; 15–30 — 15%; 30–60 — 30%; 60+ — 50%;
+    haftada 3-kechikishdan boshlab yana 10% (summa kechki hisobotdan keyin aniqlanadi);
+  - 🐢 sekin javob (limitdan oshgan zaderjka), har hafta yangidan: 1-marta ogohlantirish; 2-marta $15 × %;
+    3-dan boshlab har biri $25 × % — o'sha kuni papkada ishlayotganlarga;
+  - 🚪 papkani tashlab ketish (lid kutyapti, tanaffus aytilmagan): 15+ daqiqa $15 × %; 60+ daqiqa jami $40 × %.
+    O'sha paytdagi sekin javoblar alohida jarima bo'lmaydi.
+- **📌 Doska.** «Проёб» tepasida qadalgan «Задержки сейчас»: har RD — hozir nechta lid limitdan oshib javobsiz
+  (🟢 / 🟡 / 🔴). Hamma ko'radi, pul yo'q. Son o'zgarsa — o'sha xabar joyida yangilanadi. 🚨 Nazorat → 📌 Doska
+  (yoqish / o'chirish). Botga guruhda «Xabarlarni qadash» huquqi kerak.
 - **🙋 Ishga kelish.** Xodim «доброе утро» yozsa YOKI lidga yoza boshlasa — ishga kelgan (qaysi biri oldin bo'lsa).
-  Kech qolish shu vaqtdan. «доброе утро» yozmagan bo'lsa, ish boshlanib 15 daqiqada eslatma boradi.
+  Kech qolish shu vaqtdan; kech qolsa «Проёб»ga: «🕘 Опоздание — 25 мин · начало работы в 10:25 (по графику 10:00)».
+  Ish boshlanib 15 daqiqada hali ko'rinmaganlarga eslatma boradi; lidga yozib ishlayotganlarga — yo'q.
 - **☕ Tanaffus.** «атайду» / «перерыв» — boshlanadi, «тут» — tugaydi. Vaqt oshsa, faqat eslatma boradi.
 - **💵 Kassa.** Kassa — cheklar yig'indisi (1950 + 2600 = 4 550); zp — $ da. «Проёб»dagi cheklar, jarima, bonus, avanslar.
   - **Hisobotni botning o'ziga yozish mumkin:** tepasida ism bilan, masalan `Baxa` / `rd 19.10` / `1950` / `2600`.
@@ -55,6 +75,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   - **🧮 Tekshiruv.** Hisobotda: Kassa = Artur + xodimlar + ulushlar + sizga ✅.
   - O'tgan hafta bilan solishtirish (↑ / ↓ %), 🗓 Oy yakuni, kunlar → akkauntlar → cheklar.
   - Zp hisoblash usuli: **tugma bilan** (odatiy) / **avtomatik** / **o'chiq** (o'zingiz hisoblaysiz).
+  - Har hisobotdan keyin sizga xodimning shu kungi xulosasi keladi (eski kassa botidagidek):
+    `Adam` / `Дата: 19.10` / `Касса: 17,100` / `Кол-во рд: 8` / `Касса ($): 64$`. Shu kunga yana hisobot kelsa —
+    eskisi o'chadi, kunning jami bilan yangisi keladi.
   - Pul amallari (to'landi, avans, ulushlar, foizlar) — faqat siz. Adminlar cheklarni tuzatadi.
   - Xodim faqat o'z zp sini ko'radi, so'rov avval sizga keladi. Daromadingizni faqat siz ko'rasiz.
 - **📣 Push.** Har papka o'z akkauntidan, faqat qo'lda (🚀). Kimga va qaysi tartibda — soatga qarab:
@@ -64,11 +87,21 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Baza — 28.08.2026 dan keyin o'zi yozgan har bir lid (yangi kelgani ham, eskisi ham). Bot ularni bir marta to'liq
   tekshiradi (tugagach xabar keladi; qayta: 📣 Push → ⚙️ → 🔍 Bazani tekshirish). Vaqtlar va sana: 📣 Push → ⚙️.
   Papkaga akkaunt: 📣 Push → 📁 Papkalar → papka → 📲 Akkaunt (➕ yangisini shu yerning o'zida ulash mumkin).
+  Push ketayotganda sonini o'zgartirsangiz (⚙️ → 🔢 Soni yoki papkaning o'z soni) — darhol shu son bilan davom etadi.
+  «Проёб»da Push paneli (hamma ko'radi): nima ketyapti (matn / ovozli …), har RD — nechtadan nechtasi. Tugagach —
+  shu xabarga javob qilib xodimlar belgilanadi («Пуш завершён … будьте на связи»), panel 5 daqiqada o'chadi.
+  O'chirish: 📣 Push → ⚙️ → 👥 Guruhda panel.
+  Push paytida bot yangilansa (GitHub'ga yuklasangiz) yoki qayta ishga tushsa — Push o'zi joyidan davom etadi:
+  yuborilganlarga qayta yubormaydi, son o'sha. ⏹ bilan to'xtatilgani davom etmaydi.
+  Telegram akkauntga «kuting» desa (FloodWait) — o'sha papka kutadi (30 daqiqagacha), ekranda «⏳ RD 9 → 12:44»,
+  keyin o'zi davom etadi (sekinroq); boshqa papkalar to'xtamaydi. Kutish uzoqroq bo'lsa — papka to'xtaydi va Push
+  ekranida «▶️ Davom ettirish — qolgan N ta» chiqadi: faqat yetmay qolgan papkalar o'z sonigacha yuboriladi.
 - **📊 Hisobotlar.** Faqat buyruq bilan: shaxsiy chatda `/hisobot`, guruhda `/statistika` (🥇🥈🥉 bilan).
 - **📈 Tahlil** (📊 Hisobotlar → 📈). Hammasi faqat vaqt va kim yozgani bo'yicha — matn o'qilmaydi:
   - 🕐 Soatlar — har soatda nechta lid yozdi va nechtasi zaderjkaga tushdi (bugun / 7 kun, RD bo'yicha).
   - 💤 Qotib qolgan — N kun (3) hech kim yozmagan lidlar; 📉 Soviyotgan — mijoz odatdagidan 3 barobar uzoq jim.
-    Soviyotganlarni bot «Проёб»da o'zi eslatadi (har RD alohida, xodim belgilanadi).
+    Soviyotganlarni bot «Проёб»da o'zi eslatadi (har RD alohida, xodim belgilanadi). Faqat kecha va undan oldin
+    kelgan lidlar — bugun kelgan yangi lid «soviyotgan» hisoblanmaydi.
   - 💳 Kartalar — xodim topikda `/rek /dep /cash` yozsa, «lidga karta ketdi». Har RD: necha marta, qaysi lidga.
   - ⚡ Tezlik → karta va 🏆 G'oliblar — javob tezligi kartaga qanday ta'sir qiladi, eng yaxshi xodimlar formulasi.
   - 📣 Push natijasi (📣 Push → 🧾) — har Push'dan keyin 90 daqiqada nechta lid yozdi, 24 soatda nechtasiga karta ketdi.

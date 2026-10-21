@@ -25,10 +25,11 @@ class Notifier:
         self._last: dict[str, float] = {}
         self.userbot = None                     # asosiy akkaunt — «Проёб»ga uning nomidan yozish mumkin
         self._own: deque = deque(maxlen=300)    # asosiy akkaunt yozgan matnlar: bot ularni qayta ishlamasin
+        self._main_pause = 0.0                  # asosiy akkaunt yoza olmadi — shu vaqtgacha «Проёб»ga bot yozadi
 
     # ───────────── «Проёб»ga kim nomidan yoziladi: bot yoki asosiy akkaunt (anonim admin bo'lsa — guruh nomidan)
     def _main(self):
-        if self.db.get("proyob_sender") != "main":
+        if self.db.get("proyob_sender") != "main" or time.time() < self._main_pause:
             return None
         ub = self.userbot
         if ub is None or ub.state != "online" or ub.client is None:
@@ -45,14 +46,50 @@ class Notifier:
         t, now = self._norm(text), time.time()
         return bool(t) and any(x == t and now - ts < 300 for ts, x in self._own)
 
+    @staticmethod
+    def main_error(exc) -> tuple[str, int]:
+        """Asosiy akkaunt «Проёб»ga yoza olmadi: sabab (flood | spam | access | other) va necha soniya bot yozadi."""
+        name = type(exc).__name__
+        sec = int(getattr(exc, "seconds", 0) or 0)
+        if sec or "FloodWait" in name or "SlowModeWait" in name:
+            return "flood", max(sec, 30)
+        if name in ("PeerFloodError", "UserBannedInChannelError"):
+            return "spam", 3600
+        if name in ("ChatWriteForbiddenError", "ChannelPrivateError", "ChatAdminRequiredError",
+                    "UserNotParticipantError", "ChatRestrictedError", "ChatGuestSendForbiddenError", "ValueError"):
+            return "access", 600
+        return "other", 300
+
     async def _main_failed(self, exc) -> None:
-        log.warning("«Проёб»: asosiy akkaunt yoza olmadi (%s) — bot yozadi", type(exc).__name__)
+        kind, pause = self.main_error(exc)
+        self._main_pause = time.time() + pause
+        name = type(exc).__name__
+        log.warning("«Проёб»: asosiy akkaunt yoza olmadi (%s) — %s s bot yozadi", name, pause)
+        if kind == "flood" and pause < 600:
+            return                  # Telegram ozgina kutishni so'radi (ko'p xabar, masalan Push) — oddiy hol, xabar shart emas
+        m = max(1, pause // 60)
+        texts = {
+            "flood": (f"⚠️ Telegram asosiy akkauntni {m} daqiqaga sekinlashtirdi (juda ko'p xabar — masalan Push). "
+                      "Bu spam emas. Shu vaqt «Проёб»ga bot o'zi yozadi — xabarlar yo'qolmaydi.",
+                      f"⚠️ Telegram замедлил основной аккаунт на {m} мин (слишком много сообщений — например, Пуш). "
+                      "Это не спам. Пока в «Проёб» пишет бот — сообщения не теряются."),
+            "spam": ("⚠️ Asosiy akkaunt spam-cheklovda — «Проёб»ga yoza olmadi. Hozircha bot o'zi yozyapti. "
+                     "Tekshirish: shu akkauntdan @SpamBot ga /start.",
+                     "⚠️ Основной аккаунт под спам-ограничением — не может писать в «Проёб». Пока пишет бот. "
+                     "Проверка: с этого аккаунта /start в @SpamBot."),
+            "access": ("⚠️ Asosiy akkaunt «Проёб»ga yoza olmadi: guruhda yo'q yoki yozishga ruxsat yo'q. "
+                       "Hozircha bot o'zi yozyapti.",
+                       "⚠️ Основной аккаунт не может писать в «Проёб»: его нет в группе или нет права писать. "
+                       "Пока пишет бот."),
+            "other": (f"⚠️ Asosiy akkaunt «Проёб»ga yoza olmadi ({name}). Hozircha bot o'zi yozyapti — "
+                      "xabarlar yo'qolmaydi.",
+                      f"⚠️ Основной аккаунт не смог написать в «Проёб» ({name}). Пока пишет бот — "
+                      "сообщения не теряются."),
+        }
+        uz, ru = texts[kind]
         from .context import tr
         try:
-            await self.notify_owner(lambda: (tr(
-                "⚠️ «Проёб»ga asosiy akkaunt nomidan yozib bo'lmadi — u guruhda bormi? Hozircha bot o'zi yozyapti.",
-                "⚠️ Не удалось написать в «Проёб» от основного аккаунта — он есть в группе? Пока пишет бот."), None),
-                key="main-proyob", min_interval=3600)
+            await self.notify_owner(lambda: (tr(uz, ru), None), key=f"main-proyob-{kind}", min_interval=3600)
         except Exception:
             pass
 
@@ -84,18 +121,46 @@ class Notifier:
                 kw["chat_id"] = new_id
         return await fn(*args, **kw)
 
-    async def send_group(self, text: str, done_button=None, reply_to: int | None = None) -> tuple[int, int]:
+    def trash(self, gid: int, mid: int, kind: str = "info") -> None:
+        """🧹 Bu xabar vaqti kelganda o'chsin (tidy.sweep)."""
+        try:
+            from .tidy import remember
+            remember(self.db, gid, mid, kind, int(time.time()))
+        except Exception as exc:
+            log.info("Tozalash navbatiga qo'shilmadi: %s", exc)
+
+    async def send_group(self, text: str, done_button=None, reply_to: int | None = None,
+                         trash: str | None = None) -> tuple[int, int]:
+        """«Проёб»ga xabar. trash="info" — vaqti kelganda o'zi o'chadi (🧹 sozlamasi)."""
+        gid, mid = await self._send_group(text, done_button, reply_to)
+        if trash:
+            self.trash(gid, mid, trash)
+        return gid, mid
+
+    async def _send_group(self, text: str, done_button=None, reply_to: int | None = None) -> tuple[int, int]:
         """«Проёб»ga xabar. Asosiy akkaunt nomidan yozish yoqilgan bo'lsa — o'sha akkaunt (tugmasiz: oddiy akkaunt
         tugma qo'sha olmaydi); u yoza olmasa — bot yozadi (xabar yo'qolmaydi)."""
         gid = self.group_id()
         client = self._main()
         if client is not None:
-            try:
-                self._own.append((time.time(), self._norm(text)))
-                m = await client.send_message(gid, text, parse_mode="html", link_preview=False, reply_to=reply_to)
-                return gid, int(m.id)
-            except Exception as exc:
-                await self._main_failed(exc)
+            for attempt in (1, 2):
+                try:
+                    self._own.append((time.time(), self._norm(text)))
+                    m = await client.send_message(gid, text, parse_mode="html", link_preview=False, reply_to=reply_to)
+                    return gid, int(m.id)
+                except ValueError as exc:                # guruh akkaunt xotirasida yo'q (ishga tushgan zahoti)
+                    if attempt == 1:
+                        try:
+                            async for _d in client.iter_dialogs(limit=300):
+                                pass
+                            continue
+                        except Exception:
+                            pass
+                    await self._main_failed(exc)
+                    break
+                except Exception as exc:
+                    await self._main_failed(exc)
+                    break
         kw = {"reply_to_message_id": reply_to} if reply_to else {}
         msg = await self._call(self.bot.send_message, chat_id=gid, text=text, reply_markup=self._done_kb(done_button),
                                disable_web_page_preview=True, parse_mode="HTML", **kw)

@@ -12,6 +12,20 @@ DEFAULTS: dict[str, str] = {
     # ── nazorat (zaderjka)
     "delay_enabled": "1",
     "limit_minutes": "20",           # mijozga javob limiti
+    "remind_on": "1",                # ⏰ javobsiz zaderjka: eslatma, keyin jarima
+    "remind_min": "15",              # «задержка» chiqqanidan shuncha daqiqa o'tib ham javob yo'q — eslatma
+    "remind_grace_min": "5",         # eslatmadan keyin shuncha daqiqa — javob bo'lmasa jarima
+    "remind_fine_usd": "5",          # jarima ($) — o'sha kuni papkada ishlayotgan har xodimga
+    "strict_on": "0",                # 🔒 qattiq rejim (reglament jarimalari) — egasi yoqadi
+    "clean_delay_min": "10",         # 🧹 «задержка» xabari javobdan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
+    "clean_info_min": "60",          # 🧹 boshqa avtomat xabarlar yozilganidan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
+    "push_group": "1",               # 📣 Push ketayotganda «Проёб»da panel (hamma ko'radi), tugagach — xodimlarga xabar
+    "push_panel": "",                # ketayotgan Push paneli: bid:gid:mid
+    "push_panel_del": "",            # tugagan Push paneli o'chadigan vaqt: gid:mid:ts
+    "board_on": "1",                 # 📌 «Проёб»da qadalgan «Задержки сейчас» (har RD, jonli)
+    "board_msg_id": "",
+    "board_gid": "",
+    "board_text": "",
     "wait_slide_min": "5",           # mijoz birinchi xabaridan shu daqiqa ichida yana yozsa — oxirgisidan hisoblanadi
     "work_start": "10:00",           # ish boshlanishi (hamma uchun bir xil)
     "work_end": "23:00",             # ish tugashi
@@ -83,8 +97,8 @@ DEFAULTS: dict[str, str] = {
     "push_times": "10:30,15:00,20:00",
     "push_auto_last": "",            # oxirgi avtomat Push (sana+vaqt kaliti)
     # ── kassa
-    "zp_mode": "button",
-    "kassa_notify": "0",             # har hisobotga alohida xabar (chat toza tursin — odatda o'chiq)             # button — hafta «🧮 Haftani hisoblash» bilan; auto — doim; off — o'zingiz hisoblaysiz
+    "zp_mode": "button",             # button — hafta «🧮 Haftani hisoblash» bilan; auto — doim; off — o'zingiz hisoblaysiz
+    "kassa_notify": "1",             # har hisobotdan keyin egaga xodimning shu kungi xulosasi (eski kassa botidagidek)
     # ── hisobotlar
     "report_enabled": "0",           # egasi: hisobot faqat buyruq bilan (/hisobot), avtomat yuborilmaydi
     "report_time": "23:30",

@@ -498,6 +498,9 @@ class Tracker:
             await self.notifier.edit_group(gid, mid, text, done_button=None if closed else first)
         except Exception as exc:
             log.info("Alert tahrirlanmadi: %s", exc)
+        if closed:                                     # 🧹 hamma lidga javob berildi — N daqiqadan keyin o'chadi
+            from .tidy import remember
+            remember(self.db, gid, mid, "delay", int(self.clock()))
 
     # ------------------------------------------------------------ taymer (har ~10 soniyada)
     async def tick(self, now: int | None = None) -> dict:
@@ -511,6 +514,8 @@ class Tracker:
             out["alerts"] = await self._delays(now)
             out["eod"] = await self.end_of_day(now)
         out["incidents"] = await self._incidents(now)
+        if self.db.flag("delay_enabled"):
+            out["reminded"] = await self._remind_alerts(now)
         return out
 
     def _stavka_timeouts(self, now: int) -> int:
@@ -554,7 +559,7 @@ class Tracker:
                    for th in items]
                 + [tag(P.folder_people(self.db, fid))]) if x)
             try:
-                await self.notifier.send_group(text)
+                await self.notifier.send_group(text, trash="info")
             except Exception as exc:
                 log.warning("«ставка» yuborilmadi: %s", exc)
                 continue
@@ -602,7 +607,7 @@ class Tracker:
                     + [tag(P.folder_people(self.db, fid), "доведите работу до конца, чтобы ни один чат "
                                                           "не остался без ответа")]) if x)
                 try:
-                    await self.notifier.send_group(text)
+                    await self.notifier.send_group(text, trash="info")
                     sent += len(part)
                 except Exception as exc:
                     log.warning("Kun oxiri eslatmasi yuborilmadi: %s", exc)
@@ -664,7 +669,135 @@ class Tracker:
                         "decision) VALUES(?,?,?,?,?,?,?,?,?,?)", (now, th["wait_since"], th["chat_id"],
                                                                    th["topic_id"], th["wait_msg_id"], None, "", "",
                                                                    "timer", "alert"))
+        from . import strict
+        if strict.on(self.db):                             # 🔒 qattiq rejim: sekin javob — haftalik hisob
+            try:
+                await strict.slow(self, f, rows, now)
+            except Exception:
+                log.exception("Qattiq rejim (sekin javob)")
         return len(items)
+
+    # ------------------------------------------------------------ ⏰ javobsiz zaderjka: eslatma → jarima
+    def alert_remind_rules(self) -> tuple[bool, int, int, float]:
+        """(yoqiqmi, eslatma — zaderjkadan necha soniya, muhlat — eslatmadan necha soniya, jarima $)."""
+        return (self.db.flag("remind_on"), max(1, self.db.get_int("remind_min", 15)) * 60,
+                max(1, self.db.get_int("remind_grace_min", 5)) * 60, max(0.0, self.db.get_float("remind_fine_usd")))
+
+    def _last_work_end(self, now: int) -> int:
+        _ws, we = self.work_window()
+        t = datetime.fromtimestamp(now, self.tz)
+        end_dt = datetime.combine(t.date(), we, tzinfo=self.tz)
+        if end_dt > t:
+            end_dt -= timedelta(days=1)
+        return int(end_dt.timestamp())
+
+    async def _unanswered(self, gid: int, mid: int) -> list:
+        """Shu zaderjka xabaridagi hali javobsiz havolalar. Kun oxirida kutish yopilgan bo'lsa ham, keyin javob
+        berilgani (xodim yozgan) — yopiladi (✅). «Holat» bo'yicha jarima olganlari — qayta jarimaga kirmaydi."""
+        out = []
+        for a in self.db.all("SELECT * FROM alerts WHERE group_chat_id=? AND group_msg_id=? AND status='open'",
+                             (gid, mid)):
+            th = self.thread(a["chat_id"], a["topic_id"])
+            if th is not None and th["last_staff_ts"] and th["last_staff_ts"] >= a["wait_since"]:
+                fid = a["folder_id"]
+                await self._close_alert(a["id"], th["last_staff_ts"],
+                                        self.elapsed(fid, a["wait_since"], th["last_staff_ts"]) if fid else 0, None, None)
+                continue
+            if self.db.one("SELECT 1 FROM incident_alerts ia JOIN incidents i ON i.id=ia.incident_id "
+                           "WHERE ia.alert_id=? AND i.status='fined'", (a["id"],)):
+                continue
+            out.append(a)
+        return out
+
+    def _remind_text(self, f, rows, people, grace: int, usd: float, state: str = "open") -> str:
+        name = f["name"] if f else ""
+        fine = usd > 0 and self.db.flag("fines_enabled")
+        if state == "ok":
+            return "\n".join([head(name, "напоминание"), "✅ ответили — без штрафа"])
+        if state == "fined":
+            return "\n".join([head(name, "не ответили после напоминания"),
+                              f"💸 штраф {usd:g} $ каждому", tag(people)])
+        lines = [head(name, "всё ещё без ответа")]
+        lines += [link(message_link(a["chat_id"], a["wait_msg_id"] or a["topic_id"], a["topic_id"])) for a in rows]
+        lines.append(f"⏰ <b>Ответьте в течение {grace // 60} мин" + (f" — иначе штраф {usd:g} $ каждому" if fine else "")
+                     + "</b>")
+        lines.append(tag(people))
+        return "\n".join(lines)
+
+    async def _remind_alerts(self, now: int) -> int:
+        """Zaderjka xabari N daqiqa (yoki ish kuni tugaguncha) javobsiz — o'sha xabarga javob qilib eslatma,
+        xodimlar belgilanadi. Muhlatda javob bo'lmasa — o'sha kuni papkada ishlayotganlarga jarima (xabar qoladi)."""
+        on, after, grace, usd = self.alert_remind_rules()
+        if not on:
+            return 0
+        ws, we = self.work_window()
+        work = is_work_time(now, self.tz, ws, we)
+        end_ts = self._last_work_end(now)
+        eod = not work and end_ts <= now <= end_ts + 3 * 3600   # ish kuni hozirgina tugadi — darhol eslatma
+        day = local_date(now, self.tz)
+        changed = 0
+        if work or eod:
+            for g in self.db.all("SELECT group_chat_id gid, group_msg_id mid, folder_id, MIN(created_ts) created "
+                                 "FROM alerts WHERE status='open' AND group_msg_id IS NOT NULL AND created_ts>=? "
+                                 "GROUP BY group_chat_id, group_msg_id", (now - 86400,)):
+                if self.db.one("SELECT 1 FROM alert_reminders WHERE gid=? AND mid=?", (g["gid"], g["mid"])):
+                    continue
+                if not ((work and now >= g["created"] + after) or (eod and g["created"] < end_ts)):
+                    continue
+                rows = await self._unanswered(g["gid"], g["mid"])
+                if not rows:
+                    continue
+                f = P.folder(self.db, g["folder_id"])
+                people = self.fine_people(g["folder_id"], day) if f else []
+                rgid = rmid = None
+                try:
+                    rgid, rmid = await self.notifier.send_group(self._remind_text(f, rows, people, grace, usd),
+                                                                reply_to=g["mid"])
+                except Exception as exc:
+                    log.warning("Eslatma yuborilmadi: %s", exc)
+                self.db.run("INSERT OR IGNORE INTO alert_reminders(gid, mid, folder_id, reminded_ts, rgid, rmid, "
+                            "deadline) VALUES(?,?,?,?,?,?,?)", (g["gid"], g["mid"], g["folder_id"], now, rgid, rmid,
+                                                                 now + grace))
+                changed += 1
+        for r in self.db.all("SELECT * FROM alert_reminders WHERE status='open'"):
+            rows = await self._unanswered(r["gid"], r["mid"])
+            f = P.folder(self.db, r["folder_id"]) if r["folder_id"] else None
+            if not rows:
+                self.db.run("UPDATE alert_reminders SET status='ok', ended_ts=? WHERE gid=? AND mid=?",
+                            (now, r["gid"], r["mid"]))
+                if r["rmid"]:
+                    try:
+                        await self.notifier.edit_group(r["rgid"], r["rmid"], self._remind_text(f, [], [], grace, usd, "ok"))
+                    except Exception as exc:
+                        log.info("Eslatma tahrirlanmadi: %s", exc)
+                    from .tidy import remember
+                    remember(self.db, r["rgid"], r["rmid"], "info", now)   # 🧹 jarimasiz — keyin o'chadi
+                changed += 1
+                continue
+            if now < r["deadline"]:
+                continue
+            fday = local_date(r["reminded_ts"], self.tz)
+            people = self.fine_people(r["folder_id"], fday) if f else []
+            fined = usd > 0 and self.db.flag("fines_enabled") and bool(people)
+            if fined:
+                from .kassa import add_adj
+                for p in people:
+                    add_adj(self.db, p["id"], "fine", usd, fday.isoformat(), source="remind",
+                            note="не ответили после напоминания")
+            self.db.run("UPDATE alert_reminders SET status=?, ended_ts=? WHERE gid=? AND mid=?",
+                        ("fined" if fined else "missed", now, r["gid"], r["mid"]))
+            if r["rmid"]:
+                text = (self._remind_text(f, rows, people, grace, usd, "fined") if fined else
+                        "\n".join([head(f["name"] if f else "", "не ответили после напоминания"), tag(people)]))
+                try:
+                    await self.notifier.edit_group(r["rgid"], r["rmid"], text)
+                except Exception as exc:
+                    log.info("Eslatma tahrirlanmadi: %s", exc)
+                if not fined:
+                    from .tidy import remember
+                    remember(self.db, r["rgid"], r["rmid"], "info", now)   # jarimasiz — 🧹 keyin o'chadi
+            changed += 1
+        return changed
 
     # ------------------------------------------------------------ jarima: «holat» (papkada ko'p lid javobsiz)
     def fine_amount(self, f) -> float:
@@ -685,6 +818,9 @@ class Tracker:
 
         Har bir «задержка» havolasi faqat BITTA holatga kiradi; oxirgi 1 soatdagi havolalar sanaladi (kunlab javobsiz
         qolib ketgan eski havolalar keyingi holatlarni to'sib qo'ymaydi va qayta sanalmaydi)."""
+        from . import strict
+        if strict.on(self.db):
+            return 0                                       # 🔒 qattiq rejimda papka jarimasi ishlamaydi
         n_min, forgive, grace = self.fine_rules()
         changed = 0
         for f in P.folders(self.db):
@@ -713,6 +849,7 @@ class Tracker:
             if still == 0:
                 self.db.run("UPDATE incidents SET status='ok', ended_ts=? WHERE id=?", (now, active["id"]))
                 await self._render_incident(active["id"])
+                self._trash_incident(active["id"], now)       # vaqtida javob berildi — 🧹 keyin o'chadi
                 changed += 1
             elif now >= (active["deadline"] or now):
                 await self._fine_incident(active, f, now)
@@ -730,17 +867,26 @@ class Tracker:
         self.db.many("INSERT OR IGNORE INTO incident_alerts(incident_id, alert_id) VALUES(?,?)",
                      [(iid, a) for a in open_ids])
         try:
-            gid, mid = await self.notifier.send_group(self.incident_text(iid))
+            # 🧹 ogohlantirish — keyin o'chadi; «⏳ ответьте за N мин» — natijasini kutadi (jarima bo'lsa — qoladi)
+            gid, mid = await self.notifier.send_group(self.incident_text(iid), trash="info" if status == "warn" else None)
             self.db.run("UPDATE incidents SET group_chat_id=?, group_msg_id=? WHERE id=?", (gid, mid, iid))
         except Exception as exc:
             log.warning("Holat xabari yuborilmadi: %s", exc)
         log.info("Holat: %s #%s (%s lid) — %s", f["name"], seq, len(open_ids), status)
 
+    def _trash_incident(self, iid: int, now: int) -> None:
+        inc = self.db.one("SELECT group_chat_id, group_msg_id FROM incidents WHERE id=?", (iid,))
+        if inc is not None and inc["group_msg_id"]:
+            from .tidy import remember
+            remember(self.db, inc["group_chat_id"], inc["group_msg_id"], "info", now)
+
     async def _fine_incident(self, inc, f, now: int) -> None:
+        """Jarima yozilsa — «💸 штраф» xabari «Проёб»da QOLADI (🧹 tozalashga kirmaydi)."""
         amount = float(inc["fine_usd"] or 0)
         if amount <= 0 or not self.db.flag("fines_enabled"):
             self.db.run("UPDATE incidents SET status='ok', ended_ts=? WHERE id=?", (now, inc["id"]))
             await self._render_incident(inc["id"])
+            self._trash_incident(inc["id"], now)
             return
         self.db.run("UPDATE incidents SET status='fined', ended_ts=? WHERE id=?", (now, inc["id"]))
         day = local_date(now, self.tz)
@@ -771,8 +917,10 @@ class Tracker:
         leads = plural_leads(inc["n_leads"])
         amount = f"{inc['fine_usd']:g} $"
         top = head(name, f"{leads} без ответа")
-        if inc["status"] == "warn":
-            return "\n".join([top, f"предупреждение {inc['seq']} из {forgive} за сегодня — без штрафа", tag(people)])
+        if inc["status"] == "warn":                       # imkoniyat sanalmaydi — oddiy, aniq ogohlantirish
+            fine = (f"\n<i>Дальше за такое — штраф {amount} каждому</i>" if inc["fine_usd"]
+                    and self.db.flag("fines_enabled") else "")
+            return "\n".join([top, f"⚠️ <b>Ответьте лидам — без задержек!</b>{fine}", tag(people)])
         if inc["status"] == "grace":
             return "\n".join([top, f"⏳ Ответьте за {grace // 60} мин — иначе штраф {amount} каждому", tag(people)])
         if inc["status"] == "fined":

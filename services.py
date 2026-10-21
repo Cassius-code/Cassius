@@ -74,6 +74,8 @@ class Scheduler:
         self._last_cool = 0.0
         self._last_prune = 0.0
         self._last_pool = 0.0
+        self._last_board = 0.0
+        self._last_settle = 0.0
 
     async def run(self) -> None:
         last_full = 0.0
@@ -84,6 +86,10 @@ class Scheduler:
                 await self.step()
             else:
                 await self._safe("zaderjka va stavka", self.ctx.tracker.tick(int(self.ctx.clock())))
+            if time.monotonic() - self._last_board >= 5:          # 📌 «Проёб»dagi doska — son o'zgarsa
+                self._last_board = time.monotonic()
+                from . import board
+                await self._safe("doska", board.refresh(self.ctx, int(self.ctx.clock())))
             await asyncio.sleep(max(0.5, FAST_TICK - (time.monotonic() - started)))
 
     async def _safe(self, name: str, coro) -> None:
@@ -104,6 +110,16 @@ class Scheduler:
         if self._spam_task is None or self._spam_task.done():   # 🛡 @SpamBot — fonda (bir necha soniya oladi)
             from . import guard
             self._spam_task = asyncio.create_task(self._safe("@SpamBot", guard.daily(ctx, now)))
+        from . import push_group, strict, tidy
+        await self._safe("qattiq rejim", strict.away_tick(ctx, now))     # 🔒 joyida yo'q (lid kutyapti)
+        if time.monotonic() - self._last_settle >= 300 and strict.on(ctx.db):  # 🔒 foizli jarima summasi
+            self._last_settle = time.monotonic()
+            try:
+                strict.settle(ctx.db, local_date(now, ctx.tz))
+            except Exception:
+                log.exception("Qattiq rejim: jarima summasi")
+        await self._safe("Push paneli", push_group.cleanup(ctx, now))     # tugaganiga 5 daqiqa — panel o'chadi
+        await self._safe("«Проёб»ni tozalash", tidy.sweep(ctx, now))      # 🧹 vaqti kelgan bot xabarlari o'chadi
         if time.monotonic() - self._last_cool >= 120:              # 📉 soviyotgan lidlar — har 2 daqiqada
             self._last_cool = time.monotonic()
             from . import insights

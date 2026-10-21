@@ -157,15 +157,20 @@ def stale_line(x: dict, lang: str) -> str:
 # ═════════════════════════ 📉 soviyotgan
 def cooling(db, tr, now: int, days: int) -> dict[int, list[dict]]:
     """Soviyotgan lid: xodim yozgan, mijoz odatdagidan 3 barobar (va kamida 1 soat) uzoq jim. Vaqt ish vaqtida
-    hisoblanadi (tun kirmaydi). Mijozning kamida 2 ta javobi bo'lsa — «odatda» ma'lum. N kundan keyin — «qotib qolgan»."""
+    hisoblanadi (tun kirmaydi). Mijozning kamida 2 ta javobi bo'lsa — «odatda» ma'lum. N kundan keyin — «qotib qolgan».
+    Faqat kecha va undan oldin kelgan lidlar: bugun kelgan yangi lid — «soviyotgan» emas (egasi aytgan)."""
     skip = skip_list(db)
     cards = _cards_by_thread(db)
     ws, we = tr.work_window()
+    today = day_start(now, tr.tz)
     out: dict[int, list] = {}
-    for th in db.all("SELECT chat_id, topic_id, cl_turn, cl_avg, cl_n, cool_noted, seen_msg_id, stavka FROM threads "
-                     "WHERE cl_turn IS NOT NULL AND cl_n>=2"):
+    for th in db.all("SELECT th.chat_id, th.topic_id, th.cl_turn, th.cl_avg, th.cl_n, th.cool_noted, th.seen_msg_id, "
+                     "th.stavka, COALESCE(t.created_ts, th.first_seen) AS born FROM threads th "
+                     "LEFT JOIN topics t ON t.chat_id=th.chat_id AND t.topic_id=th.topic_id "
+                     "WHERE th.cl_turn IS NOT NULL AND th.cl_n>=2"):
         fid = tr.chat_folder.get(th["chat_id"])
         if fid is None or th["stavka"] == "on" or now - th["cl_turn"] >= days * DAY \
+                or (th["born"] is not None and th["born"] >= today) \
                 or _excluded(tr, th["chat_id"], th["topic_id"], skip):
             continue
         usual = max(1, th["cl_avg"] or 0)
@@ -230,7 +235,7 @@ async def cooling_alerts(ctx, now: int) -> int:
             lines.append(small(f"… и ещё {len(fresh) - GROUP_LIMIT}"))
         lines.append(tag(P.folder_people(db, f["id"]), "напишите им, пока не остыли"))
         try:
-            await ctx.notifier.send_group("\n".join(lines))
+            await ctx.notifier.send_group("\n".join(lines), trash="info")
         except Exception:
             continue
         for x in fresh:

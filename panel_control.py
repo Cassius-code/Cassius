@@ -46,6 +46,10 @@ async def control(ctx, r: Req):
              f"🎬 {r.L('Stavka', 'Ставка')} — {onoff(r, db.flag('stavka_enabled'))} · <b>{need}</b> "
              f"{r.L('video', 'кружка')}",
              f"⏳ {r.L('Hozir kutyapti', 'Сейчас ждут')} — <b>{waiting}</b>",
+             f"📌 {r.L('«Проёб»da doska', 'Доска в «Проёб»')} — {onoff(r, db.flag('board_on'))}",
+             clean_line(ctx, r),
+             remind_line(ctx, r),
+             f"🔒 {r.L('Qattiq rejim', 'Строгий режим')} — {onoff(r, db.flag('strict_on'))}",
              fine_line(ctx, r)]
     if not group:
         lines.append(r.L("⚠️ «Проёб» guruhi belgilanmagan (Sozlamalar)", "⚠️ Группа «Проёб» не задана (Настройки)"))
@@ -59,7 +63,11 @@ async def control(ctx, r: Req):
         rows += grid([(f"⏱ {r.L('Limit', 'Лимит')}", "cl"), (f"🔁 {r.L('Ketma-ket', 'Подряд')}", "cv"),
                       (f"🕒 {r.L('Ish vaqti', 'Рабочее время')}", "ch"), (f"🎬 {r.L('Stavka', 'Ставка')}", "cs"),
                       (f"📁 {r.L('Papkalar', 'Папки')}", "cf")])
-        rows.append([(f"💸 {r.L('Jarima qoidasi', 'Правила штрафа')}", "cfn")])
+        rows.append([(f"💸 {r.L('Jarima qoidasi', 'Правила штрафа')}", "cfn"),
+                     (f"📌 {r.L('Doska', 'Доска')}", "cpb")])
+        rows.append([(f"🧹 {r.L('«Проёб»ni tozalash', 'Очистка «Проёб»')}", "ccl"),
+                     (f"🔒 {r.L('Qattiq rejim', 'Строгий режим')}", "cst")])
+        rows.append([(f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')}", "crm")])
     rows += grid([(f"⏳ {r.L('Kutayotganlar', 'Ожидают')}", "cw"), (f"🔍 {r.L('Lidni tekshirish', 'Проверить лид')}", "cc")])
     if r.can("full"):
         rows.append([((r.L("⛔ Zaderjkani o'chirish", "⛔ Выключить контроль") if db.flag("delay_enabled")
@@ -75,6 +83,182 @@ def slide_line(ctx, r: Req) -> str:
         return r.L("🔁 Ketma-ket yozsa — ⚪ o'chiq (birinchi xabaridan)", "🔁 Пишет подряд — ⚪ выкл (с первого сообщения)")
     return r.L(f"🔁 Ketma-ket yozsa — <b>{n} daq</b> ichidagi oxirgi xabaridan",
                f"🔁 Пишет подряд — с последнего сообщения в пределах <b>{n} мин</b>")
+
+
+def _mins(r: Req, m: int) -> str:
+    if m <= 0:
+        return r.L("o'chmaydi", "не удаляются")
+    if m % 60 == 0:
+        return r.L(f"{m // 60} soat", f"{m // 60} ч")
+    return r.L(f"{m} daq", f"{m} мин")
+
+
+def clean_line(ctx, r: Req) -> str:
+    from .tidy import minutes
+    return (f"🧹 {r.L('Tozalash', 'Очистка')} — {r.L('zaderjka', 'задержки')}: <b>{_mins(r, minutes(ctx.db, 'delay'))}</b> · "
+            f"{r.L('boshqalar', 'остальное')}: <b>{_mins(r, minutes(ctx.db, 'info'))}</b>")
+
+
+@screen("ccl", "full")
+async def clean_settings(ctx, r: Req):
+    """🧹 «Проёб» toza tursin: botning o'z xabarlari qachon o'chadi (egasi boshqaradi)."""
+    from .tidy import DELAY_CHOICES, INFO_CHOICES, minutes
+    db = ctx.db
+    if len(r.args) == 2 and r.args[0] in ("d", "i") and r.args[1].isdigit():
+        v = int(r.args[1])
+        if v in (DELAY_CHOICES if r.args[0] == "d" else INFO_CHOICES):
+            db.set("clean_delay_min" if r.args[0] == "d" else "clean_info_min", str(v))
+        ui.view(r, "ccl")
+    d, i = minutes(db, "delay"), minutes(db, "info")
+    lines = [r.L(f"🚨 Zaderjka xabari — xodim javob berganidan keyin: <b>{_mins(r, d)}</b>",
+                 f"🚨 «Задержка» — после ответа сотрудника: <b>{_mins(r, d)}</b>"),
+             r.L(f"📣 Boshqa xabarlar (soviyotgan lidlar, kechikish, Push tugadi, jarima ogohlantirishi, stavka) — "
+                 f"yozilganidan keyin: <b>{_mins(r, i)}</b>",
+                 f"📣 Остальное («остывают», «Опоздание», «Пуш завершён», предупреждения, «ставка») — после отправки: "
+                 f"<b>{_mins(r, i)}</b>"),
+             r.L("💸 Jarima yozilgan xabar o'chmaydi — joyida qoladi.",
+                 "💸 Сообщение со штрафом не удаляется — остаётся."),
+             r.L("<i>Buyruq bilan chaqirilganlar (/topweek, /statistika …) va 📌 doska o'chmaydi. Hisob (kim javob berdi, "
+                 "jarima) botda saqlanadi — faqat chatdagi xabar o'chadi. Botga guruhda «Xabarlarni o'chirish» huquqi "
+                 "kerak.</i>",
+                 "<i>Ответы на команды (/topweek, /statistika …) и 📌 доска не удаляются. Учёт (кто ответил, штрафы) "
+                 "остаётся в боте — удаляется только сообщение в чате. Боту нужно право «Удалять сообщения».</i>")]
+    row_d = [(("✅ " if d == v else "") + _mins(r, v), f"ccl:d:{v}") for v in DELAY_CHOICES]
+    row_i = [(("✅ " if i == v else "") + _mins(r, v), f"ccl:i:{v}") for v in INFO_CHOICES]
+    return (ui.join(title("🧹", r.L("«ПРОЁБ»NI TOZALASH", "ОЧИСТКА «ПРОЁБ»")), "", card(lines),
+                    f"<b>{r.L('Zaderjka xabari:', 'Задержка:')}</b>"),
+            kb(*grid(row_d, 3), [(f"— {r.L('Boshqa xabarlar', 'Остальное')} —", "ccl")], *grid(row_i, 3), nav(r, "c")))
+
+
+REMIND_CHOICES = (10, 15, 20, 30, 45, 60)
+GRACE_CHOICES = (3, 5, 10, 15, 20, 30)
+
+
+def remind_line(ctx, r: Req) -> str:
+    on, after, grace, usd = ctx.tracker.alert_remind_rules()
+    if not on:
+        return f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')} — {onoff(r, False)}"
+    return (f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')} — "
+            + r.L(f"{after // 60} daq → eslatma → {grace // 60} daq → <b>{usd:g} $</b>",
+                  f"{after // 60} мин → напоминание → {grace // 60} мин → <b>{usd:g} $</b>"))
+
+
+@screen("crm", "full")
+async def remind_screen(ctx, r: Req):
+    """⏰ Zaderjka javobsiz qolsa: N daqiqada eslatma (o'sha xabarga javob qilib), muhlatda javob yo'q — jarima."""
+    db = ctx.db
+    a = r.args
+    if a and a[0] in ("on", "off"):
+        db.set("remind_on", "1" if a[0] == "on" else "0")
+        ui.view(r, "crm")
+    elif len(a) == 2 and a[0] in ("r", "g") and a[1].isdigit():
+        v = int(a[1])
+        if v in (REMIND_CHOICES if a[0] == "r" else GRACE_CHOICES):
+            db.set("remind_min" if a[0] == "r" else "remind_grace_min", str(v))
+        ui.view(r, "crm")
+    on, after, grace, usd = ctx.tracker.alert_remind_rules()
+    lines = [f"{r.L('Holat', 'Состояние')}: " + (r.L("🟢 <b>yoqiq</b>", "🟢 <b>включено</b>") if on else
+                                                 r.L("⚪ o'chiq", "⚪ выключено")),
+             r.L(f"1) Zaderjka xabari chiqqanidan <b>{after // 60} daqiqa</b> o'tib ham javob bo'lmasa — eslatma: o'sha "
+                 "xabarga javob qilib, xodimlar belgilanadi. Ish kuni tugaganda hali javobsiz bo'lsa — darhol.",
+                 f"1) Если через <b>{after // 60} мин</b> после «задержки» ответа нет — напоминание ответом на это "
+                 "сообщение, с отметкой сотрудников. Если рабочий день закончился, а ответа нет — сразу."),
+             r.L(f"2) Eslatmadan keyin <b>{grace // 60} daqiqa</b>da javob bo'lmasa — jarima <b>{usd:g} $</b> o'sha kuni "
+                 "papkada ishlayotgan har xodimga. Jarima xabari «Проёб»da qoladi.",
+                 f"2) Если через <b>{grace // 60} мин</b> после напоминания ответа нет — штраф <b>{usd:g} $</b> каждому "
+                 "сотруднику папки, который сегодня на работе. Сообщение о штрафе остаётся в «Проёб»."),
+             r.L("<i>«Holat» (ko'p lid javobsiz) uchun jarima olgan havolalar bu yerda qayta jarimaga kirmaydi.</i>",
+                 "<i>Ссылки, за которые уже был штраф по «много лидов без ответа», повторно не штрафуются.</i>")]
+    d = r.L("daq", "мин")
+    row_r = [(("✅ " if after // 60 == v else "") + f"⏰ {v} {d}", f"crm:r:{v}") for v in REMIND_CHOICES]
+    row_g = [(("✅ " if grace // 60 == v else "") + f"⏳ {v} {d}", f"crm:g:{v}") for v in GRACE_CHOICES]
+    rows = grid(row_r, 3) + grid(row_g, 3)
+    rows.append([(f"💸 {r.L('Jarima', 'Штраф')}: {usd:g} $", "crmf"),
+                 ((r.L("⛔ O'chirish", "⛔ Выключить"), "crm:off") if on else (r.L("✅ Yoqish", "✅ Включить"), "crm:on"))])
+    rows.append(nav(r, "c"))
+    return ui.join(title("⏰", r.L("JAVOBSIZ ZADERJKA", "ЗАДЕРЖКА БЕЗ ОТВЕТА")), "", card(lines),
+                   r.L("<i>⏰ — eslatma qachon · ⏳ — eslatmadan keyin muhlat</i>",
+                       "<i>⏰ — когда напомнить · ⏳ — срок после напоминания</i>")), kb(*rows)
+
+
+@screen("crmf", "full")
+async def remind_fine_ask(ctx, r: Req):
+    ui.ask(r, "remind_fine", "crm")
+    return (title("💸", r.L("ESLATMADAN KEYIN JARIMA", "ШТРАФ ПОСЛЕ НАПОМИНАНИЯ")) + "\n\n" +
+            card([r.L(f"Hozir: <b>{ctx.db.get('remind_fine_usd')} $</b> har xodimga.",
+                      f"Сейчас: <b>{ctx.db.get('remind_fine_usd')} $</b> каждому."),
+                  r.L("Necha $ bo'lsin? Son yuboring (0 — jarimasiz, faqat eslatma).",
+                      "Сколько $? Пришлите число (0 — без штрафа, только напоминание).")]),
+            ui.cancel_kb(r, "crm"))
+
+
+@on_input("remind_fine")
+async def set_remind_fine(ctx, r: Req):
+    v = parse_number(r.text)
+    if v is None or not 0 <= v <= 1000:
+        return r.L("⚠️ 0 dan 1000 gacha son yuboring", "⚠️ Пришлите число от 0 до 1000")
+    ctx.db.set("remind_fine_usd", f"{v:g}")
+    r.args = []
+    ui.view(r, "crm")
+    return await remind_screen(ctx, r)
+
+
+@screen("cst", "full")
+async def strict_screen(ctx, r: Req):
+    """🔒 Qattiq rejim (reglament jarimalari): nima qiladi — oddiy so'z bilan; yoqish / o'chirish."""
+    db = ctx.db
+    if r.args and r.args[0] in ("on", "off"):
+        db.set("strict_on", "1" if r.args[0] == "on" else "0")
+        ui.view(r, "cst")
+    on = db.flag("strict_on")
+    limit = db.get_int("limit_minutes", 20)
+    lines = [f"{r.L('Holat', 'Состояние')}: " + (r.L("🟢 <b>yoqiq</b>", "🟢 <b>включён</b>") if on else
+                                                 r.L("⚪ o'chiq", "⚪ выключен")),
+             r.L("Jarima = hujjatdagi $ × xodim foizi (masalan, $15 × 41% = $6.15).",
+                 "Штраф = $ из регламента × процент сотрудника (например, $15 × 41% = $6.15)."),
+             "",
+             r.L("<b>🕘 Kechikish</b> (o'sha kungi zp dan)", "<b>🕘 Опоздание</b> (от дневной ЗП)"),
+             r.L("15 daqiqagacha — ogohlantirish · 15–30 — 15% · 30–60 — 30% · 60+ — 50%",
+                 "до 15 мин — предупреждение · 15–30 — 15% · 30–60 — 30% · 60+ — 50%"),
+             r.L("Haftada 3-kechikishdan boshlab — yana 10%. Summa kechki hisobotdan keyin aniqlanadi.",
+                 "С 3-го опоздания за неделю — ещё 10%. Сумма — после вечернего отчёта."),
+             "",
+             r.L(f"<b>🐢 Sekin javob</b> ({limit}+ daqiqa), har hafta yangidan",
+                 f"<b>🐢 Долгий ответ</b> ({limit}+ мин), каждую неделю заново"),
+             r.L("1-marta — ogohlantirish · 2-marta — $15 × % · 3-dan boshlab har biri — $25 × %",
+                 "1-й раз — предупреждение · 2-й — $15 × % · с 3-го каждый — $25 × %"),
+             r.L("Kimga: o'sha kuni o'sha papkada ishlayotgan xodimlarga.",
+                 "Кому: сотрудникам этой папки, которые сегодня на работе."),
+             "",
+             r.L("<b>🚪 Papkani tashlab ketish</b>", "<b>🚪 Уход с папки</b>"),
+             r.L("Lid kutib turibdi, xodim tanaffus demasdan yo'q: 15+ daqiqa — $15 × % · 60+ daqiqa — jami $40 × %. "
+                 "O'sha paytdagi sekin javoblar alohida jarima bo'lmaydi.",
+                 "Лид ждёт, сотрудник отсутствует без объявленного перерыва: 15+ мин — $15 × % · 60+ мин — всего "
+                 "$40 × %. Долгие ответы за это время отдельно не штрафуются."),
+             "",
+             r.L("Yoqilganda papka jarimasi va kechikishga daqiqasiga jarima ishlamaydi. Jarima xabarlari «Проёб»da "
+                 "qoladi. Avtomat jarimalar o'chiq bo'lsa — qattiq rejim ham ishlamaydi.",
+                 "Когда включён — штраф папки и поминутный штраф за опоздание не работают. Сообщения о штрафах "
+                 "остаются в «Проёб». Если автоштрафы выключены — строгий режим тоже не работает.")]
+    btn = [(r.L("⛔ O'chirish", "⛔ Выключить"), "cst:off")] if on else [(r.L("✅ Yoqish", "✅ Включить"), "cst:on")]
+    return ui.join(title("🔒", r.L("QATTIQ REJIM", "СТРОГИЙ РЕЖИМ")), "", card(lines)), kb(btn, nav(r, "c"))
+
+
+@screen("cpb", "full")
+async def board_toggle(ctx, r: Req):
+    """📌 «Проёб» tepasida qadalgan «Задержки сейчас» (har RD) — yoqish / o'chirish."""
+    from . import board
+    on = not ctx.db.flag("board_on")
+    ctx.db.set("board_on", "1" if on else "0")
+    try:
+        if on:
+            await board.refresh(ctx, int(ctx.clock()), force=True)
+        else:
+            await board.remove(ctx)
+    except Exception:
+        pass
+    ui.view(r, "c")
+    return await control(ctx, r)
 
 
 @screen("cv", "full")

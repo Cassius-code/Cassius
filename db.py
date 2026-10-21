@@ -202,8 +202,16 @@ CREATE TABLE IF NOT EXISTS attendance (
     late_min INTEGER NOT NULL DEFAULT 0,
     reminded INTEGER NOT NULL DEFAULT 0,
     greet_ts INTEGER,                         -- «доброе утро» yozilgan vaqt (kelgan vaqt — ishni boshlagani ham bo'lishi mumkin)
+    last_act_ts INTEGER,                      -- 🔒 oxirgi marta lidga yozgan vaqt (joyida yo'qligini bilish uchun)
     PRIMARY KEY (day, person_id)
 );
+-- 🔒 qattiq rejim hodisalari: sekin javob (haftalik hisob) va joyida yo'q (boshlandi/tugadi)
+CREATE TABLE IF NOT EXISTS strict_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, kind TEXT NOT NULL, week TEXT, day TEXT,
+    ts INTEGER NOT NULL, level INTEGER NOT NULL DEFAULT 1, adj_id INTEGER, folder_id INTEGER, act_ts INTEGER,
+    ended_ts INTEGER, gid INTEGER, mid INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_strict_person ON strict_events(person_id, kind, week);
 
 CREATE TABLE IF NOT EXISTS breaks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -244,7 +252,8 @@ CREATE TABLE IF NOT EXISTS adj (
     chat_id INTEGER, msg_id INTEGER, ref_id INTEGER,
     cancelled INTEGER NOT NULL DEFAULT 0,
     pending INTEGER NOT NULL DEFAULT 0,
-    created_ts INTEGER NOT NULL DEFAULT 0
+    created_ts INTEGER NOT NULL DEFAULT 0,
+    pct REAL                                  -- 🔒 qattiq rejim: kunlik zp ning % i (usd hisobotdan keyin hisoblanadi)
 );
 CREATE INDEX IF NOT EXISTS idx_adj_person ON adj(person_id, day);
 CREATE TABLE IF NOT EXISTS transfers (
@@ -303,7 +312,8 @@ CREATE TABLE IF NOT EXISTS templates (
 CREATE TABLE IF NOT EXISTS broadcasts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, started_ts INTEGER NOT NULL, finished_ts INTEGER, trigger TEXT NOT NULL,
     total INTEGER NOT NULL DEFAULT 0, sent INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'running', kind TEXT NOT NULL DEFAULT ''
+    status TEXT NOT NULL DEFAULT 'running', kind TEXT NOT NULL DEFAULT '',
+    slot TEXT NOT NULL DEFAULT ''             -- kun bo'lagi (morning/day/evening): uzilsa — davom etish shu tartibda
 );
 -- har Push'ni kim oldi: keyin yozdimi (90 daqiqa) va kartagacha yetdimi (24 soat) — oxirgi Push'ga yoziladi
 CREATE TABLE IF NOT EXISTS push_log (
@@ -312,6 +322,21 @@ CREATE TABLE IF NOT EXISTS push_log (
     PRIMARY KEY (bid, chat_id, topic_id)
 );
 CREATE INDEX IF NOT EXISTS idx_push_log_thread ON push_log(chat_id, topic_id, ts);
+-- ⏰ javobsiz zaderjka: eslatma (zaderjka xabariga javob) va muhlatdan keyin jarima — har zaderjka xabariga bitta
+CREATE TABLE IF NOT EXISTS alert_reminders (
+    gid INTEGER NOT NULL, mid INTEGER NOT NULL, folder_id INTEGER, reminded_ts INTEGER NOT NULL, rgid INTEGER,
+    rmid INTEGER, deadline INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', ended_ts INTEGER,
+    PRIMARY KEY (gid, mid)
+);
+-- 🧹 «Проёб»dagi bot xabarlari: vaqti kelganda o'chadi (delay — yopilgan vaqtdan, info — yozilgan vaqtdan)
+CREATE TABLE IF NOT EXISTS group_msgs (
+    gid INTEGER NOT NULL, mid INTEGER NOT NULL, kind TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY (gid, mid)
+);
+-- Push: yuborib bo'lmagan lidlar (Push yangilanish sababli uzilib, keyin davom etsa — ularga qayta urinilmaydi)
+CREATE TABLE IF NOT EXISTS push_fail (
+    bid INTEGER NOT NULL, chat_id INTEGER NOT NULL, topic_id INTEGER NOT NULL, folder_id INTEGER, ts INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_push_fail_bid ON push_fail(bid);
 -- lidga karta yuborildi (xodim /rek /dep /cash yozdi): kim, qachon, qaysi lid. Matn saqlanmaydi — faqat buyruq so'zi
 CREATE TABLE IF NOT EXISTS cards (
     chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, topic_id INTEGER NOT NULL, folder_id INTEGER,

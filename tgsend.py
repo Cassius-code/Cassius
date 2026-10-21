@@ -14,6 +14,15 @@ class SendSkip(RuntimeError):
     """Bu oluvchiga yuborib bo'lmaydi — keyingisiga o'tamiz."""
 
 
+class SendWait(SendAbort):
+    """Telegram akkauntga N soniya kutishni aytdi (FloodWait). Push shu papkada kutadi va o'zi davom etadi
+    (kutmasdan yuborib bo'lmaydi: Telegram hamma xabarni rad etadi, takror urinish cheklovni uzaytiradi)."""
+
+    def __init__(self, seconds: int):
+        self.seconds = int(seconds)
+        super().__init__(f"FloodWait {self.seconds} s")
+
+
 class PushSender:
     async def send_media(self, chat_id: int, topic_id: int, media: dict, text: str = "") -> list[int]:
         """Push с вложением (голосовое, кружок, видео, фото, файл). Файл загружается ОДИН раз,
@@ -62,9 +71,10 @@ class PushSender:
                 ids.append(int(msg.id))
                 return ids
             except errors.FloodWaitError as exc:
-                if exc.seconds > 300 or attempt == 2:
-                    raise SendAbort(f"FloodWait {exc.seconds} s") from exc
-                await asyncio.sleep(exc.seconds + 1)
+                if ids and attempt == 1 and exc.seconds <= 1800:   # matn ketdi, kruzhok qoldi — shu yerda kutamiz
+                    await asyncio.sleep(exc.seconds + 1)
+                    continue
+                raise SendWait(exc.seconds) from exc
             except errors.PeerFloodError as exc:
                 raise SendAbort("PeerFlood: Telegram akkauntni chekladi") from exc
             except skip_errs as exc:
@@ -89,9 +99,7 @@ class PushSender:
                     chat_id, text, reply_to=(topic_id or None), parse_mode=None, link_preview=False)
                 return int(msg.id)
             except errors.FloodWaitError as exc:
-                if exc.seconds > 300 or attempt == 2:
-                    raise SendAbort(f"FloodWait {exc.seconds} s") from exc
-                await asyncio.sleep(exc.seconds + 1)
+                raise SendWait(exc.seconds) from exc     # Push o'zi kutadi (ekranda «⏳ RD → 12:44»)
             except errors.PeerFloodError as exc:
                 raise SendAbort("PeerFlood: Telegram akkauntni chekladi") from exc
             except ValueError as exc:
