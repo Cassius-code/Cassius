@@ -21,8 +21,8 @@ from .ui import Req, card, h, kb, screen
 log = logging.getLogger("group")
 
 GROUPS = {"group", "supergroup"}
-TOP_CMDS = {"top": "td", "topyest": "yd", "topweek": "tw", "toplast": "lw", "topall": "all"}
-REACT = {"arrived": "👍", "break_start": "👌", "break_end": "👍", "break_end_late": "👍"}
+TOP_CMDS = {"topweek": "tw", "toplast": "lw", "topall": "all"}   # shu hafta · o'tgan hafta · shu kungacha
+REACT = {"arrived": "👍", "greeted": "👍", "break_start": "👌", "break_end": "👍", "break_end_late": "👍"}
 
 
 def is_proyob(ctx, chat_id: int) -> bool:
@@ -81,6 +81,27 @@ def group_lock(ctx):
     return GroupLock()
 
 
+async def clean_delays(ctx) -> tuple[int, int]:
+    """Hamma havolasi yopilgan «задержка» xabarlarini «Проёб»dan o'chirish. -> (o'chirildi, 48 soatdan eski)."""
+    import time as _t
+    db, now = ctx.db, int(_t.time())
+    n = old = 0
+    # «ochiq» — lid hali shu havola bo'yicha javob kutyapti (kun oxirida kutish yopilganlari ochiq hisoblanmaydi)
+    for row in db.all("SELECT a.group_chat_id gid, a.group_msg_id mid, MIN(a.created_ts) sent, "
+                      "SUM(CASE WHEN a.status='open' AND EXISTS (SELECT 1 FROM threads t WHERE t.alert_id=a.id) "
+                      "THEN 1 ELSE 0 END) open FROM alerts a WHERE a.group_msg_id IS NOT NULL "
+                      "GROUP BY a.group_chat_id, a.group_msg_id"):
+        if row["open"]:
+            continue                                      # hali javob kutayotgan havola bor — qoladi
+        if now - row["sent"] > 47 * 3600:
+            old += 1
+            continue
+        if await ctx.notifier.delete_group(row["gid"], row["mid"]):
+            db.run("UPDATE alerts SET group_msg_id=NULL WHERE group_chat_id=? AND group_msg_id=?", (row["gid"], row["mid"]))
+            n += 1
+    return n, old
+
+
 def build_router(ctx) -> Router:
     r = Router(name="group")
     try:
@@ -119,7 +140,49 @@ def build_router(ctx) -> Router:
         s = K.week_start(t)
         await reply(message, weekly_group(ctx, s, t))
 
-    # eski kassa botidagidek: /top — bugun, /topyest — kecha, /topweek — shu hafta, /toplast — o'tgan hafta
+    # 💤 /frozen (qotib qolgan) va 📉 /cooling (soviyotgan) — «Проёб»ga, HAR RD alohida xabar (ega va to'liq adminlar)
+    @r.message(in_group, Command("frozen", "cooling"))
+    async def cmd_lists(message: Message) -> None:
+        if not is_proyob(ctx, message.chat.id):
+            return
+        _uid, staff, _n = sender_info(ctx, message)
+        if not staff:
+            return
+        cmd = (message.text or "").split()[0].split("@")[0].lstrip("/").lower()
+        kind, key = ("stale", "an_stale") if cmd == "frozen" else ("cool", "an_cooling")
+        if not ctx.db.flag(key):
+            await reply(message, "<i>функция выключена (панель → 🧩 Доп. функции)</i>")
+            return
+        from .panel_insights import post_lists
+        if await post_lists(ctx, kind) == 0:
+            await reply(message, "<i>" + ("застывших лидов нет" if kind == "stale" else "остывающих лидов нет") + "</i>")
+
+    # 🧹 /clean — shu paytgacha javob berilgan «задержка» xabarlarini o'chirish (javob kutayotganlari qoladi)
+    @r.message(in_group, Command("clean"))
+    async def cmd_clean(message: Message) -> None:
+        if not is_proyob(ctx, message.chat.id):
+            return
+        _uid, staff, _n = sender_info(ctx, message)
+        if not staff:
+            return
+        n, old = await clean_delays(ctx)
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        text = f"🧹 удалено задержек: {n}" + (f" · старше 48 ч (Telegram не даёт удалить): {old}" if old else "")
+        try:
+            sent = await ctx.notifier.send_group(f"<i>{text}</i>")
+        except Exception:
+            return
+
+        async def later():
+            import asyncio
+            await asyncio.sleep(8)
+            await ctx.notifier.delete_group(*sent)
+        ui.bg(later())
+
+    # 🏆 reyting: /topweek — shu hafta, /toplast — o'tgan hafta, /topall — shu kungacha (boshlang'ich kassa bilan)
     @r.message(in_group, Command(*TOP_CMDS))
     async def cmd_top(message: Message) -> None:
         if not is_proyob(ctx, message.chat.id):

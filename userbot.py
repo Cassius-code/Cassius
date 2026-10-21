@@ -24,8 +24,9 @@ SYNC_EVERY = 600               # papka/topik sinxroni va tekshiruv har necha son
 WATCH_EVERY = 2                # ish vaqtida: guruhlarda yangi xabar bormi — har necha soniyada tekshiriladi
 # Vositachi botning o'z menyusi: «Статус: 🔥 Новый …» (/status paneli), «✅Установлен: 💊 Мариновка». Bu mijoz xabari
 # emas. Faqat xabar boshidagi bir necha belgiga qaraladi — matn o'qilmaydi va saqlanmaydi.
-BOT_UI_RE = re.compile(r"^\W*(статус|установлен|status)\s*:", re.IGNORECASE)
+BOT_UI_RE = re.compile(r"^\W*((статус|установлен|status)\s*:|реквизиты\s+отправлены)", re.IGNORECASE)
 CMD_WINDOW = 300               # xodim /buyruq yozgandan keyin botning tugmali javobi — menyu (5 daqiqagacha)
+CMD_ECHO = 10                  # xodim /buyruq yozgandan keyin shu soniya ichida bot yozgani — buyruq javobi, mijoz emas
 
 
 def thread_of(m, is_forum: bool) -> int:
@@ -99,6 +100,7 @@ class Userbot(TgAccount, PushSender):
     async def on_online(self, client) -> None:
         from telethon import events
         client.add_event_handler(self._on_event, events.NewMessage())
+        self.tracker.main_id = self.me_id
         log.info("Asosiy akkaunt ulandi: %s", self.me_label)
         self._start_sync()
 
@@ -349,24 +351,29 @@ class Userbot(TgAccount, PushSender):
         """Vositachi botning menyusi/javobi (status paneli, «Установлен: …») — mijoz xabari emas."""
         if BOT_UI_RE.match((getattr(m, "message", "") or "")[:40]):
             return True
+        last = self._cmd_ts.get((chat_id, topic))
+        if last is None:
+            return False
+        gap = m.date.timestamp() - last
+        if 0 <= gap <= CMD_ECHO:                          # buyruqdan darhol keyin (karta, menyu) — botning javobi
+            return True
         rm = getattr(m, "reply_markup", None)
-        if rm is not None and type(rm).__name__ == "ReplyInlineMarkup":     # tugmali xabar — buyruqqa javob
-            last = self._cmd_ts.get((chat_id, topic))
-            return last is not None and 0 <= m.date.timestamp() - last <= CMD_WINDOW
-        return False
+        return rm is not None and type(rm).__name__ == "ReplyInlineMarkup" and 0 <= gap <= CMD_WINDOW
 
     async def _process(self, m, chat_id: int, topic: int, source: str) -> str:
         action = getattr(m, "action", None)
         if source != "live" and action is not None and "TopicEdit" in type(action).__name__ and topic > 1:
             await self.refresh_topic(chat_id, topic)       # status (🔥/⚡/💊) o'zgardi — jonli kelmagan bo'lsa ham
         who = await self.classify(m, chat_id)
+        cmd = ""
         if who == "client" and self._bot_ui(m, chat_id, topic):
             who = "service"
         elif who == "staff" and (getattr(m, "message", "") or "").startswith("/"):
-            self._cmd_ts[(chat_id, topic)] = m.date.timestamp()            # /status va h.k. — javob ham emas
+            self._cmd_ts[(chat_id, topic)] = m.date.timestamp()            # /status, /rek … — faqat buyruq so'zi
+            cmd = m.message.split()[0].split("@")[0].lower()[:33]
             who = "service"
         msg = Msg(chat_id, topic, int(m.id), int(m.date.timestamp()), m.sender_id, who,
-                  video=bool(getattr(m, "video_note", None)), source=source)
+                  video=bool(getattr(m, "video_note", None)), source=source, cmd=cmd)
         return await self.tracker.handle(msg)
 
     async def _fetch_and_process(self, chat_id: int, topic: int, min_id: int, upto: int | None, limit: int,
@@ -457,7 +464,7 @@ class Userbot(TgAccount, PushSender):
             await self.notifier.notify_owner(lambda: (tr(
                 f"✅ Push bazasi to'liq tekshirildi: {d} dan keyin o'zi yozgan lidlar — {n} ta." +
                 (f" ⚠️ {failed} ta guruh o'qilmadi, keyinroq qayta uriniladi." if failed else ""),
-                f"✅ База Push проверена полностью: писали сами после {d} — {n}." +
+                f"✅ База Пуш проверена полностью: писали сами после {d} — {n}." +
                 (f" ⚠️ {failed} групп(ы) не прочитаны, повторю позже." if failed else "")), None),
                 key="deepscan")
             return n

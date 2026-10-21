@@ -21,7 +21,10 @@ async def reports_menu(ctx, r: Req):
     opts = [(r.L("📅 Bugun", "📅 Сегодня"), "r:td"), (r.L("↩️ Kecha", "↩️ Вчера"), "r:yd"),
             (r.L("🗓 Shu hafta", "🗓 Эта неделя"), "r:tw"), (r.L("🗓 O'tgan hafta", "🗓 Прошлая неделя"), "r:lw"),
             (r.L("📆 Shu oy", "📆 Этот месяц"), "r:tm"), (r.L("📆 O'tgan oy", "📆 Прошлый месяц"), "r:lm")]
+    rows = grid(opts)
+    if r.can("full"):
+        rows.append([(r.L("📈 Tahlil: soatlar, lidlar, kartalar", "📈 Аналитика: часы, лиды, карты"), "an")])
     return ui.join(title("📊", r.L("HISOBOTLAR", "ОТЧЁТЫ")), "",
                    ui.card([r.L("Zaderjkalar, javob tezligi, ishga kelish va kassa — bitta joyda.",
                                 "Задержки, скорость ответа, приход и касса — в одном месте.")])), \
-        kb(*grid(opts), nav(r))
+        kb(*rows, nav(r))

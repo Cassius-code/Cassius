@@ -15,6 +15,7 @@ Qoidalar (egasi bilan kelishilgan):
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -29,6 +30,19 @@ from .timeutil import minutes_up, parse_hhmm, work_seconds, local_date, is_work_
 log = logging.getLogger("rules")
 
 MAX_LINKS = 10                 # bitta «задержка» xabarida eng ko'pi bilan nechta havola
+BATCH_SEC = 40                 # yaqin zaderjkalar shuncha soniya kutib, bitta xabar bo'lib ketadi
+CARD_WINDOW = 24 * 3600        # Push'dan keyin shu vaqt ichida karta yuborilsa — o'sha Push natijasi
+CL_CAP = 12 * 3600             # mijozning bitta javob vaqti o'rtachaga ko'pi bilan shuncha qo'shiladi (tun va h.k.)
+
+
+def parse_cmds(text: str | None) -> set[str]:
+    """«/rek /dep, cash» -> {'/rek', '/dep', '/cash'}."""
+    out = set()
+    for w in re.split(r"[\s,;]+", (text or "").strip().lower()):
+        w = w.lstrip("/")
+        if re.fullmatch(r"[a-z0-9_]{1,32}", w):
+            out.add("/" + w)
+    return out
 INCIDENT_FRESH = 3600          # «holat» uchun oxirgi shuncha soniyadagi «задержка»lar sanaladi
 
 # qaror kodlari (jurnal va «Lidni tekshirish» ekrani uchun)
@@ -46,6 +60,7 @@ class Msg:
     who: str                 # client | staff | ours | service
     video: bool = False      # dumaloq video (video_note)
     source: str = "live"     # live | catchup
+    cmd: str = ""            # xodimning buyrug'i («/rek») — faqat buyruq so'zi, matn emas
 
 
 def skip_list(db: Database) -> list[str]:
@@ -66,6 +81,9 @@ class Tracker:
         self.clock = clock
         self.chat_folder: dict[int, int] = {}
         self.forums: set[int] = set()
+        self.on_staff = None             # xodim lidga yozdi -> ishga kelgan (Attendance.work_seen)
+        self.main_id: int | None = None  # asosiy akkaunt (papka uchun Push akkaunti bo'lsa — xodimni aniqlash)
+        self._due_since: dict[int, int] = {}
         self.reload()
 
     # ------------------------------------------------------------ keshlar
@@ -102,6 +120,86 @@ class Tracker:
             return f"{t['icon']} {t['title']}".strip() if t else ""
         c = self.db.one("SELECT title FROM chats WHERE chat_id=?", (chat_id,))
         return c["title"] if c else ""
+
+    # ------------------------------------------------------------ kim yozdi
+    def person_of(self, chat_id: int, sender_id: int | None):
+        """Xabarni yozgan xodim. O'z akkauntidan yozsa — aniq. Papka akkauntidan (shu papkaning Push akkaunti yoki
+        asosiy akkaunt) yozsa — papkada bitta xodim bo'lsa, o'sha. Aniqlab bo'lmasa — None (taxmin qilinmaydi)."""
+        if not sender_id:
+            return None
+        p = P.by_tg(self.db, sender_id)
+        if p is not None:
+            return p
+        fid = self.chat_folder.get(chat_id)
+        f = P.folder(self.db, fid) if fid else None
+        if f is None or not f["push_account_id"]:
+            return None
+        if f["push_account_id"] == -1:
+            acc_uid = self.main_id
+        else:
+            row = self.db.one("SELECT user_id FROM accounts WHERE id=?", (f["push_account_id"],))
+            acc_uid = row["user_id"] if row else None
+        if not acc_uid or int(acc_uid) != int(sender_id):
+            return None
+        ppl = P.folder_people(self.db, fid)
+        return ppl[0] if len(ppl) == 1 else None
+
+    def card_cmds(self, fid: int | None = None) -> set[str]:
+        """Karta buyruqlari — hamma RD uchun bitta ro'yxat (CRM egasi o'zgartirsa, panelda yangilanadi)."""
+        return parse_cmds(self.db.get("card_cmds"))
+
+    async def _staff_seen(self, m: "Msg") -> None:
+        """Xodim lidga yozdi — demak ishda (faqat bugungi xabarlar, yangi versiya ishga tushgandan keyin)."""
+        if self.on_staff is None or m.ts < self.db.get_int("cards_since") \
+                or local_date(m.ts, self.tz) != local_date(self.clock(), self.tz):
+            return
+        p = self.person_of(m.chat_id, m.sender_id)
+        if p is not None:
+            try:
+                await self.on_staff(p, m.ts)
+            except Exception:
+                log.exception("Ishga kelish (faollik)")
+
+    def _push_hit(self, c: int, t: int, ts: int, col: str, window: int) -> None:
+        """Oxirgi Push (shu oyna ichida) natijasiga yozish: mijoz yozdi (replied_ts) yoki karta ketdi (card_ts)."""
+        row = self.db.one("SELECT rowid AS rid, replied_ts, card_ts FROM push_log WHERE chat_id=? AND topic_id=? "
+                          "AND ts<=? AND ts>=? ORDER BY ts DESC LIMIT 1", (c, t, ts, ts - window))
+        if row is not None and row[col] is None:
+            self.db.run(f"UPDATE push_log SET {col}=? WHERE rowid=?", (ts, row["rid"]))
+
+    def _client_spoke(self, th, m: "Msg") -> None:
+        """Haqiqiy mijoz xabari: u odatda qancha vaqtda javob qaytarishi (soviyotgan lid) va Push'ga javobmi."""
+        c, t = m.chat_id, m.topic_id
+        if th["cl_turn"] is not None and m.ts >= th["cl_turn"]:
+            n = min(th["cl_n"] or 0, 9)                     # oxirgi ~10 ta javob og'irligida o'rtacha
+            ws, we = self.work_window()                     # tun hisobga kirmaydi (ish vaqtidagi soniyalar)
+            lat = work_seconds(th["cl_turn"], m.ts, self.tz, ws, we)
+            avg = ((th["cl_avg"] or 0) * n + min(lat, CL_CAP)) / (n + 1)
+            self._set(c, t, cl_turn=None, cl_avg=int(round(avg)), cl_n=(th["cl_n"] or 0) + 1)
+        self._push_hit(c, t, m.ts, "replied_ts", max(1, self.db.get_int("push_reply_min", 90)) * 60)
+
+    async def _command(self, th, m: "Msg") -> str:
+        """Xodimning /buyrug'i. Karta buyrug'i (/rek …) — lidga karta ketdi: yoziladi va bu mijozga javob ham.
+        Boshqa buyruqlar (/status …) — ichki ish: mijozga javob ham, mijoz xabari ham emas."""
+        c, t = m.chat_id, m.topic_id
+        upd = {"last_staff_ts": max(m.ts, th["last_staff_ts"] or 0)}
+        fid = self.chat_folder.get(c)
+        card = fid is not None and m.cmd in self.card_cmds(fid)
+        if card and th["cl_turn"] is None and th["stavka"] != "on":
+            upd["cl_turn"] = m.ts                             # karta ketdi — endi mijoz navbati
+        self._set(c, t, **upd)
+        await self._staff_seen(m)
+        if not card:
+            return "command"
+        p = self.person_of(c, m.sender_id)
+        new = self.db.run("INSERT OR IGNORE INTO cards(chat_id, msg_id, topic_id, folder_id, sender_id, person_id, "
+                          "cmd, ts) VALUES(?,?,?,?,?,?,?,?)", (c, m.msg_id, t, fid, m.sender_id, p["id"] if p else None,
+                                                               m.cmd, m.ts)).rowcount
+        if new:
+            self._push_hit(c, t, m.ts, "card_ts", CARD_WINDOW)
+        if th["stavka"] != "on" and th["wait_since"] is not None and m.ts >= th["wait_since"]:
+            await self._answered(th, m.ts, m.sender_id, by_button=None)
+        return "card"
 
     # ------------------------------------------------------------ nitlar
     def thread(self, chat_id: int, topic_id: int):
@@ -150,11 +248,13 @@ class Tracker:
     async def _decide(self, th, m: Msg) -> str:
         c, t = m.chat_id, m.topic_id
         if m.who == "service":
-            return "service"
+            return await self._command(th, m) if m.cmd else "service"
         if m.who == "ours":
             return "ours"
         if m.who == "client":
             self._count_lead(th, m)
+        if m.who == "staff":
+            await self._staff_seen(m)
 
         # ── stavka (yangi lid): video + uning matni, N marta
         if th["stavka"] == "on" and m.who == "staff":
@@ -207,6 +307,7 @@ class Tracker:
             echo = max(0, self.db.get_int("echo_seconds", 2))
             if echo and th["last_staff_ts"] is not None and 0 <= m.ts - th["last_staff_ts"] <= echo:
                 return "echo"                              # xodim amalidan so'ng vositachi bot darhol yozgan — mijoz emas
+            self._client_spoke(th, m)
             if m.ts < self.db.get_int("delay_from"):
                 return "before"
             ws, we = self.work_window()
@@ -220,7 +321,10 @@ class Tracker:
             return "wait_more"
 
         # odam (xodim) yozdi
-        self._set(c, t, last_staff_ts=max(m.ts, th["last_staff_ts"] or 0))
+        upd = {"last_staff_ts": max(m.ts, th["last_staff_ts"] or 0)}
+        if th["cl_turn"] is None:
+            upd["cl_turn"] = m.ts                             # endi mijoz navbati (u qancha vaqtda javob qaytaradi)
+        self._set(c, t, **upd)
         if th["wait_since"] is not None:
             if m.ts < th["wait_since"]:
                 return "staff"
@@ -257,8 +361,10 @@ class Tracker:
         c, t = th["chat_id"], th["topic_id"]
         fid = self.chat_folder.get(c)
         waited = self.elapsed(fid, th["wait_since"], ts) if fid else 0
-        self.db.run("INSERT INTO replies(chat_id, topic_id, folder_id, staff_id, wait_since, reply_ts, work_seconds) "
-                    "VALUES(?,?,?,?,?,?,?)", (c, t, fid or 0, staff_id, th["wait_since"], ts, waited))
+        p = self.person_of(c, staff_id) if staff_id else None
+        self.db.run("INSERT INTO replies(chat_id, topic_id, folder_id, staff_id, wait_since, reply_ts, work_seconds, "
+                    "person_id) VALUES(?,?,?,?,?,?,?,?)", (c, t, fid or 0, staff_id, th["wait_since"], ts, waited,
+                                                          p["id"] if p else None))
         self._set(c, t, wait_since=None, wait_msg_id=None, alert_id=None)
         if th["alert_id"]:
             await self._close_alert(th["alert_id"], ts, waited, staff_id, by_button)
@@ -514,8 +620,15 @@ class Tracker:
                 continue
             if self.elapsed(fid, th["wait_since"], now) >= limit:
                 due.setdefault(fid, []).append(th)
+        batch = BATCH_SEC if self.db.flag("delay_batch") else 0
+        for fid in [x for x in self._due_since if x not in due]:
+            self._due_since.pop(fid, None)                 # kutayotganlar javob oldi — hisob boshidan
         sent = 0
         for fid, items in due.items():
+            first = self._due_since.setdefault(fid, now)
+            if batch and now - first < batch and len(items) < MAX_LINKS:
+                continue                                   # yana kechikkanlar bo'lsa — birga ketadi
+            self._due_since.pop(fid, None)
             for i in range(0, len(items), MAX_LINKS):
                 sent += await self._send_alert(items[i:i + MAX_LINKS], folders[fid], now)
         return sent
@@ -626,12 +739,21 @@ class Tracker:
         self.db.run("UPDATE incidents SET status='fined', ended_ts=? WHERE id=?", (now, inc["id"]))
         day = local_date(now, self.tz)
         from .kassa import add_adj
-        for p in P.folder_people(self.db, f["id"]):
-            if not p["active"] or P.is_day_off(p, day.weekday()):
-                continue
+        for p in self.fine_people(f["id"], day):
             add_adj(self.db, p["id"], "fine", amount, day.isoformat(), source="delay", ref_id=inc["id"],
                     note=f"{f['name']}: {plural_leads(inc['n_leads'])} без ответа")
         await self._render_incident(inc["id"])
+
+    def fine_people(self, fid: int, day) -> list:
+        """Jarima kimga: papkaning shu kuni ishda bo'lgan xodimlari («доброе утро» yoki lidga yozgan). Hech kim
+        kelmagan bo'lsa (yoki ishga kelish nazorati o'chiq) — dam olmayotgan hamma xodim."""
+        ppl = [p for p in P.folder_people(self.db, fid) if p["active"] and not P.is_day_off(p, day.weekday())]
+        if not self.db.flag("attendance_enabled"):
+            return ppl
+        came = {r["person_id"] for r in self.db.all("SELECT person_id FROM attendance WHERE day=? AND arrived_ts "
+                                                     "IS NOT NULL", (day.isoformat(),))}
+        here = [p for p in ppl if p["id"] in came]
+        return here or ppl
 
     def incident_text(self, iid: int) -> str:
         """«Проёб» uchun (ruscha)."""

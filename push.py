@@ -68,6 +68,14 @@ def hhmm(minute: int) -> str:
 BASE_SQL = "th.last_seen >= ?"
 
 
+def spam_limited(db, acc_id) -> bool:
+    """@SpamBot tekshiruvi: akkauntga Telegram spam-cheklov qo'yganmi (shu akkauntdan Push yuborilmaydi)."""
+    if acc_id == -1:
+        return db.get("main_spam") == "limited"
+    row = db.one("SELECT spam FROM accounts WHERE id=?", (acc_id,)) if acc_id else None
+    return bool(row and row["spam"] == "limited")
+
+
 def base_count(db, base_ts: int, folder_id: int | None = None, active_since: int = 0) -> int:
     """Push bazasidagi lidlar soni (papka bo'yicha yoki hammasi); active_since — shu vaqtdan keyin o'zi yozganlar."""
     q = ("SELECT COUNT(*) FROM threads th JOIN chats c ON c.chat_id=th.chat_id "
@@ -246,8 +254,8 @@ class Pusher:
         self._stop = False
         aud = self.audience(slot)
         items = aud["items"]
-        bid = int(self.db.run("INSERT INTO broadcasts(started_ts, trigger, total) VALUES(?,?,?)",
-                              (int(self.clock()), trigger, len(items))).lastrowid)
+        bid = int(self.db.run("INSERT INTO broadcasts(started_ts, trigger, total, kind) VALUES(?,?,?,?)",
+                              (int(self.clock()), trigger, len(items), media["kind"] if media else "text")).lastrowid)
         stat = {"sent": 0, "failed": 0, "done": 0, "aborted": ""}
         reasons: dict[str, int] = {}
         per_folder: dict[int, list[int]] = {}
@@ -280,11 +288,16 @@ class Pusher:
                     fail("akkaunt tarmoqda emas", fid)
                     await tick()
                 return
+            if spam_limited(self.db, acc_id):             # @SpamBot: Telegram cheklov qo'ygan — bu akkauntdan yo'q
+                for _c, _t, fid in group:
+                    fail("akkauntda spam-cheklov", fid)
+                    await tick()
+                return
             for i, (chat_id, topic_id, fid) in enumerate(group):
                 if self._stop:
                     return
                 try:
-                    async def send_and_mark(c=chat_id, t=topic_id):
+                    async def send_and_mark(c=chat_id, t=topic_id, f_id=fid):
                         ids = await (sender.send_media(c, t, media, text) if media else
                                      sender.send_text(c, t, text))
                         ids = ids if isinstance(ids, list) else [ids]
@@ -293,6 +306,8 @@ class Pusher:
                             self.db.run("INSERT OR IGNORE INTO ignored_msgs(chat_id, msg_id, ts) VALUES(?,?,?)",
                                         (c, int(mid), now))
                         self.db.run("UPDATE threads SET last_push_ts=? WHERE chat_id=? AND topic_id=?", (now, c, t))
+                        self.db.run("INSERT OR IGNORE INTO push_log(bid, chat_id, topic_id, folder_id, ts) "
+                                    "VALUES(?,?,?,?,?)", (bid, c, t, f_id, now))
 
                     job = asyncio.ensure_future(send_and_mark())
                     job.add_done_callback(lambda f: f.cancelled() or f.exception())

@@ -17,14 +17,14 @@ DEC_UZ = {"dup": "takror", "service": "xizmat xabari", "ours": "bizning Push", "
           "auto_bet": "avtostavka videosi", "wait": "mijoz javob kutyapti", "wait_more": "mijoz yana yozdi",
           "reply": "xodim javob berdi ✅", "staff": "xodim yozdi", "alert": "«задержка» yuborildi",
           "echo": "xodimdan keyin darhol bot xabari — mijoz emas", "night": "ish vaqtidan tashqari — hisoblanmaydi"}
-DEC_RU = {"dup": "повтор", "service": "служебное", "ours": "наш Push", "excluded": "⚡/💊 — не учитывается",
+DEC_RU = {"dup": "повтор", "service": "служебное", "ours": "наш Пуш", "excluded": "⚡/💊 — не учитывается",
           "before": "до начала контроля", "stavka_skip": "идёт ставка — не учитывается", "stavka_bet": "кружок ставки",
           "bet_text": "текст ставки", "stavka_end": "ставка закончилась", "auto_bet": "автоставка",
           "wait": "клиент ждёт ответа", "wait_more": "клиент дописал", "reply": "сотрудник ответил ✅",
           "staff": "сотрудник написал", "alert": "«задержка» отправлена",
           "echo": "сразу после сотрудника сообщение бота — не клиент", "night": "вне рабочего времени — не считается"}
 WHO_UZ = {"client": "mijoz (bot)", "staff": "xodim", "ours": "Push", "service": "xizmat", "": ""}
-WHO_RU = {"client": "клиент (бот)", "staff": "сотрудник", "ours": "Push", "service": "служебное", "": ""}
+WHO_RU = {"client": "клиент (бот)", "staff": "сотрудник", "ours": "Пуш", "service": "служебное", "": ""}
 
 
 def work_hours(ctx) -> str:
@@ -50,7 +50,7 @@ async def control(ctx, r: Req):
                    r.L("<i>Mijoz = vositachi bot xabari. Javob = har qanday xodim xabari (papka akkauntidan ham). "
                        "Push xabari va xodim yozgan zahoti chiqqan bot xabari hisobga olinmaydi.</i>",
                        "<i>Клиент = сообщение бота-посредника. Ответ = сообщение любого сотрудника (и с аккаунта "
-                       "папки). Push и сообщение бота сразу после сотрудника не считаются.</i>"))
+                       "папки). Пуш и сообщение бота сразу после сотрудника не считаются.</i>"))
     rows = []
     if r.can("full"):
         rows += grid([(f"⏱ {r.L('Limit', 'Лимит')}", "cl"), (f"🕒 {r.L('Ish vaqti', 'Рабочее время')}", "ch"),
@@ -96,40 +96,45 @@ async def fine_rules(ctx, r: Req):
     from .kassa_view import money
     n, forgive, grace = ctx.tracker.fine_rules()
     on = db.flag("fines_enabled")
-    d = r.L("daq", "мин")
-    lines = [f"💸 {r.L('Avtomat jarimalar', 'Автоматические штрафы')} — {onoff(r, on)}", "",
-             f"<b>🚨 {r.L('Zaderjka', 'Задержка')}</b>",
-             f"👥 {r.L('Nechta lid birdaniga', 'Сколько лидов сразу')} — <b>{n}</b>",
-             f"⏳ {r.L('Javob uchun vaqt', 'Время на ответ')} — <b>{grace // 60} {d}</b>",
-             f"💵 {r.L('Summa', 'Сумма')} — <b>{money(db.get_float('fine_amount'))} $</b> "
-             f"{r.L('har xodimga', 'каждому')}",
-             f"🙏 {r.L('Kechirim', 'Прощать')} — <b>{forgive}</b> {r.L('marta har kuni', 'раз в день')}",
-             f"🔁 {r.L('Bitta holat', 'Один случай')} — <b>{db.get_int('fine_episode', 30)} {d}</b>",
-             "", f"<b>🕘 {r.L('Kech qolish', 'Опоздание')}</b> — {h(late_fine_text(db.get('late_fine'), r.lang))}"]
+    ep = db.get_int("fine_episode", 30)
+    amount = money(db.get_float("fine_amount"))
+    late = h(late_fine_text(db.get("late_fine"), r.lang))
+    from .rules import plural_leads
+    raz = "раза" if forgive % 10 in (2, 3, 4) and forgive % 100 not in (12, 13, 14) else "раз"
+    head = f"💸 {r.L('Avtomat jarimalar', 'Автоматические штрафы')} — {onoff(r, on)}"
+    story = [f"<b>🚨 {r.L('Zaderjka uchun — qanday ishlaydi', 'За задержки — как работает')}</b>",
+             r.L(f"1) Papkada bir vaqtda <b>{n} ta lid</b> javobsiz qolsa — bu «holat».",
+                 f"1) В папке одновременно <b>{plural_leads(n)}</b> без ответа — это «случай»."),
+             r.L(f"2) Kuniga birinchi <b>{forgive} marta</b> — faqat ogohlantirish, jarimasiz.",
+                 f"2) Первые <b>{forgive} {raz}</b> в день — только предупреждение, без штрафа."),
+             r.L(f"3) Keyingisida: «<b>{grace // 60} daqiqada</b> javob bering». Javob bo'lmasa — papkaning har "
+                 f"xodimiga <b>{amount} $</b> (dam olayotganga emas).",
+                 f"3) Дальше: «ответьте за <b>{grace // 60} мин</b>». Нет ответа — каждому сотруднику папки "
+                 f"<b>{amount} $</b> (кроме выходных)."),
+             r.L(f"4) Jarimadan keyin <b>{ep} daqiqa</b> ichidagi kechikishlar — o'sha holat, ikkinchi jarima yo'q.",
+                 f"4) Задержки в течение <b>{ep} мин</b> после штрафа — тот же случай, второго штрафа нет.")]
+    other = [f"<b>🕘 {r.L('Kech qolish', 'Опоздание')}</b> — {late}"]
     folders = P.folders(db)
     if folders:
-        lines.append("")
-        lines += [f"📁 {h(f['name'])} — {folder_fine_text(ctx, r, f)}" for f in folders]
-    how = [r.L(f"Papkada {n} ta lid birdaniga javobsiz qolsa — «Проёб»ga ogohlantirish. Kuniga birinchi {forgive} "
-               f"tasi kechiriladi. Keyingisida «{grace // 60} daqiqada javob bering», javob bo'lmasa — summa papkaning "
-               f"har xodimiga (dam olayotganga emas). {db.get_int('fine_episode', 30)} daqiqa ichida yana kechiksa — "
-               "o'sha holat, qayta jarima yo'q.",
-               f"{n} лидов сразу без ответа в папке — предупреждение в «Проёб». Первые {forgive} в день прощаются. "
-               f"Дальше «ответьте за {grace // 60} мин», нет ответа — сумма каждому сотруднику папки (кроме "
-               f"выходных). Повтор в течение {db.get_int('fine_episode', 30)} мин — тот же случай.")]
+        other.append(f"<b>📁 {r.L('Papkalar', 'Папки')}</b>")
+        other += [f"{h(f['name'])} — {folder_fine_text(ctx, r, f)}" for f in folders]
     rows = []
     if r.can("full"):
-        rows.append([((r.L("⛔ Jarimalarni o'chirish", "⛔ Выключить штрафы") if on else
-                       r.L("✅ Jarimalarni yoqish", "✅ Включить штрафы")), "cfn:t")])
-        rows += grid([(f"👥 {r.L('Nechta lid', 'Сколько лидов')}", "cfi:fine_min_leads"),
-                      (f"⏳ {r.L('Javob vaqti', 'Время на ответ')}", "cfi:fine_grace"),
-                      (f"💵 {r.L('Summa', 'Сумма')}", "cfi:fine_amount"),
-                      (f"🙏 {r.L('Kechirim', 'Прощать')}", "cfi:fine_forgive"),
-                      (f"🔁 {r.L('Bitta holat', 'Один случай')}", "cfi:fine_episode"),
+        d = r.L("daq", "мин")
+        rows += grid([(f"👥 {r.L(f'{n} ta lid', plural_leads(n))}", "cfi:fine_min_leads"),
+                      (f"🙏 {r.L(f'{forgive} marta kechirish', f'прощать {forgive} {raz}')}", "cfi:fine_forgive"),
+                      (f"⏳ {grace // 60} {d}", "cfi:fine_grace"),
+                      (f"💵 {amount} $", "cfi:fine_amount"),
+                      (f"🔁 {ep} {d}", "cfi:fine_episode"),
                       (f"🕘 {r.L('Kech qolish', 'Опоздание')}", "cfi:late_fine")])
         rows.append([(f"📁 {r.L('Papka bo‘yicha summa', 'Сумма по папкам')}", "cf")])
+        rows.append([((r.L("⛔ Jarimalarni o'chirish", "⛔ Выключить штрафы") if on else
+                       r.L("✅ Jarimalarni yoqish", "✅ Включить штрафы")), "cfn:t")])
     rows.append(nav(r, "c"))
-    return ui.join(title("💸", r.L("JARIMA QOIDASI", "ПРАВИЛА ШТРАФА")), "", card(lines), card(how)), kb(*rows)
+    hint = r.L("O'zgartirish: pastdagi raqamni bosing va yangisini yozing.",
+               "Изменить: нажмите на число внизу и напишите новое.")
+    return ui.join(title("💸", r.L("JARIMALAR", "ШТРАФЫ")), "", head, card(story), card(other), f"<i>{hint}</i>"), \
+        kb(*rows)
 
 
 FINE_KEYS = {"fine_min_leads": (1, 50), "fine_forgive": (0, 20), "fine_grace": (0, 120), "fine_amount": (0, 1000),
@@ -570,7 +575,7 @@ async def folder_card(ctx, r: Req):
              f"💬 {r.L('Guruhlar', 'Группы')} — <b>{chats}</b>",
              f"🔥 {r.L('Lidlar', 'Лиды')} — <b>{lc['total']}</b> {r.L('ta', '')}".rstrip()
              + f" · 🆕 {r.L('bugun yangi', 'новых сегодня')} <b>{lc['new']}</b>",
-             f"└ {r.L(f'Push bazasi ({base_d} dan keyin o‘zi yozgan)', f'База Push (писали сами после {base_d})')} — "
+             f"└ {r.L(f'Push bazasi ({base_d} dan keyin o‘zi yozgan)', f'База Пуш (писали сами после {base_d})')} — "
              f"<b>{lc['all']}</b> · {r.L('7 kunda yozgan', 'писали за 7 дней')} <b>{lc['week']}</b> · "
              f"{r.L('bugun', 'сегодня')} <b>{lc['today']}</b>",
              f"🚨 {r.L('Zaderjka nazorati', 'Контроль задержек')} — {onoff(r, f['delay_on'])}",
@@ -587,7 +592,7 @@ async def folder_card(ctx, r: Req):
     return ui.join(title("📁", h(f["name"])), "", card(lines),
                    r.L("<i>💬 — papkadagi guruhlar, har guruhda lidlar — topiklar. 🔥 — hamma lidlar; "
                        "Push faqat baza sanasidan keyin o'zi yozganlarga boradi (yangi ham, eski ham).</i>",
-                       "<i>💬 — группы папки, лиды — топики в них. 🔥 — все лиды; Push идёт только тем, "
+                       "<i>💬 — группы папки, лиды — топики в них. 🔥 — все лиды; Пуш идёт только тем, "
                        "кто писал сам после даты базы (новые и старые).</i>")), kb(*rows)
 
 

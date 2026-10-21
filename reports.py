@@ -105,7 +105,7 @@ def summary(ctx, s: dt.date, e: dt.date, lang: str, owner: bool, full: bool = Tr
         lines.append(f"⚠️ {L('Ko‘p lid javobsiz', 'Много лидов без ответа')} — <b>{sum(inc.values())}</b> "
                      f"({L('kechirildi', 'прощено')} {inc.get('warn', 0)} · {L('vaqtida javob', 'успели')} "
                      f"{inc.get('ok', 0)} · {L('jarima', 'штраф')} {inc.get('fined', 0)})")
-    lines.append(f"📣 Push — <b>{pushed}</b>")
+    lines.append(f"📣 {L('Push', 'Пуш')} — <b>{pushed}</b>")
     parts.append("<blockquote>" + "\n".join(lines) + "</blockquote>")
     st = staff_stats(db, s_ts, e_ts, tz)
     if st:

@@ -161,24 +161,55 @@ class Attendance:
             return self._break(person, kind, ts, break_minutes(text) if kind == "start" else None)
         return None
 
-    def arrive(self, person, ts: int) -> str:
+    def arrive(self, person, ts: int, via: str = "greet") -> str:
+        """Ishga keldi: «доброе утро» (via='greet') yoki lidga yoza boshladi (via='work') — qaysi biri oldin bo'lsa,
+        kelgan vaqt o'sha. Kech qolish shu vaqtdan hisoblanadi."""
         day = local_date(ts, self.tz)
         row = self.db.one("SELECT * FROM attendance WHERE day=? AND person_id=?", (day.isoformat(), person["id"]))
+        if via == "greet" and row is not None and row["greet_ts"] is None:
+            self.db.run("UPDATE attendance SET greet_ts=? WHERE day=? AND person_id=?", (ts, day.isoformat(), person["id"]))
         if row is not None and row["arrived_ts"]:
-            return "already"
+            return "greeted" if via == "greet" and row["greet_ts"] is None else "already"
         start = at(day, self.work_start(), self.tz)
         late = minutes_up(ts - start) if ts > start + 59 else 0
         if P.is_day_off(person, day.weekday()):
             late = 0
-        self.db.run("INSERT INTO attendance(day, person_id, arrived_ts, late_min) VALUES(?,?,?,?) "
-                    "ON CONFLICT(day, person_id) DO UPDATE SET arrived_ts=excluded.arrived_ts, late_min=excluded.late_min",
-                    (day.isoformat(), person["id"], ts, late))
+        self.db.run("INSERT INTO attendance(day, person_id, arrived_ts, late_min, greet_ts) VALUES(?,?,?,?,?) "
+                    "ON CONFLICT(day, person_id) DO UPDATE SET arrived_ts=excluded.arrived_ts, late_min=excluded.late_min, "
+                    "greet_ts=COALESCE(attendance.greet_ts, excluded.greet_ts)",
+                    (day.isoformat(), person["id"], ts, late, ts if via == "greet" else None))
         amount = late_fine_amount(self.db.get("late_fine"), late)
         if late and amount > 0 and self.db.flag("fines_enabled"):
             from .kassa import add_adj
             add_adj(self.db, person["id"], "fine", amount, day.isoformat(), source="late",
                     note=f"опоздание {late} мин")
         return "late" if late else "arrived"
+
+    async def work_seen(self, person, ts: int) -> str | None:
+        """Xodim lidga yozdi — demak ishga kelgan (ish boshlanishidan 2 soat oldindan boshlab hisoblanadi).
+        Kech qolgan bo'lsa — «Проёб»da qisqa xabar (xuddi «доброе утро» kech yozilgandagidek)."""
+        if not self.db.flag("attendance_enabled") or not person["attend"] or not person["active"]:
+            return None
+        day = local_date(ts, self.tz)
+        if ts < at(day, self.work_start(), self.tz) - 2 * 3600:
+            return None                                    # tungi yozishmalar — yangi kunga kelish emas
+        row = self.db.one("SELECT arrived_ts FROM attendance WHERE day=? AND person_id=?", (day.isoformat(), person["id"]))
+        if row is not None and row["arrived_ts"]:
+            return None
+        if not self.db.one("SELECT 1 FROM folder_people WHERE person_id=?", (person["id"],)):
+            return None
+        res = self.arrive(person, ts, via="work")
+        if res == "late":
+            row = self.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
+                              (day.isoformat(), person["id"]))
+            from .gtext import esc
+            from .timeutil import fmt
+            try:
+                await self.notifier.send_group(f"🕘 опоздание · {esc(P.mention(person))} — {row['late_min']} мин "
+                                               f"<i>(начал работу в {fmt(ts, self.tz, '%H:%M')})</i>")
+            except Exception as exc:
+                log.warning("Kech qolish xabari yuborilmadi: %s", exc)
+        return res
 
     # ------------------------------------------------------------ tanaffus
     def length(self, br) -> int:
@@ -264,24 +295,28 @@ class Attendance:
         due = at(day, self.work_start(), self.tz) + max(1, self.db.get_int("noshow_minutes", 15)) * 60
         if now < due or now > due + 6 * 3600:
             return
-        missing = []
+        missing, working = [], []                          # hali ko'rinmagan / ishlayapti, lekin «доброе утро» yo'q
         for p in self.staff():
             if P.is_day_off(p, day.weekday()):
                 continue
             row = self.db.one("SELECT * FROM attendance WHERE day=? AND person_id=?", (day.isoformat(), p["id"]))
-            if row is not None and (row["arrived_ts"] or row["reminded"]):
+            if row is not None and (row["greet_ts"] or row["reminded"]):
                 continue
-            missing.append(p)
-        if not missing:
+            (working if row is not None and row["arrived_ts"] else missing).append(p)
+        if not missing and not working:
             return
-        from .gtext import mentions
-        text = f"🙋 приход · {mentions(missing)} — ещё нет «доброе утро»"
+        from .gtext import mentions, small
+        lines = [small("приход · напишите «доброе утро»")]
+        if missing:
+            lines.append(f"{mentions(missing)} — ещё не видно в работе")
+        if working:
+            lines.append(f"{mentions(working)} — уже работает, но без «доброе утро»")
         try:
-            await self.notifier.send_group(text)
+            await self.notifier.send_group("\n".join(lines))
         except Exception as exc:
             log.warning("Kelmaganlar eslatmasi yuborilmadi: %s", exc)
             return
-        for p in missing:
+        for p in missing + working:
             self.db.run("INSERT INTO attendance(day, person_id, reminded) VALUES(?,?,1) "
                         "ON CONFLICT(day, person_id) DO UPDATE SET reminded=1", (day.isoformat(), p["id"]))
 

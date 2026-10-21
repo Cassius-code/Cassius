@@ -11,7 +11,7 @@ from . import people as P
 from .kassa import zp_mode
 from . import ui
 from .tgclient import LoginFlow
-from .timeutil import parse_number
+from .timeutil import fmt, parse_number
 from .ui import Req, card, grid, h, kb, nav, on_input, onoff, screen, title
 
 log = logging.getLogger("settings")
@@ -36,7 +36,7 @@ async def settings(ctx, r: Req):
     lines = [f"⏯ {r.L('Bot', 'Бот')} — {onoff(r, db.flag('bot_enabled'))}",
              f"🔑 {r.L('Asosiy akkaunt', 'Основной аккаунт')} — {st(r, ub.state if ub else 'disabled')}"
              + (f" · {h(ub.me_label)}" if ub and ub.me_label else ""),
-             f"📲 {r.L('Push akkauntlar', 'Push-аккаунты')} — <b>{len(accs)}</b>",
+             f"📲 {r.L('Push akkauntlar', 'Пуш-аккаунты')} — <b>{len(accs)}</b>",
              "👥 «Проёб» — " + (f"<code>{h(db.get('proyob_group_id'))}</code>" if db.get("proyob_group_id")
                                 else r.L("belgilanmagan ⚠️", "не задана ⚠️")),
              f"💸 {r.L('Avto-jarimalar', 'Авто-штрафы')} — {onoff(r, db.flag('fines_enabled'))}",
@@ -46,13 +46,14 @@ async def settings(ctx, r: Req):
              f"🙋 {r.L('Ishga kelish', 'Приход')} — {onoff(r, db.flag('attendance_enabled'))} · "
              f"☕ {r.L('Tanaffus', 'Перерывы')} — {onoff(r, db.flag('breaks_enabled'))}"]
     btn = [(r.L("👥 «Проёб» guruhi", "👥 Группа «Проёб»"), "sg"), (r.L("🔑 Asosiy akkaunt", "🔑 Основной аккаунт"), "sm"),
-           (r.L("📲 Push akkauntlar", "📲 Push-аккаунты"), "sa"), (r.L("👮 Adminlar", "👮 Админы"), "sd"),
+           (r.L("📲 Push akkauntlar", "📲 Пуш-аккаунты"), "sa"), (r.L("👮 Adminlar", "👮 Админы"), "sd"),
            (r.L("🙋 Ishga kelish", "🙋 Приход"), "st"), (r.L("☕ Tanaffus", "☕ Перерывы"), "sr"),
            (r.L("📥 Ko'chirish", "📥 Перенос данных"), "sk"), (r.L("💾 Zaxira nusxa", "💾 Резервная копия"), "sb"),
            (r.L("🔎 Chat qidirish", "🔎 Поиск чата"), "sx")]
     if r.owner:
         btn.append((r.L("🧮 Zp hisoblash", "🧮 Расчёт зп"), "kzm"))
         btn.append((r.L("🧹 Tozalash", "🧹 Очистка"), "sz"))
+        btn.append((r.L("🧩 Qo'shimcha funksiyalar", "🧩 Доп. функции"), "ans"))
     rows = grid(btn)
     rows.append([((r.L("💸 Jarimalarni o'chirish", "💸 Выключить штрафы") if db.flag("fines_enabled") else
                    r.L("💸 Jarimalarni yoqish", "💸 Включить штрафы")), "sfn")])
@@ -80,9 +81,9 @@ WIPE = {"kassa": ("🧾", "Kassa yozuvlari", "Записи кассы",
         "people": ("👥", "Xodimlar (kassa ham)", "Сотрудники (и касса)",
                    "hamma xodimlar, foizlari, papkadagi o'rni, ishga kelish — va hamma kassa yozuvlari",
                    "все сотрудники, проценты, места в папках, приход — и все записи кассы"),
-        "push": ("📲", "Push akkauntlar", "Push-аккаунты", "Push akkauntlar (qayta kirasiz)",
-                 "Push-аккаунты (войдёте заново)"),
-        "all": ("🧹", "Hammasi", "Всё", "kassa, xodimlar va Push akkauntlar", "касса, сотрудники и Push-аккаунты")}
+        "push": ("📲", "Push akkauntlar", "Пуш-аккаунты", "Push akkauntlar (qayta kirasiz)",
+                 "Пуш-аккаунты (войдёте заново)"),
+        "all": ("🧹", "Hammasi", "Всё", "kassa, xodimlar va Push akkauntlar", "касса, сотрудники и Пуш-аккаунты")}
 
 
 @screen("sz", "owner")
@@ -118,7 +119,7 @@ async def wipe_screen(ctx, r: Req):
                                                                               ui.back_data("sz"))])
     counts = [f"🧾 {r.L('Cheklar', 'Чеки')} — <b>{db.scalar('SELECT COUNT(*) FROM checks')}</b>",
               f"👥 {r.L('Xodimlar', 'Сотрудники')} — <b>{db.scalar('SELECT COUNT(*) FROM people')}</b>",
-              f"📲 Push — <b>{db.scalar('SELECT COUNT(*) FROM accounts')}</b>"]
+              f"📲 {r.L('Push', 'Пуш')} — <b>{db.scalar('SELECT COUNT(*) FROM accounts')}</b>"]
     rows = [[(f"{v[0]} {r.L(v[1], v[2])}", f"sz:{k}")] for k, v in WIPE.items()]
     rows.append(nav(r, "s"))
     return ui.join(title("🧹", r.L("TOZALASH", "ОЧИСТКА"), r.L("boshidan kiritish uchun", "чтобы ввести заново")),
@@ -172,7 +173,7 @@ async def main_account(ctx, r: Req):
         lines.append(r.L("Oxirgi sinxron: ", "Последняя синхронизация: ") + time.strftime(
             "%H:%M", time.localtime(ub.last_sync)))
     lines.append(r.L("Asosiy akkaunt ish chatlarini kuzatadi (faqat kim/qachon). Push yubormaydi.",
-                     "Основной аккаунт следит за чатами (только кто/когда). Push не шлёт."))
+                     "Основной аккаунт следит за чатами (только кто/когда). Пуш не шлёт."))
     rows = [[(r.L("📲 Ulash / almashtirish", "📲 Подключить / сменить"), "sml:main")],
             [(r.L("🔄 Yangilash (papka, chat, xabarlar)", "🔄 Обновить (папки, чаты, сообщения)"), "sms")]]
     if ub.session():
@@ -269,7 +270,7 @@ def _back(target: str) -> str:
 
 def _phone_screen(r: Req, target: str, err: str = ""):
     what = r.L("asosiy akkaunt", "основной аккаунт") if target == "main" else r.L("yangi Push akkaunt",
-                                                                                   "новый Push-аккаунт")
+                                                                                   "новый Пуш-аккаунт")
     return title("📲", r.L("ULASH", "ПОДКЛЮЧЕНИЕ"), what) + "\n\n" + card(
         ([err, ""] if err else []) +
         [r.L("Telefon raqamini yuboring, masalan <code>+998901234567</code>.",
@@ -431,7 +432,7 @@ async def login_done(ctx, r: Req, target: str):
     aid = ctx.db.run("INSERT INTO accounts(name, session, added_ts) VALUES(?,?,?)",
                      (f"Push {n}", session, int(time.time()))).lastrowid
     ctx.pool.sync()
-    await ui.toast(ctx.bot, r.chat_id, r.L("✅ Push akkaunt qo'shildi", "✅ Push-аккаунт добавлен"))
+    await ui.toast(ctx.bot, r.chat_id, r.L("✅ Push akkaunt qo'shildi", "✅ Пуш-аккаунт добавлен"))
     fid = int(target.split(":", 1)[1]) if target.startswith("push:") else 0
     if fid and P.folder(ctx.db, fid) is not None:
         P.set_folder(ctx.db, fid, push_account_id=int(aid))
@@ -443,6 +444,19 @@ async def login_done(ctx, r: Req, target: str):
 
 
 # ───────────────────────── Push akkauntlar
+def spam_line(ctx, r: Req, spam: str, ts) -> str:
+    """🛡 @SpamBot tekshiruvi natijasi (kuniga bir marta)."""
+    when = f" · {fmt(ts, ctx.tz)}" if ts else ""
+    if not ctx.db.flag("spam_check"):
+        return r.L("🛡 Spam tekshiruvi — ⚪ o'chiq", "🛡 Проверка спама — ⚪ выкл")
+    if spam == "limited":
+        return r.L(f"🛡 Spam — 🚫 cheklov bor, Push to'xtatilgan{when}", f"🛡 Спам — 🚫 ограничение, Пуш остановлен{when}")
+    if spam == "ok":
+        return r.L(f"🛡 Spam — ✅ cheklov yo'q{when}", f"🛡 Спам — ✅ ограничений нет{when}")
+    return r.L("🛡 Spam — hali tekshirilmagan (har kuni 09:00 dan keyin)",
+               "🛡 Спам — ещё не проверялся (каждый день после 09:00)")
+
+
 @screen("sa", "full")
 async def accounts(ctx, r: Req):
     db = ctx.db
@@ -452,12 +466,14 @@ async def accounts(ctx, r: Req):
     for a in db.all("SELECT * FROM accounts ORDER BY id"):
         state = ctx.pool.state_of(a["id"]) if ctx.pool else "no_session"
         icon = {"online": "🟢", "paused": "⏸"}.get(state, "🔴" if state in ("offline", "unauthorized") else "🟡")
+        if a["spam"] == "limited":
+            icon = "🚫"
         rows.append([(f"{icon} {a['name']} {a['label']}"[:50], f"sa:{a['id']}")])
-    rows.append([(r.L("➕ Push akkaunt qo'shish", "➕ Добавить Push-аккаунт"), "sml:push")])
+    rows.append([(r.L("➕ Push akkaunt qo'shish", "➕ Добавить Пуш-аккаунт"), "sml:push")])
     rows.append(nav(r, "s"))
-    return ui.join(title("📲", r.L("PUSH AKKAUNTLAR", "PUSH-АККАУНТЫ")), "", card(
+    return ui.join(title("📲", r.L("PUSH AKKAUNTLAR", "ПУШ-АККАУНТЫ")), "", card(
         [r.L("Har papkaga o'z akkaunti (📣 Push → 📁 Papkalar). Akkaunt kerakli chatlarda bo'lishi kerak.",
-             "У каждой папки свой аккаунт (📣 Push → 📁 Папки). Аккаунт должен быть в нужных чатах.")])), kb(*rows)
+             "У каждой папки свой аккаунт (📣 Пуш → 📁 Папки). Аккаунт должен быть в нужных чатах.")])), kb(*rows)
 
 
 async def account_card(ctx, r: Req):
@@ -489,7 +505,7 @@ async def account_card(ctx, r: Req):
         return await accounts(ctx, r)
     used = [f["name"] for f in db.all("SELECT name FROM folders WHERE push_account_id=?", (aid,))]
     lines = [f"{r.L('Holati', 'Состояние')} — {st(r, ctx.pool.state_of(aid))}", f"👤 {h(a['label'] or '—')}",
-             f"📁 {h(', '.join(used) or r.L('papka yo‘q', 'нет папок'))}"]
+             f"📁 {h(', '.join(used) or r.L('papka yo‘q', 'нет папок'))}", spam_line(ctx, r, a["spam"], a["spam_ts"])]
     rows = grid([((r.L("▶️ Davom ettirish", "▶️ Возобновить") if a["paused"] else r.L("⏸ Pauza", "⏸ Пауза")),
                   f"sa:{aid}:p"), (r.L("✏️ Nomi", "✏️ Название"), f"sa:{aid}:n"),
                  (r.L("🗑 O'chirish", "🗑 Удалить"), f"sa:{aid}:x")])

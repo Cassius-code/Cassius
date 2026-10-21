@@ -41,6 +41,9 @@ def used_by(ctx, acc_id, except_fid: int = 0) -> str:
 
 
 def state_icon(ctx, acc_id) -> str:
+    from .push import spam_limited
+    if acc_id and spam_limited(ctx.db, acc_id):
+        return "🚫"                                        # @SpamBot: spam-cheklov — Push bu akkauntdan ketmaydi
     st = ctx.pool.state_of(acc_id) if ctx.pool else "no_session"
     return {"online": "🟢", "connecting": "🟡", "starting": "🟡", "paused": "⏸"}.get(st, "🔴")
 
@@ -87,11 +90,11 @@ async def push_menu(ctx, r: Req):
                     f" · <b>{n or r.L('hammasi', 'все')}</b>")
     name, rule = slot_info(ctx, r, pu.slot())
     base = db.get("push_base_from") or "2026-08-28"
-    parts = [title("📣", "PUSH", r.L("issiq lidlarga xabar", "сообщение горячим лидам")), "",
+    parts = [title("📣", r.L("PUSH", "ПУШ"), r.L("issiq lidlarga xabar", "сообщение горячим лидам")), "",
              card([f"<b>{r.L('Matn', 'Текст')}</b>", preview] +
                   ([f"📎 {kinds.get(media['kind'], media['kind'])}"] if media else [])),
              card([f"<b>{r.L('Hozir', 'Сейчас')}: {name}</b>", f"<i>{rule}</i>"]),
-             card([f"<b>{r.L('Papkalar', 'Папки')}</b>"] + (plan or [r.L("Push yoqilgan papka yo'q", "Нет папок с Push")]) +
+             card([f"<b>{r.L('Papkalar', 'Папки')}</b>"] + (plan or [r.L("Push yoqilgan papka yo'q", "Нет папок с Пушем")]) +
                   [f"📅 {r.L('Baza', 'База')}: {dstr(base)} {r.L('dan keyin o‘zi yozgan lidlar', 'и позже (писали сами)')}" +
                    base_state(ctx, r)])]
     if pu.running:
@@ -143,7 +146,7 @@ async def start_preview(ctx, r: Req):
     if aud["no_account"]:
         info.append("⚠️ " + r.L("Akkauntsiz papkalar: ", "Папки без аккаунта: ") +
                     h(", ".join(folders[f]["name"] for f in aud["no_account"])))
-    text = ui.join(title("🚀", r.L("PUSHNI TASDIQLANG", "ПОДТВЕРДИТЕ PUSH")), "", card(info), card(lines) if lines else "")
+    text = ui.join(title("🚀", r.L("PUSHNI TASDIQLANG", "ПОДТВЕРДИТЕ ПУШ")), "", card(info), card(lines) if lines else "")
     rows = [[(r.L("✅ Boshlash", "✅ Начать"), "usy")]] if n else []
     rows.append(nav(r, "u"))
     return text, kb(*rows)
@@ -171,14 +174,14 @@ async def start_run(ctx, r: Req):
 
 
 def report_text(ctx, r: Req, res: dict) -> str:
-    return ui.join(title("📣", "PUSH"), "", card(report_lines(ctx, r, res)))
+    return ui.join(title("📣", r.L("PUSH", "ПУШ")), "", card(report_lines(ctx, r, res)))
 
 
 def report_lines(ctx, r: Req, res: dict) -> list[str]:
     names = {"done": r.L("✅ Push tugadi", "✅ Рассылка завершена"), "stopped": r.L("⏹ To'xtatildi", "⏹ Остановлено"),
              "aborted": r.L("⛔ Push uzildi", "⛔ Рассылка прервана"), "busy": r.L("⏳ Boshqa Push ketyapti",
                                                                               "⏳ Другая рассылка идёт"),
-             "empty": r.L("⚠️ Matn yo'q", "⚠️ Нет текста"), "disabled": r.L("⛔ Push o'chirilgan", "⛔ Push выключен"),
+             "empty": r.L("⚠️ Matn yo'q", "⚠️ Нет текста"), "disabled": r.L("⛔ Push o'chirilgan", "⛔ Пуш выключен"),
              "interrupted": r.L("⚠️ Qayta ishga tushish sababli uzildi", "⚠️ Прервано перезапуском")}
     lines = [f"<b>{names.get(res['status'], res['status'])}</b>"]
     if "sent" in res:
@@ -218,7 +221,7 @@ async def test(ctx, r: Req):
 @screen("ue", "full")
 async def text_ask(ctx, r: Req):
     ui.ask(r, "push_text", "u")
-    return title("✏️", r.L("PUSH MATNI", "ТЕКСТ PUSH")) + "\n\n" + card(
+    return title("✏️", r.L("PUSH MATNI", "ТЕКСТ ПУША")) + "\n\n" + card(
         [r.L("Matnni yuboring (3500 belgigacha). <code>-</code> — matnni olib tashlash.",
              "Пришлите текст (до 3500 символов). <code>-</code> — убрать текст.")]), ui.cancel_kb(r, "u")
 
@@ -260,7 +263,7 @@ async def media_ask(ctx, r: Req):
     ui.ask(r, "push_media", "u")
     rows = [[(r.L("🗑 Mediani olib tashlash", "🗑 Убрать медиа"), "umx")]] if ctx.pusher.media() else []
     rows.append([(r.L("✖️ Bekor qilish", "✖️ Отмена"), "u")])
-    return title("📎", r.L("PUSH MEDIASI", "МЕДИА PUSH")) + "\n\n" + card(
+    return title("📎", r.L("PUSH MEDIASI", "МЕДИА ПУША")) + "\n\n" + card(
         [r.L("Yuboring: 🎤 ovozli, ⭕ dumaloq video, 🎬 video, 🖼 rasm yoki fayl (20 MB gacha). Matn izoh bo'lib ketadi.",
              "Пришлите: 🎤 голосовое, ⭕ кружок, 🎬 видео, 🖼 фото или файл (до 20 МБ). Текст пойдёт подписью.")]), \
         kb(*rows)
@@ -363,7 +366,7 @@ async def folders(ctx, r: Req):
         rows.append([(f"{mark} {f['name']} · {state_icon(ctx, f['push_account_id'])} {acc_name(ctx, f['push_account_id'])}"
                       f" · {n or '∞'}"[:60], f"uf:{f['id']}")])
     rows.append(nav(r, "u"))
-    return ui.join(title("📁", r.L("PUSH: PAPKALAR", "PUSH: ПАПКИ")), "", card(
+    return ui.join(title("📁", r.L("PUSH: PAPKALAR", "ПУШ: ПАПКИ")), "", card(
         [r.L("Har papka o'z akkauntidan yuboradi. Soni — HAR papkaga (150 = har birida 150).",
              "Каждая папка шлёт со своего аккаунта. Количество — НА КАЖДУЮ папку (150 = по 150).")])), kb(*rows)
 
@@ -397,14 +400,14 @@ async def folder_card(ctx, r: Req):
                      "Сколько за раз этой папке? <code>0</code> — общее число.")]), ui.cancel_kb(r, f"uf:{fid}")
         ui.view(r, f"uf:{fid}")
     f = must(P.folder(db, fid))
-    lines = [f"📣 Push — {onoff(r, f['push_on'])}",
+    lines = [f"📣 {r.L('Push', 'Пуш')} — {onoff(r, f['push_on'])}",
              f"📲 {r.L('Akkaunt', 'Аккаунт')} — {state_icon(ctx, f['push_account_id'])} {h(acc_name(ctx, f['push_account_id']))}",
              f"🔢 {r.L('Soni', 'Количество')} — <b>{f['push_limit'] or r.L('umumiy', 'общее')}</b>"]
-    rows = grid([((r.L("⛔ Push'ni o'chirish", "⛔ Выкл. Push") if f["push_on"] else r.L("✅ Push'ni yoqish", "✅ Вкл. Push")),
+    rows = grid([((r.L("⛔ Push'ni o'chirish", "⛔ Выкл. Пуш") if f["push_on"] else r.L("✅ Push'ni yoqish", "✅ Вкл. Пуш")),
                   f"uf:{fid}:o"), (f"📲 {r.L('Akkaunt', 'Аккаунт')}", f"uf:{fid}:a"),
                  (f"🔢 {r.L('Soni', 'Количество')}", f"uf:{fid}:n")])
     rows.append(nav(r, "uf"))
-    return ui.join(title("📁", h(f["name"]), "Push"), "", card(lines)), kb(*rows)
+    return ui.join(title("📁", h(f["name"]), r.L("Push", "Пуш")), "", card(lines)), kb(*rows)
 
 
 @on_input("folder_push_n")
@@ -448,7 +451,7 @@ async def settings(ctx, r: Req):
            (f"🔁 {r.L('Takror', 'Повтор')}", "uoi:push_repeat_minutes"), (f"🔥 {r.L('Belgilar', 'Иконки')}", "uoi:push_emojis"),
            (f"🚫 {r.L('Chiqarilgan', 'Исключены')}", "uoi:skip_emojis"),
            (f"🔍 {r.L('Bazani tekshirish', 'Проверить базу')}", "uob")]
-    return ui.join(title("⚙️", r.L("PUSH SOZLAMALARI", "НАСТРОЙКИ PUSH")), "", card(lines)), kb(*grid(btn), nav(r, "u"))
+    return ui.join(title("⚙️", r.L("PUSH SOZLAMALARI", "НАСТРОЙКИ ПУША")), "", card(lines)), kb(*grid(btn), nav(r, "u"))
 
 
 def base_state(ctx, r: Req) -> str:
@@ -499,10 +502,10 @@ async def period_screen(ctx, r: Req):
     btn = [(("✅ " if (k == "all" and cur == 0) or (k.isdigit() and int(k) == cur) else "") + t, f"upd:{k}")
            for k, t in opts]
     lines = [r.L("Lidlar haftalar o'tib eskiradi. Push faqat shu davrda o'zi yozgan lidlarga ketadi.",
-                 "Лиды со временем остывают. Push — только тем, кто сам писал в этот период."),
+                 "Лиды со временем остывают. Пуш — только тем, кто сам писал в этот период."),
              f"{r.L('Hozir', 'Сейчас')}: <b>{period_text(ctx, r)}</b>"]
     rows = grid(btn, 3) + [[(r.L("📆 Sana oralig'i", "📆 Даты"), "uoi:range")], nav(r, "uo")]
-    return ui.join(title("🗓", r.L("PUSH DAVRI", "ПЕРИОД PUSH")), "", card(lines)), kb(*rows)
+    return ui.join(title("🗓", r.L("PUSH DAVRI", "ПЕРИОД ПУША")), "", card(lines)), kb(*rows)
 
 
 PROMPTS = {
@@ -525,7 +528,7 @@ PROMPTS = {
     "push_emojis": ("Faqat shu belgili lidlarga (masalan <code>🔥</code>). <code>*</code> — hammasiga.",
                     "Только лидам с иконкой (например <code>🔥</code>). <code>*</code> — всем."),
     "skip_emojis": ("Chiqarilgan belgilar (zaderjka va Push'da hisobga olinmaydi), masalan <code>⚡ 💊</code>.",
-                    "Исключённые иконки (не учитываются в задержках и Push), например <code>⚡ 💊</code>."),
+                    "Исключённые иконки (не учитываются в задержках и Пуше), например <code>⚡ 💊</code>."),
 }
 
 
@@ -597,12 +600,66 @@ async def setting_set(ctx, r: Req, key: str):
 
 
 # ───────────────────────── jurnal
+STATUS_ICON = {"done": "✅", "stopped": "⏹", "aborted": "⛔", "interrupted": "⚠️", "running": "⏳"}
+
+
+def kind_label(r: Req, kind: str) -> str:
+    if not kind:
+        return ""
+    if kind == "text":
+        return r.L("📝 matn", "📝 текст")
+    return (KIND_RU if r.lang == "ru" else KIND_UZ).get(kind, kind)
+
+
 @screen("uh", "full")
 async def history(ctx, r: Req):
-    rows = ctx.db.all("SELECT * FROM broadcasts ORDER BY id DESC LIMIT 12")
-    names = {"done": "✅", "stopped": "⏹", "aborted": "⛔", "interrupted": "⚠️", "running": "⏳"}
-    lines = [f"{names.get(b['status'], b['status'])} {fmt(b['started_ts'], ctx.tz)} · "
-             f"{'⏰' if b['trigger'] == 'auto' else '👆'} · <b>{b['sent']}</b>/{b['total']}"
-             + (f" · ✖️{b['failed']}" if b["failed"] else "") for b in rows]
-    return ui.join(title("🧾", r.L("PUSH JURNALI", "ЖУРНАЛ PUSH")), "",
-                   card(lines) if lines else r.L("<i>Hozircha bo'sh.</i>", "<i>Пока пусто.</i>")), kb(nav(r, "u"))
+    """🧾 Har Push: kimga ketdi, nechtasi keyin yozdi, nechtasiga karta ketdi. Push matni/ovozi o'qilmaydi."""
+    from . import insights as I
+    db, now = ctx.db, int(ctx.clock())
+    stats = I.push_stats(db, now, limit=12)
+    on = db.flag("an_push")
+    win = db.get_int("push_reply_min", 90)
+    lines, best = [], None
+    for x in stats:
+        b = x["b"]
+        head = (f"{STATUS_ICON.get(b['status'], b['status'])} {fmt(b['started_ts'], ctx.tz)} · "
+                f"{'⏰' if b['trigger'] == 'auto' else '👆'} {kind_label(r, b['kind'])}".rstrip())
+        if not on or not x["n"]:
+            lines.append(head + f" · <b>{b['sent']}</b>/{b['total']}" + (f" · ✖️{b['failed']}" if b["failed"] else ""))
+            continue
+        rep = f"✍️ {x['rep']} ({I.pct(x['rep'], x['n'])})" + (" ⏳" if x["rep_open"] else "")
+        crd = f"💳 {x['card']} ({I.pct(x['card'], x['n'])})" + (" ⏳" if x["card_open"] else "")
+        lines.append(f"{head}\n   {x['n']} {r.L('ta', 'лид.')} → {rep} · {crd}")
+        if not x["rep_open"] and x["n"] >= 20 and (best is None or x["rep"] / x["n"] > best[1]):
+            best = (b, x["rep"] / x["n"], x)
+    parts = [title("🧾", r.L("PUSH NATIJASI", "РЕЗУЛЬТАТ ПУША")), "",
+             card(lines) if lines else r.L("<i>Hozircha bo'sh.</i>", "<i>Пока пусто.</i>")]
+    if on and best:
+        b, _v, x = best
+        parts.append(card([r.L(f"🏆 Eng yaxshisi: {fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])} — "
+                               f"✍️ {I.pct(x['rep'], x['n'])} · 💳 {I.pct(x['card'], x['n'])}",
+                               f"🏆 Лучший: {fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])} — "
+                               f"✍️ {I.pct(x['rep'], x['n'])} · 💳 {I.pct(x['card'], x['n'])}")]))
+    if on:
+        parts.append(r.L(f"<i>✍️ — Push'dan keyin {win} daqiqa ichida yozgan lidlar · 💳 — 24 soat ichida karta "
+                         "yuborilgan lidlar. Bir lidga bir necha Push bo'lsa — natija oxirgisiga. ⏳ — hali hisoblanmoqda. "
+                         "Push'ning o'zi (matn, ovoz, video) o'qilmaydi.</i>",
+                         f"<i>✍️ — лиды, написавшие в течение {win} мин после Пуша · 💳 — кому за 24 ч отправили карту. "
+                         "Если Пушей было несколько — результат последнему. ⏳ — ещё считается. Сам Пуш (текст, голос, "
+                         "видео) не читается.</i>"))
+    btn = [(f"📁 {fmt(x['b']['started_ts'], ctx.tz)}", f"uhb:{x['b']['id']}") for x in stats if on and x["n"]][:6]
+    return ui.join(*parts), kb(*grid(btn, 2), nav(r, "u"))
+
+
+@screen("uhb", "full")
+async def history_folders(ctx, r: Req):
+    """Bitta Push — RD bo'yicha."""
+    from . import insights as I
+    bid = int(r.args[0])
+    b = must(ctx.db.one("SELECT * FROM broadcasts WHERE id=?", (bid,)))
+    names = {f["id"]: f["name"] for f in P.folders(ctx.db)}
+    lines = [f"📁 {h(names.get(fid, '?'))} — {n} {r.L('ta', 'лид.')} → ✍️ {rep} ({I.pct(rep, n)}) · "
+             f"💳 {crd} ({I.pct(crd, n)})" for fid, n, rep, crd in I.push_by_folder(ctx.db, bid)]
+    sub = f"{fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])}".strip()
+    return ui.join(title("🧾", r.L("PUSH NATIJASI", "РЕЗУЛЬТАТ ПУША"), sub), "",
+                   card(lines or [r.L("Ma'lumot yo'q", "Нет данных")])), kb(nav(r, "uh"))

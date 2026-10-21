@@ -34,6 +34,11 @@ def first_run(db, now: int, tz) -> None:
         db.set("late_fine", old_rate["value"])
     K.seed_prices(db)
     K.seed_opening(db)
+    if not db.get_int("cards_since"):
+        db.set("cards_since", str(now))                  # karta, Push natijasi, faollik — shu paytdan yig'iladi
+    if not db.get("greet_migrated"):                     # eski yozuvlar: kelgan = «доброе утро» yozgan
+        db.run("UPDATE attendance SET greet_ts=arrived_ts WHERE greet_ts IS NULL AND arrived_ts IS NOT NULL")
+        db.set("greet_migrated", "1")
 
 
 def make_backup(ctx) -> tuple[bytes, str]:
@@ -65,6 +70,8 @@ class Scheduler:
     def __init__(self, ctx):
         self.ctx = ctx
         self._push_task: asyncio.Task | None = None
+        self._spam_task: asyncio.Task | None = None
+        self._last_cool = 0.0
         self._last_prune = 0.0
         self._last_pool = 0.0
 
@@ -94,6 +101,13 @@ class Scheduler:
         await self._safe("ishga kelish va tanaffus", ctx.att.tick(now))
         if ctx.pusher is not None and (self._push_task is None or self._push_task.done()):
             self._push_task = asyncio.create_task(self._safe("avtomat Push", self._auto_push(now)))
+        if self._spam_task is None or self._spam_task.done():   # 🛡 @SpamBot — fonda (bir necha soniya oladi)
+            from . import guard
+            self._spam_task = asyncio.create_task(self._safe("@SpamBot", guard.daily(ctx, now)))
+        if time.monotonic() - self._last_cool >= 120:              # 📉 soviyotgan lidlar — har 2 daqiqada
+            self._last_cool = time.monotonic()
+            from . import insights
+            await self._safe("soviyotgan lidlar", insights.cooling_alerts(ctx, now))
         await self._safe("kunlik hisobot", self.daily_report(now))
         await self._safe("haftalik xulosa", self.weekly(now))
         await self._safe("zaxira nusxa", self.backup(now))

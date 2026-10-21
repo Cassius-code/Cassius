@@ -129,6 +129,7 @@ async def amain() -> None:
     notifier = Notifier(bot, db, cfg.owner_ids)
     tracker = Tracker(db, tz, notifier)
     att = Attendance(db, tz, notifier)
+    tracker.on_staff = att.work_seen                    # xodim lidga yozsa — ishga kelgan
     userbot = Userbot(cfg, db, tracker, notifier, tz)
     pool = AccountPool(cfg, db, notifier, on_identified=userbot.reload_ids)
     pool.main = userbot                                   # papka Push'i asosiy akkauntdan ham bo'lishi mumkin

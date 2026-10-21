@@ -10,7 +10,7 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Xodim yozgandan keyin bot yozsa — bu mijozning yangi xabari, unga ham javob kerak.
   Ish vaqtida guruhlar har 2 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
   yetkazmay qolgan xabar ham topilib, o'z vaqti bilan hisoblanadi.
-  Bir vaqtda kechikkan lidlar — bitta xabarda; keyin kechikkani — pastga yangi xabar (eskisi o'chmaydi).
+  Bir-biriga yaqin kechikkan lidlar — 40 soniya kutib, bitta xabarda; keyingisi — pastga yangi xabar.
   Lid statusi ⚡/💊 (Клоун, Мариновка) — zaderjka emas: status qo'yilsa kutish bekor, ochiq zaderjka yopiladi.
   Xodimning `/status` buyrug'i va vositachi botning status menyusi mijoz xabari hisoblanmaydi.
   **Papkalar:** 🚨 Nazorat → 📁 Papkalar — asosiy akkauntdagi papkalar ro'yxati; ➕ — qo'shish (guruhlari o'zi
@@ -20,11 +20,12 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   3 ta stavkadan keyin oddiy zaderjka nazorati boshlanadi.
 - **🌙 Kun oxiri.** Ish vaqti tugagach (23:01) javobsiz chatlar ro'yxati «Проёб»ga boradi:
   «доведите работу до конца». Ertalab ular uchun zaderjka yozilmaydi.
-- **💸 Jarima.** Har zaderjkaga emas. Raqamlarni o'zingiz kiritasiz (🚨 Nazorat → 💸 Jarima qoidasi):
-  nechta lid birdaniga javobsiz qolsa, kuniga necha marta kechiriladi, ogohlantirishdan keyin necha
-  daqiqa beriladi, summa ($). Hammasini bitta tugma bilan o'chirish mumkin.
+- **💸 Jarima.** Har zaderjkaga emas. Ekranda oddiy tilda yozilgan: «papkada bir vaqtda N ta lid javobsiz qolsa…».
+  Raqamni bosib o'zgartirasiz (masalan 5 ta lid, 10 daqiqa). Jarima shu kuni ishda bo'lgan xodimlarga yoziladi
+  («доброе утро» yoki lidga yozgan); hech kim kelmagan bo'lsa — dam olmayotgan hammaga.
   Kech qolish: o'zingiz kiritasiz, masalan `0.5` (har daqiqa) yoki `10=2, 30=5`.
-- **🙋 Ishga kelish.** Xodim «Проёб»ga «доброе утро» yozadi. Ish boshlanib 15 daqiqada yozmasa, eslatma boradi.
+- **🙋 Ishga kelish.** Xodim «доброе утро» yozsa YOKI lidga yoza boshlasa — ishga kelgan (qaysi biri oldin bo'lsa).
+  Kech qolish shu vaqtdan. «доброе утро» yozmagan bo'lsa, ish boshlanib 15 daqiqada eslatma boradi.
 - **☕ Tanaffus.** «атайду» / «перерыв» — boshlanadi, «тут» — tugaydi. Vaqt oshsa, faqat eslatma boradi.
 - **💵 Kassa.** Kassa — cheklar yig'indisi (1950 + 2600 = 4 550); zp — $ da. «Проёб»dagi cheklar, jarima, bonus, avanslar.
   - **Hisobotni botning o'ziga yozish mumkin:** tepasida ism bilan, masalan `Baxa` / `rd 19.10` / `1950` / `2600`.
@@ -57,6 +58,16 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   tekshiradi (tugagach xabar keladi; qayta: 📣 Push → ⚙️ → 🔍 Bazani tekshirish). Vaqtlar va sana: 📣 Push → ⚙️.
   Papkaga akkaunt: 📣 Push → 📁 Papkalar → papka → 📲 Akkaunt (➕ yangisini shu yerning o'zida ulash mumkin).
 - **📊 Hisobotlar.** Faqat buyruq bilan: shaxsiy chatda `/hisobot`, guruhda `/statistika` (🥇🥈🥉 bilan).
+- **📈 Tahlil** (📊 Hisobotlar → 📈). Hammasi faqat vaqt va kim yozgani bo'yicha — matn o'qilmaydi:
+  - 🕐 Soatlar — har soatda nechta lid yozdi va nechtasi zaderjkaga tushdi (bugun / 7 kun, RD bo'yicha).
+  - 💤 Qotib qolgan — N kun (3) hech kim yozmagan lidlar; 📉 Soviyotgan — mijoz odatdagidan 3 barobar uzoq jim.
+    Soviyotganlarni bot «Проёб»da o'zi eslatadi (har RD alohida, xodim belgilanadi).
+  - 💳 Kartalar — xodim topikda `/rek /dep /cash` yozsa, «lidga karta ketdi». Har RD: necha marta, qaysi lidga.
+  - ⚡ Tezlik → karta va 🏆 G'oliblar — javob tezligi kartaga qanday ta'sir qiladi, eng yaxshi xodimlar formulasi.
+  - 📣 Push natijasi (📣 Push → 🧾) — har Push'dan keyin 90 daqiqada nechta lid yozdi, 24 soatda nechtasiga karta ketdi.
+  - Hammasini yoqish/o'chirish, kunlar va karta buyruqlari: ⚙️ Sozlamalar → 🧩 Qo'shimcha funksiyalar.
+- **🛡 Akkaunt himoyasi.** Har kuni 09:00 dan keyin Push akkauntlar @SpamBot da tekshiriladi. Cheklov bo'lsa —
+  o'sha akkauntdan Push to'xtaydi va sizga xabar keladi; cheklov olinsa — o'zi qaytadi.
   «🆕 Yangi lidlar» — shu kuni ochilgan topiklar (eski lid bugun yozsa, yangi hisoblanmaydi).
 - **🌐 Til.** Har admin o'z tilini tanlaydi (bosh menyuning pastida). Savol va ogohlantirishlar ham har kimga
   o'z tilida boradi.
@@ -130,9 +141,10 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 - «Проёб» guruhi:
   - `/proyob` — shu guruhni «Проёб» qilish
   - `/statistika` — hafta xulosasi va eng yaxshilar
-  - `/top` — bugungi kassa, `/topyest` — kecha, `/topweek` — shu hafta, `/toplast` — o'tgan hafta,
-    `/topall` — hammasi (boshlang'ich kassa bilan)
-    (faqat ega yoki admin yoza oladi)
+  - `/topweek` — shu hafta kassasi, `/toplast` — o'tgan hafta, `/topall` — shu kungacha (boshlang'ich kassa bilan)
+  - `/frozen` — 💤 qotib qolgan lidlar, `/cooling` — 📉 soviyotgan lidlar (har RD alohida xabar)
+  - `/clean` — 🧹 javob berilgan «задержка» xabarlarini o'chirish (javob kutayotganlari qoladi)
+    (bularni faqat ega yoki admin yoza oladi)
   - `/id` — guruh ID si
 
 Bot guruhda xabarlarni ko'rishi uchun uni guruhda admin qiling.

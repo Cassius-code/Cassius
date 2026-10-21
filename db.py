@@ -117,6 +117,10 @@ CREATE TABLE IF NOT EXISTS threads (
     wait_msg_id INTEGER,
     alert_id INTEGER,
     last_push_ts INTEGER,
+    cl_turn INTEGER,                          -- xodim yozdi, mijoz hali javob qaytarmadi: shu vaqtdan (soviyotgan lid)
+    cl_avg INTEGER,                           -- mijoz odatda necha soniyada javob qaytaradi
+    cl_n INTEGER NOT NULL DEFAULT 0,
+    cool_noted INTEGER,                       -- shu «navbat» uchun «Проёб»da eslatildi (cl_turn qiymati) — qayta yo'q
     PRIMARY KEY (chat_id, topic_id)
 );
 CREATE INDEX IF NOT EXISTS idx_threads_wait ON threads(wait_since);
@@ -173,9 +177,11 @@ CREATE TABLE IF NOT EXISTS incident_alerts (
 CREATE TABLE IF NOT EXISTS replies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL, topic_id INTEGER NOT NULL, folder_id INTEGER NOT NULL,
-    staff_id INTEGER, wait_since INTEGER NOT NULL, reply_ts INTEGER NOT NULL, work_seconds INTEGER NOT NULL
+    staff_id INTEGER, wait_since INTEGER NOT NULL, reply_ts INTEGER NOT NULL, work_seconds INTEGER NOT NULL,
+    person_id INTEGER                         -- javob bergan xodim (papka akkauntidan bo'lsa — papkadagi yagona xodim)
 );
 CREATE INDEX IF NOT EXISTS idx_replies_ts ON replies(reply_ts);
+CREATE INDEX IF NOT EXISTS idx_replies_thread ON replies(chat_id, topic_id);
 
 CREATE TABLE IF NOT EXISTS journal (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +191,7 @@ CREATE TABLE IF NOT EXISTS journal (
 );
 CREATE INDEX IF NOT EXISTS idx_journal_thread ON journal(chat_id, topic_id, id);
 CREATE INDEX IF NOT EXISTS idx_journal_at ON journal(at);
+CREATE INDEX IF NOT EXISTS idx_journal_ts ON journal(ts);
 
 -- ishga kelish («доброе утро»)
 CREATE TABLE IF NOT EXISTS attendance (
@@ -193,6 +200,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     arrived_ts INTEGER,
     late_min INTEGER NOT NULL DEFAULT 0,
     reminded INTEGER NOT NULL DEFAULT 0,
+    greet_ts INTEGER,                         -- «доброе утро» yozilgan vaqt (kelgan vaqt — ishni boshlagani ham bo'lishi mumkin)
     PRIMARY KEY (day, person_id)
 );
 
@@ -285,7 +293,8 @@ CREATE TABLE IF NOT EXISTS requests (
 -- ── Push
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, session TEXT NOT NULL DEFAULT '', user_id INTEGER,
-    label TEXT NOT NULL DEFAULT '', paused INTEGER NOT NULL DEFAULT 0, added_ts INTEGER NOT NULL DEFAULT 0
+    label TEXT NOT NULL DEFAULT '', paused INTEGER NOT NULL DEFAULT 0, added_ts INTEGER NOT NULL DEFAULT 0,
+    spam TEXT NOT NULL DEFAULT '', spam_ts INTEGER        -- @SpamBot: '' noma'lum · ok · limited
 );
 CREATE TABLE IF NOT EXISTS templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', media TEXT NOT NULL DEFAULT ''
@@ -293,8 +302,23 @@ CREATE TABLE IF NOT EXISTS templates (
 CREATE TABLE IF NOT EXISTS broadcasts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, started_ts INTEGER NOT NULL, finished_ts INTEGER, trigger TEXT NOT NULL,
     total INTEGER NOT NULL DEFAULT 0, sent INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'running'
+    status TEXT NOT NULL DEFAULT 'running', kind TEXT NOT NULL DEFAULT ''
 );
+-- har Push'ni kim oldi: keyin yozdimi (90 daqiqa) va kartagacha yetdimi (24 soat) — oxirgi Push'ga yoziladi
+CREATE TABLE IF NOT EXISTS push_log (
+    bid INTEGER NOT NULL, chat_id INTEGER NOT NULL, topic_id INTEGER NOT NULL, folder_id INTEGER,
+    ts INTEGER NOT NULL, replied_ts INTEGER, card_ts INTEGER,
+    PRIMARY KEY (bid, chat_id, topic_id)
+);
+CREATE INDEX IF NOT EXISTS idx_push_log_thread ON push_log(chat_id, topic_id, ts);
+-- lidga karta yuborildi (xodim /rek /dep /cash yozdi): kim, qachon, qaysi lid. Matn saqlanmaydi — faqat buyruq so'zi
+CREATE TABLE IF NOT EXISTS cards (
+    chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, topic_id INTEGER NOT NULL, folder_id INTEGER,
+    sender_id INTEGER, person_id INTEGER, cmd TEXT NOT NULL DEFAULT '', ts INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, msg_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cards_thread ON cards(chat_id, topic_id, ts);
+CREATE INDEX IF NOT EXISTS idx_cards_ts ON cards(ts);
 -- bir nechta odamga borgan savol/ogohlantirish nusxalari: biri hal qilsa — hammasi o'chadi/yangilanadi
 CREATE TABLE IF NOT EXISTS sent (
     key TEXT NOT NULL, chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, ts INTEGER NOT NULL

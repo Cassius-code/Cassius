@@ -24,6 +24,22 @@ DEFAULTS: dict[str, str] = {
     "fine_amount": "0",              # zaderjka jarimasi summasi ($), hamma papkaga (papkada alohida summa bo'lmasa)
     "fine_episode": "30",            # holatdan keyin shu daqiqa ichidagi kechikishlar — o'sha holatning davomi
     "skip_emojis": "⚡ 💊",           # bunday lidlar zaderjka va Push'da hisobga olinmaydi
+    "delay_batch": "1",              # yaqin zaderjkalar 40 soniya kutib, bitta xabar bo'lib ketadi
+    # ── tahlil (har biri yoqiladi/o'chiriladi)
+    "an_heatmap": "1",               # 🕐 soatlar: qachon lid ko'p yozadi, qachon zaderjka
+    "an_stale": "1",                 # 💤 qotib qolgan lidlar
+    "stale_days": "3",
+    "an_cooling": "1",               # 📉 soviyotgan lidlar
+    "cooling_days": "2",
+    "cool_auto": "1",                # 📉 soviyotgan lidni «Проёб»da o'zi eslatadi (papka xodimini belgilab)
+    "an_speed": "1",                 # ⚡ javob tezligi → karta va 🏆 g'oliblar formulasi
+    "an_push": "1",                  # 📣 Push natijasi (90 daqiqada yozdi, 24 soatda karta)
+    "push_reply_min": "90",
+    "an_cards": "1",                 # 💳 kartalar: har RD da qaysi lidga necha marta
+    "spam_check": "1",               # 🛡 har kuni Push akkauntlarni @SpamBot da tekshirish
+    "spam_check_last": "",
+    "cards_since": "",               # karta va Push natijasi shu vaqtdan yig'iladi
+    "card_cmds": "/rek /dep /cash",  # xodim topikda shu buyruqni yozsa — lidga karta ketdi (hamma RD; CRM o'zgartirsa — panelda)
     "proyob_group_id": "",
     # ── stavka (yangi lid)
     "stavka_enabled": "1",

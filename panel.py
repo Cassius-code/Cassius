@@ -96,17 +96,17 @@ async def main_menu(ctx, r: Req):
     online = sum(1 for a in accs if ctx.pool and ctx.pool.state_of(a["id"]) == "online")
     group_ok = bool(db.get("proyob_group_id"))
     sysline = (f"{'🟢' if ub_ok else '🔴'} {r.L('Akkaunt', 'Аккаунт')} · "
-               f"{'🟢' if (not accs or online == len(accs)) else '🟡'} Push {online}/{len(accs)} · "
+               f"{'🟢' if (not accs or online == len(accs)) else '🟡'} {r.L('Push', 'Пуш')} {online}/{len(accs)} · "
                f"{'🟢' if group_ok else '🔴'} «Проёб»")
     pu = ctx.pusher
-    pushline = (f"📣 {r.L('Push ketyapti', 'Идёт Push')} — <b>{h(pu.progress_text or '…')}</b>"
+    pushline = (f"📣 {r.L('Push ketyapti', 'Идёт Пуш')} — <b>{h(pu.progress_text or '…')}</b>"
                 if pu is not None and pu.running else None)
     head = title("◆", "RD CONTROL", f"{when} · " + (r.L("🟢 ishlayapti", "🟢 работает") if alive else
                                                      r.L("⛔ to'xtatilgan", "⛔ остановлен")))
     from .kassa import pending_reports
     pend = len(pending_reports(db)) if r.can("full") else 0
     buttons = [(r.L("🚨 Nazorat", "🚨 Контроль"), "c"), (r.L("💵 Kassa", "💵 Касса") + (f" ❓{pend}" if pend else ""), "k"),
-               (r.L("👥 Xodimlar", "👥 Сотрудники"), "p"), ("📣 Push", "u"),
+               (r.L("👥 Xodimlar", "👥 Сотрудники"), "p"), (r.L("📣 Push", "📣 Пуш"), "u"),
                (r.L("📊 Hisobotlar", "📊 Отчёты"), "r"), (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "s")]
     if not r.can("full"):
         buttons = [b for b in buttons if b[1] in ("c", "p", "r")]
@@ -219,11 +219,12 @@ async def set_commands(ctx, uid: int | None = None) -> None:
                BotCommand(command="hisobot", description="📊 Отчёт за сегодня" if ru else "📊 Bugungi hisobot"),
                BotCommand(command="id", description="🆔 Мой ID" if ru else "🆔 Mening ID")]
     group = [BotCommand(command="statistika", description="📅 Итоги недели"),
-             BotCommand(command="top", description="🏆 Касса за сегодня"),
-             BotCommand(command="topyest", description="🏆 Касса за вчера"),
-             BotCommand(command="topweek", description="🏆 Касса за неделю"),
-             BotCommand(command="toplast", description="🏆 Касса за прошлую неделю"),
-             BotCommand(command="topall", description="🏆 Касса — всего")]
+             BotCommand(command="topweek", description="🏆 Касса — эта неделя"),
+             BotCommand(command="toplast", description="🏆 Касса — прошлая неделя"),
+             BotCommand(command="topall", description="🏆 Касса — всего (по сегодня)"),
+             BotCommand(command="frozen", description="💤 Застывшие лиды (каждая RD отдельно)"),
+             BotCommand(command="cooling", description="📉 Остывающие лиды (каждая RD отдельно)"),
+             BotCommand(command="clean", description="🧹 Удалить задержки, на которые уже ответили")]
     if uid:
         try:
             await ctx.bot.set_my_commands(private, scope=BotCommandScopeChat(chat_id=uid))
@@ -240,7 +241,8 @@ async def set_commands(ctx, uid: int | None = None) -> None:
 
 # ───────────────────────── yo'naltirish
 def build_router(ctx) -> Router:
-    from . import panel_control, panel_kassa, panel_people, panel_push, panel_reports, panel_settings, private  # noqa: F401
+    from . import (panel_control, panel_insights, panel_kassa, panel_people, panel_push, panel_reports,  # noqa: F401
+                   panel_settings, private)
     from .db import EFFECTS
     r = Router(name="panel")
     ui.STORE = ctx.db

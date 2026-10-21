@@ -55,6 +55,14 @@ class Notifier:
                                disable_web_page_preview=True, parse_mode="HTML")
         return msg.chat.id, msg.message_id
 
+    async def delete_group(self, gid: int, mid: int) -> bool:
+        """Botning o'z xabarini «Проёб»dan o'chirish (Telegram 48 soatdan eskisini o'chirtirmaydi — False)."""
+        try:
+            await self._call(self.bot.delete_message, chat_id=gid, message_id=mid)
+            return True
+        except Exception:
+            return False
+
     async def edit_group(self, gid: int, mid: int, text: str, done_button=None) -> None:
         from aiogram.exceptions import TelegramBadRequest
         try:

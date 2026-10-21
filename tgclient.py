@@ -150,7 +150,7 @@ class TgAccount:
                 ttl, err = self.title(), type(exc).__name__
                 await self.notifier.notify_owner(
                     lambda: (tr(f"⚠️ {ttl}: uzildi ({err}). Qayta ulanyapman.",
-                                f"⚠️ {ttl.replace('Asosiy akkaunt', 'Основной аккаунт')}: связь потеряна ({err}). "
+                                f"⚠️ {ttl.replace('Asosiy akkaunt', 'Основной аккаунт').replace('Push «', 'Пуш «')}: связь потеряна ({err}). "
                                 "Переподключаюсь."), None), key=f"down-{self.title()}", min_interval=1800)
                 await self._disconnect()
                 await self._sleep_or_wake(backoff)
@@ -168,7 +168,7 @@ class TgAccount:
             ttl = self.title()
             await self.notifier.notify_owner(lambda: (tr(
                 f"🔑 {ttl}: seans yaroqsiz — ⚙️ Sozlamalar → akkauntlar orqali qaytadan ulang.",
-                f"🔑 {ttl.replace('Asosiy akkaunt', 'Основной аккаунт')}: сессия недействительна — войдите заново: "
+                f"🔑 {ttl.replace('Asosiy akkaunt', 'Основной аккаунт').replace('Push «', 'Пуш «')}: сессия недействительна — войдите заново: "
                 "⚙️ Настройки → аккаунты."), None), key=f"unauth-{self.title()}", min_interval=3600)
             await self._disconnect()
             await self._sleep_or_wake(300)
