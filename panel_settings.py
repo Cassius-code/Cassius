@@ -39,6 +39,9 @@ async def settings(ctx, r: Req):
              f"📲 {r.L('Push akkauntlar', 'Пуш-аккаунты')} — <b>{len(accs)}</b>",
              "👥 «Проёб» — " + (f"<code>{h(db.get('proyob_group_id'))}</code>" if db.get("proyob_group_id")
                                 else r.L("belgilanmagan ⚠️", "не задана ⚠️")),
+             f"✍️ {r.L('«Проёб»ga yozadi', 'Пишет в «Проёб»')} — " + (r.L("🔑 asosiy akkaunt", "🔑 основной аккаунт")
+                                                                    if db.get("proyob_sender") == "main"
+                                                                    else r.L("🤖 bot", "🤖 бот")),
              f"💸 {r.L('Avto-jarimalar', 'Авто-штрафы')} — {onoff(r, db.flag('fines_enabled'))}",
              f"🧮 {r.L('Zp hisoblash', 'Расчёт зп')} — " + {"button": r.L("tugma bilan", "по кнопке"),
                                                            "auto": r.L("avtomatik", "автоматически"),
@@ -54,6 +57,7 @@ async def settings(ctx, r: Req):
         btn.append((r.L("🧮 Zp hisoblash", "🧮 Расчёт зп"), "kzm"))
         btn.append((r.L("🧹 Tozalash", "🧹 Очистка"), "sz"))
         btn.append((r.L("🧩 Qo'shimcha funksiyalar", "🧩 Доп. функции"), "ans"))
+        btn.append((r.L("✍️ «Проёб»ga kim yozadi", "✍️ Кто пишет в «Проёб»"), "sgw"))
     rows = grid(btn)
     rows.append([((r.L("💸 Jarimalarni o'chirish", "💸 Выключить штрафы") if db.flag("fines_enabled") else
                    r.L("💸 Jarimalarni yoqish", "💸 Включить штрафы")), "sfn")])
@@ -160,6 +164,38 @@ async def group_set(ctx, r: Req):
         return r.L("⚠️ Guruh ID si manfiy son (-100…)", "⚠️ ID группы — отрицательное число (-100…)")
     ctx.db.set("proyob_group_id", m.group(0))
     return await settings(ctx, r)
+
+
+@screen("sgw", "owner")
+async def group_sender(ctx, r: Req):
+    """«Проёб»ga kim nomidan yoziladi: bot yoki asosiy akkaunt (u guruhda anonim admin bo'lsa — «Проёб» nomidan)."""
+    db = ctx.db
+    if r.args and r.args[0] in ("bot", "main"):
+        db.set("proyob_sender", r.args[0])
+    cur = db.get("proyob_sender")
+    ub = ctx.userbot
+    ok = ub is not None and ub.state == "online"
+    lines = [f"{r.L('Hozir', 'Сейчас')}: <b>" + (r.L("🔑 asosiy akkaunt", "🔑 основной аккаунт") if cur == "main"
+                                                   else r.L("🤖 bot", "🤖 бот")) + "</b>",
+             "",
+             r.L("<b>🔑 Asosiy akkaunt</b> — xabarlar asosiy akkauntingiz nomidan chiqadi. Uni «Проёб»da "
+                 "<b>anonim admin</b> qilsangiz (guruh → ✏️ → Administratorlar → akkaunt → «anonim qolish») — "
+                 "«Проёб» nomidan chiqadi.",
+                 "<b>🔑 Основной аккаунт</b> — сообщения от имени вашего основного аккаунта. Сделайте его в «Проёб» "
+                 "<b>анонимным админом</b> (Изменить → Администраторы → аккаунт → «Оставаться анонимным») — "
+                 "будут от имени «Проёб»."),
+             r.L("Kamchiligi: oddiy akkaunt tugma qo'sha olmaydi — «✅ Выполнено» tugmasi bo'lmaydi (zaderjka xodim "
+                 "lidga javob berganda o'zi yopiladi). Tugmali savollar (kassa) bot nomidan qoladi.",
+                 "Минус: обычный аккаунт не может добавить кнопку — «✅ Выполнено» не будет (задержка закрывается сама, "
+                 "когда сотрудник ответил лиду). Вопросы с кнопками (касса) остаются от бота."),
+             r.L("Asosiy akkaunt uzilib qolsa — xabar yo'qolmaydi, bot o'zi yozadi.",
+                 "Если основной аккаунт отключится — сообщение не пропадёт, напишет бот.")]
+    if cur == "main" and not ok:
+        lines.append(r.L("⚠️ Asosiy akkaunt hozir ulanmagan — bot yozyapti.", "⚠️ Основной аккаунт не подключён — пишет бот."))
+    rows = [[(("✅ " if cur != "main" else "") + r.L("🤖 Bot", "🤖 Бот"), "sgw:bot"),
+             (("✅ " if cur == "main" else "") + r.L("🔑 Asosiy akkaunt", "🔑 Основной аккаунт"), "sgw:main")],
+            nav(r, "s")]
+    return ui.join(title("✍️", r.L("«ПРОЁБ»GA KIM YOZADI", "КТО ПИШЕТ В «ПРОЁБ»")), "", card(lines)), kb(*rows)
 
 
 # ───────────────────────── asosiy akkaunt va login

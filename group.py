@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -51,8 +52,18 @@ async def react(ctx, message: Message, emoji: str) -> None:
         pass
 
 
+NOTIFIER = None                 # «Проёб»ga asosiy akkaunt nomidan yozish tanlansa — javoblar ham o'sha nomdan
+
+
 async def reply(message: Message, text: str) -> None:
     """Faqat «Проёб» da (qulf boshqasini o'tkazmaydi). Matn — HTML (gtext.esc bilan)."""
+    if NOTIFIER is not None and NOTIFIER._main() is not None and is_proyob(SimpleNamespace(db=NOTIFIER.db),
+                                                                            message.chat.id):
+        try:
+            await NOTIFIER.send_group(text, reply_to=message.message_id)
+            return
+        except Exception as exc:
+            log.info("Guruhga javob (asosiy akkaunt) yozilmadi: %s", exc)
     try:
         await message.reply(text, disable_web_page_preview=True, parse_mode="HTML")
     except Exception as exc:
@@ -103,6 +114,8 @@ async def clean_delays(ctx) -> tuple[int, int]:
 
 
 def build_router(ctx) -> Router:
+    global NOTIFIER
+    NOTIFIER = ctx.notifier
     r = Router(name="group")
     try:
         ctx.bot.session.middleware(group_lock(ctx))
@@ -238,6 +251,8 @@ def build_router(ctx) -> Router:
         if not is_proyob(ctx, message.chat.id) or not ctx.db.flag("bot_enabled"):
             return
         text = (message.text or message.caption or "").strip()
+        if ctx.notifier.is_own(text):
+            return                                         # bot o'zi asosiy akkaunt orqali yozgan xabar
         if not text or text.startswith("/"):
             return
         if not edited and len(text) <= 20 and norm(text) in ("statistika", "statistik"):   # eski botdagidek

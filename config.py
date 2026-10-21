@@ -12,6 +12,7 @@ DEFAULTS: dict[str, str] = {
     # ── nazorat (zaderjka)
     "delay_enabled": "1",
     "limit_minutes": "20",           # mijozga javob limiti
+    "wait_slide_min": "5",           # mijoz birinchi xabaridan shu daqiqa ichida yana yozsa — oxirgisidan hisoblanadi
     "work_start": "10:00",           # ish boshlanishi (hamma uchun bir xil)
     "work_end": "23:00",             # ish tugashi
     "delay_from": "0",               # zaderjka shu vaqtdan keyingi xabarlar bo'yicha (o'rnatilgan payt)
@@ -41,6 +42,7 @@ DEFAULTS: dict[str, str] = {
     "cards_since": "",               # karta va Push natijasi shu vaqtdan yig'iladi
     "card_cmds": "/rek /dep /cash",  # xodim topikda shu buyruqni yozsa — lidga karta ketdi (hamma RD; CRM o'zgartirsa — panelda)
     "proyob_group_id": "",
+    "proyob_sender": "bot",          # «Проёб»ga kim yozadi: bot | main (asosiy akkaunt; anonim admin — guruh nomidan)
     # ── stavka (yangi lid)
     "stavka_enabled": "1",
     "stavka_count": "3",             # nechta dumaloq video stavkani tugatadi

@@ -24,7 +24,7 @@ WIN_DAYS = 30                  # g'oliblar va tezlik — oxirgi 30 kun
 MIN_LEADS = 10                 # g'oliblar formulasi: xodimda kamida shuncha lid bo'lsa
 GROUP_LIMIT = 30               # «Проёб»dagi ro'yxatda bitta RD uchun eng ko'pi bilan havola
 # mijozning haqiqiy xabarlari (jurnal): bot stavkasi, uning matni va «aks-sado» kirmaydi
-CLIENT_DECISIONS = ("wait", "wait_more", "night", "excluded", "before", "stavka_skip")
+CLIENT_DECISIONS = ("wait", "wait_more", "wait_last", "night", "excluded", "before", "stavka_skip")
 
 FEATURES = ("an_heatmap", "an_stale", "an_cooling", "an_speed", "an_push", "an_cards")
 

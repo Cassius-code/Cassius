@@ -11,6 +11,10 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Ish vaqtida guruhlar har 2 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
   yetkazmay qolgan xabar ham topilib, o'z vaqti bilan hisoblanadi.
   Bir-biriga yaqin kechikkan lidlar — 40 soniya kutib, bitta xabarda; keyingisi — pastga yangi xabar.
+  Mijoz ketma-ket yozsa (birinchi xabaridan 5 daqiqa ichida) — zaderjka oxirgi xabaridan hisoblanadi
+  (🚨 Nazorat → 🔁 Ketma-ket: 3/4/5/7/10 daqiqa yoki o'chiq).
+  «Проёб»ga kim yozadi: 🤖 bot yoki 🔑 asosiy akkaunt (⚙️ → ✍️). Asosiy akkaunt guruhda anonim admin bo'lsa —
+  xabarlar «Проёб» nomidan. Bunda «✅ Выполнено» tugmasi bo'lmaydi (zaderjka javob bilan o'zi yopiladi).
   Lid statusi ⚡/💊 (Клоун, Мариновка) — zaderjka emas: status qo'yilsa kutish bekor, ochiq zaderjka yopiladi.
   Xodimning `/status` buyrug'i va vositachi botning status menyusi mijoz xabari hisoblanmaydi.
   **Papkalar:** 🚨 Nazorat → 📁 Papkalar — asosiy akkauntdagi papkalar ro'yxati; ➕ — qo'shish (guruhlari o'zi
@@ -29,6 +33,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
 - **☕ Tanaffus.** «атайду» / «перерыв» — boshlanadi, «тут» — tugaydi. Vaqt oshsa, faqat eslatma boradi.
 - **💵 Kassa.** Kassa — cheklar yig'indisi (1950 + 2600 = 4 550); zp — $ da. «Проёб»dagi cheklar, jarima, bonus, avanslar.
   - **Hisobotni botning o'ziga yozish mumkin:** tepasida ism bilan, masalan `Baxa` / `rd 19.10` / `1950` / `2600`.
+    Ism bo'lmasa yoki bot tanimasa — «Kimning hisoboti?» deb so'raydi, tagida «➕ Yangi xodim» tugmasi bor
+    (ism yozilgan bo'lsa — o'sha ism bilan qo'shadi, bo'lmasa — ismni so'raydi).
+    Telefon raqami (`+998 90 123 45 67`, `998901234567`, `90 123 45 67`) hisobot hisoblanmaydi.
     Ism notanish bo'lsa — «➕ Yangi xodim: Baxa» tugmasi chiqadi (shunday tanishtirasiz). Jarima ham:
     `@ivan штраф 5`. Guruhda ham xuddi shunday.
   - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD

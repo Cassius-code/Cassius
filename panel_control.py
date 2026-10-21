@@ -15,12 +15,14 @@ DEC_UZ = {"dup": "takror", "service": "xizmat xabari", "ours": "bizning Push", "
           "before": "kuzatuv boshlanishidan oldin", "stavka_skip": "stavka ketyapti — hisobga olinmaydi",
           "stavka_bet": "stavka videosi", "bet_text": "stavka matni", "stavka_end": "stavka tugadi",
           "auto_bet": "avtostavka videosi", "wait": "mijoz javob kutyapti", "wait_more": "mijoz yana yozdi",
+          "wait_last": "mijoz ketma-ket yozdi — endi shu xabaridan hisoblanadi",
           "reply": "xodim javob berdi ✅", "staff": "xodim yozdi", "alert": "«задержка» yuborildi",
           "echo": "xodimdan keyin darhol bot xabari — mijoz emas", "night": "ish vaqtidan tashqari — hisoblanmaydi"}
 DEC_RU = {"dup": "повтор", "service": "служебное", "ours": "наш Пуш", "excluded": "⚡/💊 — не учитывается",
           "before": "до начала контроля", "stavka_skip": "идёт ставка — не учитывается", "stavka_bet": "кружок ставки",
           "bet_text": "текст ставки", "stavka_end": "ставка закончилась", "auto_bet": "автоставка",
-          "wait": "клиент ждёт ответа", "wait_more": "клиент дописал", "reply": "сотрудник ответил ✅",
+          "wait": "клиент ждёт ответа", "wait_more": "клиент дописал",
+          "wait_last": "клиент дописал подряд — считаем с этого сообщения", "reply": "сотрудник ответил ✅",
           "staff": "сотрудник написал", "alert": "«задержка» отправлена",
           "echo": "сразу после сотрудника сообщение бота — не клиент", "night": "вне рабочего времени — не считается"}
 WHO_UZ = {"client": "mijoz (bot)", "staff": "xodim", "ours": "Push", "service": "xizmat", "": ""}
@@ -39,6 +41,7 @@ async def control(ctx, r: Req):
     group = db.get("proyob_group_id")
     lines = [f"🚨 {r.L('Zaderjka nazorati', 'Контроль задержек')} — {onoff(r, db.flag('delay_enabled'))}",
              f"⏱ {r.L('Limit', 'Лимит')} — <b>{db.get('limit_minutes')} {r.L('daq', 'мин')}</b>",
+             slide_line(ctx, r),
              f"🕒 {r.L('Ish vaqti', 'Рабочее время')} — <b>{work_hours(ctx)}</b>",
              f"🎬 {r.L('Stavka', 'Ставка')} — {onoff(r, db.flag('stavka_enabled'))} · <b>{need}</b> "
              f"{r.L('video', 'кружка')}",
@@ -53,8 +56,9 @@ async def control(ctx, r: Req):
                        "папки). Пуш и сообщение бота сразу после сотрудника не считаются.</i>"))
     rows = []
     if r.can("full"):
-        rows += grid([(f"⏱ {r.L('Limit', 'Лимит')}", "cl"), (f"🕒 {r.L('Ish vaqti', 'Рабочее время')}", "ch"),
-                      (f"🎬 {r.L('Stavka', 'Ставка')}", "cs"), (f"📁 {r.L('Papkalar', 'Папки')}", "cf")])
+        rows += grid([(f"⏱ {r.L('Limit', 'Лимит')}", "cl"), (f"🔁 {r.L('Ketma-ket', 'Подряд')}", "cv"),
+                      (f"🕒 {r.L('Ish vaqti', 'Рабочее время')}", "ch"), (f"🎬 {r.L('Stavka', 'Ставка')}", "cs"),
+                      (f"📁 {r.L('Papkalar', 'Папки')}", "cf")])
         rows.append([(f"💸 {r.L('Jarima qoidasi', 'Правила штрафа')}", "cfn")])
     rows += grid([(f"⏳ {r.L('Kutayotganlar', 'Ожидают')}", "cw"), (f"🔍 {r.L('Lidni tekshirish', 'Проверить лид')}", "cc")])
     if r.can("full"):
@@ -63,6 +67,38 @@ async def control(ctx, r: Req):
         rows.append([(f"🧾 {r.L('Qarorlar jurnali (fayl)', 'Журнал решений (файл)')}", "cj")])
     rows.append(nav(r))
     return text, kb(*rows)
+
+
+def slide_line(ctx, r: Req) -> str:
+    n = ctx.db.get_int("wait_slide_min", 5)
+    if not n:
+        return r.L("🔁 Ketma-ket yozsa — ⚪ o'chiq (birinchi xabaridan)", "🔁 Пишет подряд — ⚪ выкл (с первого сообщения)")
+    return r.L(f"🔁 Ketma-ket yozsa — <b>{n} daq</b> ichidagi oxirgi xabaridan",
+               f"🔁 Пишет подряд — с последнего сообщения в пределах <b>{n} мин</b>")
+
+
+@screen("cv", "full")
+async def slide(ctx, r: Req):
+    """Mijoz bir necha xabarni ketma-ket yozsa: birinchisidan N daqiqa ichidagi oxirgi xabaridan hisoblanadi."""
+    if r.args and r.args[0].isdigit() and int(r.args[0]) in (0, 2, 3, 4, 5, 7, 10):
+        ctx.db.set("wait_slide_min", r.args[0])
+        r.args = []
+        ui.view(r, "c")
+        return await control(ctx, r)
+    cur = ctx.db.get_int("wait_slide_min", 5)
+    lines = [r.L("Mijoz yozdi va bir necha daqiqada yana yozdi — zaderjka <b>oxirgi</b> xabaridan hisoblanadi.",
+                 "Клиент написал и через пару минут дописал — задержка считается с <b>последнего</b> сообщения."),
+             r.L(f"Masalan, 5 daqiqa: 12:00 «salom», 12:04 «karta bering» → {ctx.db.get('limit_minutes')} daqiqa "
+                 "12:04 dan hisoblanadi.",
+                 f"Например, 5 минут: 12:00 «привет», 12:04 «дайте карту» → {ctx.db.get('limit_minutes')} минут "
+                 "считаются с 12:04."),
+             r.L("Birinchi xabaridan necha daqiqa ichidagi xabarlar hisobga olinsin?",
+                 "Сколько минут от первого сообщения учитывать?")]
+    d = r.L("daq", "мин")
+    opts = [(("✅ " if cur == v else "") + (f"{v} {d}" if v else r.L("O'chiq", "Выкл")), f"cv:{v}")
+            for v in (0, 3, 4, 5, 7, 10)]
+    return ui.join(title("🔁", r.L("KETMA-KET XABARLAR", "СООБЩЕНИЯ ПОДРЯД")), "", card(lines)), \
+        kb(*grid(opts, 3), nav(r, "c"))
 
 
 def fine_line(ctx, r: Req) -> str:

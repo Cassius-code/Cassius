@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS threads (
     stavka_reminded INTEGER NOT NULL DEFAULT 0,  -- nechta «ставка» eslatmasi ketdi
     stavka_remind_ts INTEGER,                 -- oxirgi eslatma vaqti
     last_staff_ts INTEGER,                    -- xodimning oxirgi xabari (vositachi bot «aks-sadosi»ni ajratish uchun)
-    wait_since INTEGER,                       -- javobsiz birinchi mijoz xabari vaqti
+    wait_since INTEGER,                       -- zaderjka shu vaqtdan hisoblanadi (ketma-ket yozsa — oxirgisidan)
+    wait_first INTEGER,                       -- javobsiz birinchi mijoz xabari (ketma-ket oynasi shundan)
     wait_msg_id INTEGER,
     alert_id INTEGER,
     last_push_ts INTEGER,

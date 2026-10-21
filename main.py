@@ -131,6 +131,7 @@ async def amain() -> None:
     att = Attendance(db, tz, notifier)
     tracker.on_staff = att.work_seen                    # xodim lidga yozsa — ishga kelgan
     userbot = Userbot(cfg, db, tracker, notifier, tz)
+    notifier.userbot = userbot                           # «Проёб»ga asosiy akkaunt nomidan yozish (tanlansa)
     pool = AccountPool(cfg, db, notifier, on_identified=userbot.reload_ids)
     pool.main = userbot                                   # papka Push'i asosiy akkauntdan ham bo'lishi mumkin
     pusher = Pusher(db, tz, notifier, pool, tracker)
@@ -147,6 +148,11 @@ async def amain() -> None:
 
     # yangi xabar emas: egalardagi panel joyida yangilanadi (holat 🟢/🔴 panelning o'zida ko'rinadi)
     await panel.refresh_panels(ctx, note_old)
+    try:                                                  # eski: telefon raqami «Чей отчёт?» bo'lib qolgan bo'lsa
+        from .kassa_flow import cleanup_phone_reports
+        await cleanup_phone_reports(ctx)
+    except Exception:
+        log.exception("Telefon raqami hisobotlarini tozalash")
 
     sched = Scheduler(ctx)
     tasks = [asyncio.create_task(supervise("Telegram bot", lambda: polling(bot, dp), notifier)),

@@ -226,6 +226,8 @@ def question(ctx, rid: int):
         if new_name:
             btn.insert(0, [(L(ctx, f"➕ Yangi xodim: {new_name}", f"➕ Новый сотрудник: {new_name}")[:60],
                             f"qr:{rid}:n:0")])
+        else:
+            btn.insert(0, [(L(ctx, "➕ Yangi xodim qo'shish", "➕ Добавить нового сотрудника"), f"qr:{rid}:N:0")])
         btn.append(no)
         tag = f"\n🏷 {h(r['tag'])}" if r["tag"] else ""
         return (f"❓ <b>{L(ctx, 'Kimning hisoboti?', 'Чей отчёт?')}</b>{tag}{who}\n\n<code>{snippet}</code>", kb(*btn),
@@ -248,6 +250,21 @@ def question(ctx, rid: int):
     return (f"❓ <b>{h(p['name'])} ({days}) — {L(ctx, 'kim ishladi?', 'кто работал?')}</b>\n"
             f"{L(ctx, 'Zp o‘shanga, o‘z foizi bilan.', 'Зп получит он, по своему проценту.')}\n\n<code>{snippet}</code>",
             kb(*btn), ctx.notifier.staff_ids())
+
+
+async def cleanup_phone_reports(ctx) -> int:
+    """Eski versiyada telefon raqami hisobot deb qolgan bo'lsa — savoli o'chadi, hisobot olib tashlanadi."""
+    n = 0
+    for rid in K.pending_reports(ctx.db):
+        r = K.report(ctx.db, rid)
+        if r is not None and K.is_phone(r["raw"] or ""):
+            K.delete_report(ctx.db, rid)
+            try:
+                await ctx.notifier.resolve(f"qr:{rid}")
+            except Exception:
+                pass
+            n += 1
+    return n
 
 
 async def advance(ctx, rid: int) -> None:

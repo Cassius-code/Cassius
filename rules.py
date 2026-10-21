@@ -316,8 +316,14 @@ class Tracker:
             if label_excluded(self.label(c, t), skip_list(self.db)):
                 return "excluded"
             if th["wait_since"] is None:
-                self._set(c, t, wait_since=m.ts, wait_msg_id=m.msg_id)
+                self._set(c, t, wait_since=m.ts, wait_msg_id=m.msg_id, wait_first=m.ts)
                 return "wait"
+            # ketma-ket yozdi (birinchi xabaridan N daqiqa ichida) — zaderjka oxirgi xabaridan hisoblanadi
+            slide = max(0, self.db.get_int("wait_slide_min", 5)) * 60
+            first = th["wait_first"] or th["wait_since"]
+            if slide and th["alert_id"] is None and th["wait_since"] < m.ts <= first + slide:
+                self._set(c, t, wait_since=m.ts, wait_msg_id=m.msg_id)
+                return "wait_last"
             return "wait_more"
 
         # odam (xodim) yozdi

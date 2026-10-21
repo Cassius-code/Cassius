@@ -174,13 +174,20 @@ def has_rd(text: str) -> bool:
 
 
 PHONE_RE = re.compile(r"\+\s*\d[\d\s\-()]{7,}")
+PHONE_LOCAL = re.compile(r"(998[\s\-]?)?\(?\d{2}\)?[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2}")   # 90 123 45 67
 
 
 def is_phone(text: str) -> bool:
-    """«+1 470 514 4558», «+998 90 123 45 67» — telefon raqami, chek emas."""
+    """Telefon raqami — chek emas: «+1 470 514 4558», «+998 90 123 45 67», «998901234567», «90 123 45 67».
+    Kassa summalari 3–6 xonali bo'ladi, shuning uchun 9+ xonali bitta raqam ham telefon."""
     for line in text.strip().splitlines():
-        m = PHONE_RE.fullmatch(line.strip())
-        if m and 10 <= len(re.sub(r"\D", "", line)) <= 15:
+        s = line.strip()
+        digits = len(re.sub(r"\D", "", s))
+        if PHONE_RE.fullmatch(s) and 10 <= digits <= 15:
+            return True
+        if re.fullmatch(r"\d{9,15}", s):
+            return True
+        if PHONE_LOCAL.fullmatch(s) and digits in (9, 12):
             return True
     return False
 

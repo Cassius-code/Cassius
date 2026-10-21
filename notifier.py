@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import html as _html
 import logging
+import re
 import time
+from collections import deque
 
 from . import people as P
 
@@ -20,6 +23,38 @@ class Notifier:
         self.db = db
         self.owners = owners
         self._last: dict[str, float] = {}
+        self.userbot = None                     # asosiy akkaunt — «Проёб»ga uning nomidan yozish mumkin
+        self._own: deque = deque(maxlen=300)    # asosiy akkaunt yozgan matnlar: bot ularni qayta ishlamasin
+
+    # ───────────── «Проёб»ga kim nomidan yoziladi: bot yoki asosiy akkaunt (anonim admin bo'lsa — guruh nomidan)
+    def _main(self):
+        if self.db.get("proyob_sender") != "main":
+            return None
+        ub = self.userbot
+        if ub is None or ub.state != "online" or ub.client is None:
+            return None
+        return ub.client
+
+    @staticmethod
+    def _norm(text: str) -> str:
+        t = _html.unescape(re.sub(r"<[^>]+>", "", text or ""))
+        return "\n".join(line.strip() for line in t.strip().splitlines() if line.strip())
+
+    def is_own(self, text: str) -> bool:
+        """Bu xabarni bot asosiy akkaunt orqali o'zi yozganmi (guruhdagi yangi xabar sifatida qaytib keladi)."""
+        t, now = self._norm(text), time.time()
+        return bool(t) and any(x == t and now - ts < 300 for ts, x in self._own)
+
+    async def _main_failed(self, exc) -> None:
+        log.warning("«Проёб»: asosiy akkaunt yoza olmadi (%s) — bot yozadi", type(exc).__name__)
+        from .context import tr
+        try:
+            await self.notify_owner(lambda: (tr(
+                "⚠️ «Проёб»ga asosiy akkaunt nomidan yozib bo'lmadi — u guruhda bormi? Hozircha bot o'zi yozyapti.",
+                "⚠️ Не удалось написать в «Проёб» от основного аккаунта — он есть в группе? Пока пишет бот."), None),
+                key="main-proyob", min_interval=3600)
+        except Exception:
+            pass
 
     def group_id(self) -> int:
         raw = (self.db.get("proyob_group_id") or "").strip()
@@ -49,28 +84,70 @@ class Notifier:
                 kw["chat_id"] = new_id
         return await fn(*args, **kw)
 
-    async def send_group(self, text: str, done_button=None) -> tuple[int, int]:
+    async def send_group(self, text: str, done_button=None, reply_to: int | None = None) -> tuple[int, int]:
+        """«Проёб»ga xabar. Asosiy akkaunt nomidan yozish yoqilgan bo'lsa — o'sha akkaunt (tugmasiz: oddiy akkaunt
+        tugma qo'sha olmaydi); u yoza olmasa — bot yozadi (xabar yo'qolmaydi)."""
         gid = self.group_id()
+        client = self._main()
+        if client is not None:
+            try:
+                self._own.append((time.time(), self._norm(text)))
+                m = await client.send_message(gid, text, parse_mode="html", link_preview=False, reply_to=reply_to)
+                return gid, int(m.id)
+            except Exception as exc:
+                await self._main_failed(exc)
+        kw = {"reply_to_message_id": reply_to} if reply_to else {}
         msg = await self._call(self.bot.send_message, chat_id=gid, text=text, reply_markup=self._done_kb(done_button),
-                               disable_web_page_preview=True, parse_mode="HTML")
+                               disable_web_page_preview=True, parse_mode="HTML", **kw)
         return msg.chat.id, msg.message_id
 
+    def _main_any(self):
+        ub = self.userbot
+        return ub.client if ub is not None and ub.state == "online" and ub.client is not None else None
+
     async def delete_group(self, gid: int, mid: int) -> bool:
-        """Botning o'z xabarini «Проёб»dan o'chirish (Telegram 48 soatdan eskisini o'chirtirmaydi — False)."""
+        """«Проёб»dagi o'z xabarini o'chirish (bot yoki asosiy akkaunt yozgan). 48 soatdan eskisi — False."""
         try:
             await self._call(self.bot.delete_message, chat_id=gid, message_id=mid)
             return True
         except Exception:
-            return False
+            pass
+        client = self._main_any()
+        if client is not None:
+            try:
+                return bool(await client.delete_messages(gid, [mid]))
+            except Exception:
+                return False
+        return False
 
     async def edit_group(self, gid: int, mid: int, text: str, done_button=None) -> None:
+        """Xabarni yozgan o'zi tahrirlaydi: avval hozirgi tanlov (bot yoki asosiy akkaunt), bo'lmasa — ikkinchisi."""
         from aiogram.exceptions import TelegramBadRequest
-        try:
-            await self._call(self.bot.edit_message_text, chat_id=gid, message_id=mid, text=text,
-                             reply_markup=self._done_kb(done_button), disable_web_page_preview=True, parse_mode="HTML")
-        except TelegramBadRequest as exc:
-            if "not modified" not in str(exc).lower():
-                raise
+        order = ("main", "bot") if self._main() is not None else ("bot", "main")
+        last = None
+        for who in order:
+            try:
+                if who == "bot":
+                    await self._call(self.bot.edit_message_text, chat_id=gid, message_id=mid, text=text,
+                                     reply_markup=self._done_kb(done_button), disable_web_page_preview=True,
+                                     parse_mode="HTML")
+                    return
+                client = self._main_any()
+                if client is None:
+                    continue
+                self._own.append((time.time(), self._norm(text)))
+                await client.edit_message(gid, mid, text, parse_mode="html", link_preview=False)
+                return
+            except TelegramBadRequest as exc:
+                if "not modified" in str(exc).lower():
+                    return
+                last = exc
+            except Exception as exc:
+                if "NotModified" in type(exc).__name__:
+                    return
+                last = exc
+        if last is not None:
+            raise last
 
     def staff_ids(self, include_view: bool = False) -> list[int]:
         ids = list(self.owners)

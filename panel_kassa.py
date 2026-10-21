@@ -7,6 +7,7 @@ lekin yopilgan kunni faqat ega o'zgartira oladi."""
 from __future__ import annotations
 
 import asyncio
+import re
 import datetime as dt
 
 from . import kassa as K
@@ -769,6 +770,30 @@ async def price_delete(ctx, r: Req):
     return await prices(ctx, r)
 
 
+@on_input("rep_person")
+async def rep_person(ctx, r: Req, rid: int):
+    """«Чей отчёт?» → ➕ yangi xodim: ism yozildi — xodim qo'shiladi (yoki shu ismli bor bo'lsa — o'sha) va hisobot unga."""
+    db = ctx.db
+    name = " ".join(r.text.split())[:40]
+    if not name or not re.search(r"[^\W\d_]", name):
+        return r.L("⚠️ Ism yozing, masalan Bayzed", "⚠️ Напишите имя, например Bayzed")
+    rep = K.report(db, rid)
+    if rep is None or rep["person_id"] is not None:
+        return r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено.")
+    p = P.by_name(db, name)
+    if p is None:
+        pid = P.add_person(db, name, "", None)
+        K.make_kassa_person(db, pid, "worker", 0, K.week_start(today(ctx)).isoformat())
+        note = r.L(f"➕ {h(name)} qo'shildi", f"➕ {h(name)} добавлен")
+    else:
+        pid = p["id"]
+        if not p["kassa_kind"]:
+            K.make_kassa_person(db, pid, "worker", 0, K.week_start(today(ctx)).isoformat())
+        note = f"✅ {h(p['name'])}"
+    db.run("UPDATE reports SET person_id=? WHERE id=?", (pid, rid))
+    return await _next(ctx, r, rid, note)
+
+
 @on_input("price")
 async def price_set(ctx, r: Req, pid: int = 0, rid: int = 0):
     nums = [parse_number(x) for x in r.text.split()]
@@ -881,6 +906,18 @@ async def q_report(ctx, r: Req):
             await ui.toast(ctx.bot, r.chat_id, r.L("🚫 Hisobga olinmaydi", "🚫 Не учитывается"))
             return await main_menu(ctx, r)
         return r.L("🚫 Bu xabar hisobga olinmaydi.", "🚫 Сообщение не учитывается.")
+    if op == "N":                                           # yangi xodim — ismini so'raymiz
+        if rep["person_id"] is not None:
+            return await _next(ctx, r, rid, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
+        ui.ask(r, "rep_person", "k", rid=rid)
+        if _in_panel(r):
+            return title("➕", r.L("YANGI XODIM", "НОВЫЙ СОТРУДНИК")) + "\n\n" + card(
+                [r.L("Xodimning ismini yozing (masalan <code>Bayzed</code>). Hisobot unga yoziladi.",
+                     "Напишите имя сотрудника (например <code>Bayzed</code>). Отчёт запишется на него.")]), \
+                ui.cancel_kb(r, f"krv:{rid}")
+        await _edit_q(ctx, r, r.L("➕ Yangi xodim: ismini javob qilib yozing (masalan Bayzed).",
+                                  "➕ Новый сотрудник: напишите имя ответом (например Bayzed)."))
+        return None
     if op in ("p", "n"):
         if rep["person_id"] is not None:
             return await _next(ctx, r, rid, r.L("✅ Allaqachon hal qilingan.", "✅ Уже решено."))
