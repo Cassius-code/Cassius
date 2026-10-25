@@ -55,7 +55,6 @@ def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", messag
 # ───────────────────────── bosh menyu
 @screen("m", "view")
 async def main_menu(ctx, r: Req):
-    ui.view(r, "m")                     # qayerdan ochilsa ham (til almashtirish, /start …) — jonli yangilanadi
     db, now = ctx.db, int(ctx.clock())
     t = datetime.fromtimestamp(now, ctx.tz)
     months = MONTHS_RU if r.lang == "ru" else MONTHS_UZ
@@ -119,7 +118,7 @@ async def main_menu(ctx, r: Req):
 # ───────────────────────── jonli panel: bosh menyu va Push o'z joyida yangilanib turadi
 LIVE_VIEWS = ("m", "u")
 _LIVE_PAUSE: dict[int, float] = {}
-LIVE_EVERY = 1                          # soniya: har soniyada tekshiriladi, son o'zgarsa — o'sha xabar tahrirlanadi
+LIVE_EVERY = 2
 
 
 async def live_refresh(ctx) -> int:
@@ -131,15 +130,14 @@ async def live_refresh(ctx) -> int:
     from aiogram.types import LinkPreviewOptions
     n = 0
     for chat, view in list(ui.VIEW.items()):
-        base = (view or "").split(":")[0]                  # «m:ru» (til almashtirilgandan keyin) ham — bosh menyu
-        if base not in LIVE_VIEWS or _t.monotonic() < _LIVE_PAUSE.get(chat, 0) or chat in ui.WAIT:
+        if view not in LIVE_VIEWS or _t.monotonic() < _LIVE_PAUSE.get(chat, 0) or chat in ui.WAIT:
             continue
         async with ui.lock(chat):
             mid = ui.panel_id(chat)
             if ui.VIEW.get(chat) != view or not mid:
                 continue                                   # foydalanuvchi boshqa ekranga o'tdi
-            req = make_req(ctx, chat, chat, base)
-            fn, need = ui.SCREENS[base]
+            req = make_req(ctx, chat, chat, view)
+            fn, need = ui.SCREENS[view]
             if not req.can(need):
                 ui.VIEW.pop(chat, None)
                 continue

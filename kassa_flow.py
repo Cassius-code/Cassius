@@ -314,12 +314,6 @@ async def finalize(ctx, rid: int) -> None:
     shut = [d for d in K.report_days(db, rid) if K.is_closed(db, d)]
     if shut:
         await closed_day_alert(ctx, rid, shut)
-    from . import strict
-    if strict.on(db):                                      # 🔒 kunlik zp ma'lum bo'ldi — foizli jarima summasi
-        try:
-            strict.settle(db, local_date(ctx.clock(), ctx.tz))
-        except Exception:
-            log.exception("Qattiq rejim: jarima summasi")
     if db.get("kassa_notify") != "0":
         ids = _who_can_see(ctx, pid)
         if r["chat_id"] and r["chat_id"] > 0:

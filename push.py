@@ -527,29 +527,6 @@ class Pusher:
                                             for f, u in sorted(waiting.items()))
             return out
         self._live = live
-        order = {f["id"]: i for i, f in enumerate(P.folders(self.db))}
-
-        def snap() -> dict:
-            """«Проёб»dagi Push paneli uchun: har RD — nechta ketdi / nechtadan, kutyaptimi."""
-            rows = []
-            for fid in sorted(fids, key=lambda f: order.get(f, 10 ** 6)):
-                ok = per_folder.get(fid, [0, 0])[0]
-                tot = taken.get(fid, 0) if fid in closed else max(taken.get(fid, 0), cap(fid))
-                rows.append({"fid": fid, "name": names.get(fid, "?"), "sent": ok, "total": tot,
-                             "wait": waiting.get(fid)})
-            return {"rows": rows, "sent": stat["sent"], "total": total()}
-
-        gp = None                                  # 📣 «Проёб»da hamma ko'radigan Push paneli
-        if self.db.flag("push_group") and self.db.get("proyob_group_id") and \
-                getattr(self.notifier, "bot", None) is not None:
-            from .push_group import GroupPanel
-            gp = GroupPanel(self, bid, text, media)
-            try:
-                await gp.start(snap())
-            except Exception as exc:
-                log.info("Push paneli guruhga yozilmadi: %s", exc)
-                gp = None
-        updater = asyncio.create_task(gp.loop(snap)) if gp is not None else None
         try:
             self._workers = [asyncio.create_task(worker(k, q)) for k, q in groups.items()]
             results = await asyncio.gather(*self._workers, return_exceptions=True)
@@ -566,8 +543,6 @@ class Pusher:
             status = "interrupted"
             raise
         finally:
-            if updater is not None:
-                updater.cancel()
             n = total()
             self.db.run("UPDATE broadcasts SET sent=?, failed=?, status=?, finished_ts=?, total=? WHERE id=?",
                         (stat["sent"], stat["failed"], status, int(self.clock()), n, bid))
@@ -577,11 +552,6 @@ class Pusher:
         res = {"status": status, "sent": stat["sent"], "failed": stat["failed"], "total": n,
                "reasons": reasons, "reason": stat["aborted"], "per_folder": per_folder, "aud": aud}
         self.last_report = (int(self.clock()), res)
-        if gp is not None and status != "interrupted":   # uzilgan (yangilanish) — davom etganda o'sha panel
-            try:
-                await gp.finish(snap(), status)
-            except Exception as exc:
-                log.info("Push paneli yakunlanmadi: %s", exc)
         return res
 
     async def send_test(self, bot, uid: int) -> None:

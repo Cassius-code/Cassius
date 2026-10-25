@@ -14,19 +14,16 @@ EVERY = 5                    # soniya: shunchada bir tekshiriladi, son o'zgargan
 
 
 def text(ctx, now: int) -> str:
-    """Birinchi qator — guruh tepasidagi qadalgan satrda ko'rinadi: jami va qaysi RD da nechta (bosmasdan ham)."""
     db, tr = ctx.db, ctx.tracker
+    lines = ["<b>🚨 Задержки сейчас</b>"]
     if not db.flag("delay_enabled"):
-        return "<b>🚨 Задержки сейчас</b>\n⚪ контроль выключен"
+        return "\n".join(lines + ["⚪ контроль выключен"])
     over = tr.live_counts(now)["overdue"]
     red = max(1, tr.fine_rules()[0])
-    rows = [(f, over.get(f["id"], 0)) for f in P.folders(db) if f["delay_on"]]
-    total = sum(n for _f, n in rows)
-    worst = sorted((x for x in rows if x[1]), key=lambda x: -x[1])
-    first = (f"<b>🚨 Задержки сейчас: {total}</b> · " + " · ".join(f"{esc(f['name'])} — {n}" for f, n in worst)
-             if total else "<b>🟢 Задержек нет</b>")
-    lines = [first, ""]
-    for f, n in rows:
+    for f in P.folders(db):
+        if not f["delay_on"]:
+            continue
+        n = over.get(f["id"], 0)
         lines.append(f"{'🟢' if n == 0 else ('🔴' if n >= red else '🟡')} {esc(f['name'])} — <b>{n}</b>")
     return "\n".join(lines)
 

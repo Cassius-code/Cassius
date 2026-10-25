@@ -28,19 +28,6 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Raqamni bosib o'zgartirasiz (masalan 5 ta lid, 10 daqiqa). Jarima shu kuni ishda bo'lgan xodimlarga yoziladi
   («доброе утро» yoki lidga yozgan); hech kim kelmagan bo'lsa — dam olmayotgan hammaga.
   Kech qolish: o'zingiz kiritasiz, masalan `0.5` (har daqiqa) yoki `10=2, 30=5`.
-- **🧹 «Проёб»ni tozalash.** Zaderjka xabari — xodim javob berganidan 10 daqiqa keyin o'chadi; boshqa avtomat
-  xabarlar (soviyotgan lidlar, kechikish, Push tugadi, jarima, stavka) — 1 soatdan keyin. Vaqtni o'zingiz
-  tanlaysiz: 🚨 Nazorat → 🧹 «Проёб»ni tozalash (0 — o'chmaydi). Jarima yozilgan xabar («💸 штраф», jarimali
-  kechikish) o'chmaydi. Buyruqqa javoblar va doska ham o'chmaydi; hisob botda qoladi. Botga guruhda «Xabarlarni
-  o'chirish» huquqi kerak.
-- **🔒 Qattiq rejim** (🚨 Nazorat → 🔒, egasi yoqadi/o'chiradi). Yoqilsa papka jarimasi va daqiqasiga kechikish jarimasi
-  ishlamaydi, o'rniga (jarima = reglamentdagi $ × xodim foizi, masalan $15 × 41% = $6.15):
-  - 🕘 kechikish — o'sha kungi zp dan: 15 daqiqagacha ogohlantirish; 15–30 — 15%; 30–60 — 30%; 60+ — 50%;
-    haftada 3-kechikishdan boshlab yana 10% (summa kechki hisobotdan keyin aniqlanadi);
-  - 🐢 sekin javob (limitdan oshgan zaderjka), har hafta yangidan: 1-marta ogohlantirish; 2-marta $15 × %;
-    3-dan boshlab har biri $25 × % — o'sha kuni papkada ishlayotganlarga;
-  - 🚪 papkani tashlab ketish (lid kutyapti, tanaffus aytilmagan): 15+ daqiqa $15 × %; 60+ daqiqa jami $40 × %.
-    O'sha paytdagi sekin javoblar alohida jarima bo'lmaydi.
 - **📌 Doska.** «Проёб» tepasida qadalgan «Задержки сейчас»: har RD — hozir nechta lid limitdan oshib javobsiz
   (🟢 / 🟡 / 🔴). Hamma ko'radi, pul yo'q. Son o'zgarsa — o'sha xabar joyida yangilanadi. 🚨 Nazorat → 📌 Doska
   (yoqish / o'chirish). Botga guruhda «Xabarlarni qadash» huquqi kerak.
@@ -85,9 +72,6 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   tekshiradi (tugagach xabar keladi; qayta: 📣 Push → ⚙️ → 🔍 Bazani tekshirish). Vaqtlar va sana: 📣 Push → ⚙️.
   Papkaga akkaunt: 📣 Push → 📁 Papkalar → papka → 📲 Akkaunt (➕ yangisini shu yerning o'zida ulash mumkin).
   Push ketayotganda sonini o'zgartirsangiz (⚙️ → 🔢 Soni yoki papkaning o'z soni) — darhol shu son bilan davom etadi.
-  «Проёб»da Push paneli (hamma ko'radi): nima ketyapti (matn / ovozli …), har RD — nechtadan nechtasi. Tugagach —
-  shu xabarga javob qilib xodimlar belgilanadi («Пуш завершён … будьте на связи»), panel 5 daqiqada o'chadi.
-  O'chirish: 📣 Push → ⚙️ → 👥 Guruhda panel.
   Push paytida bot yangilansa (GitHub'ga yuklasangiz) yoki qayta ishga tushsa — Push o'zi joyidan davom etadi:
   yuborilganlarga qayta yubormaydi, son o'sha. ⏹ bilan to'xtatilgani davom etmaydi.
   Telegram akkauntga «kuting» desa (FloodWait) — o'sha papka kutadi (30 daqiqagacha), ekranda «⏳ RD 9 → 12:44»,

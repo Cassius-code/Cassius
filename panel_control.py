@@ -47,8 +47,6 @@ async def control(ctx, r: Req):
              f"{r.L('video', 'кружка')}",
              f"⏳ {r.L('Hozir kutyapti', 'Сейчас ждут')} — <b>{waiting}</b>",
              f"📌 {r.L('«Проёб»da doska', 'Доска в «Проёб»')} — {onoff(r, db.flag('board_on'))}",
-             clean_line(ctx, r),
-             f"🔒 {r.L('Qattiq rejim', 'Строгий режим')} — {onoff(r, db.flag('strict_on'))}",
              fine_line(ctx, r)]
     if not group:
         lines.append(r.L("⚠️ «Проёб» guruhi belgilanmagan (Sozlamalar)", "⚠️ Группа «Проёб» не задана (Настройки)"))
@@ -64,8 +62,6 @@ async def control(ctx, r: Req):
                       (f"📁 {r.L('Papkalar', 'Папки')}", "cf")])
         rows.append([(f"💸 {r.L('Jarima qoidasi', 'Правила штрафа')}", "cfn"),
                      (f"📌 {r.L('Doska', 'Доска')}", "cpb")])
-        rows.append([(f"🧹 {r.L('«Проёб»ni tozalash', 'Очистка «Проёб»')}", "ccl"),
-                     (f"🔒 {r.L('Qattiq rejim', 'Строгий режим')}", "cst")])
     rows += grid([(f"⏳ {r.L('Kutayotganlar', 'Ожидают')}", "cw"), (f"🔍 {r.L('Lidni tekshirish', 'Проверить лид')}", "cc")])
     if r.can("full"):
         rows.append([((r.L("⛔ Zaderjkani o'chirish", "⛔ Выключить контроль") if db.flag("delay_enabled")
@@ -81,92 +77,6 @@ def slide_line(ctx, r: Req) -> str:
         return r.L("🔁 Ketma-ket yozsa — ⚪ o'chiq (birinchi xabaridan)", "🔁 Пишет подряд — ⚪ выкл (с первого сообщения)")
     return r.L(f"🔁 Ketma-ket yozsa — <b>{n} daq</b> ichidagi oxirgi xabaridan",
                f"🔁 Пишет подряд — с последнего сообщения в пределах <b>{n} мин</b>")
-
-
-def _mins(r: Req, m: int) -> str:
-    if m <= 0:
-        return r.L("o'chmaydi", "не удаляются")
-    if m % 60 == 0:
-        return r.L(f"{m // 60} soat", f"{m // 60} ч")
-    return r.L(f"{m} daq", f"{m} мин")
-
-
-def clean_line(ctx, r: Req) -> str:
-    from .tidy import minutes
-    return (f"🧹 {r.L('Tozalash', 'Очистка')} — {r.L('zaderjka', 'задержки')}: <b>{_mins(r, minutes(ctx.db, 'delay'))}</b> · "
-            f"{r.L('boshqalar', 'остальное')}: <b>{_mins(r, minutes(ctx.db, 'info'))}</b>")
-
-
-@screen("ccl", "full")
-async def clean_settings(ctx, r: Req):
-    """🧹 «Проёб» toza tursin: botning o'z xabarlari qachon o'chadi (egasi boshqaradi)."""
-    from .tidy import DELAY_CHOICES, INFO_CHOICES, minutes
-    db = ctx.db
-    if len(r.args) == 2 and r.args[0] in ("d", "i") and r.args[1].isdigit():
-        v = int(r.args[1])
-        if v in (DELAY_CHOICES if r.args[0] == "d" else INFO_CHOICES):
-            db.set("clean_delay_min" if r.args[0] == "d" else "clean_info_min", str(v))
-        ui.view(r, "ccl")
-    d, i = minutes(db, "delay"), minutes(db, "info")
-    lines = [r.L(f"🚨 Zaderjka xabari — xodim javob berganidan keyin: <b>{_mins(r, d)}</b>",
-                 f"🚨 «Задержка» — после ответа сотрудника: <b>{_mins(r, d)}</b>"),
-             r.L(f"📣 Boshqa xabarlar (soviyotgan lidlar, kechikish, Push tugadi, jarima ogohlantirishi, stavka) — "
-                 f"yozilganidan keyin: <b>{_mins(r, i)}</b>",
-                 f"📣 Остальное («остывают», «Опоздание», «Пуш завершён», предупреждения, «ставка») — после отправки: "
-                 f"<b>{_mins(r, i)}</b>"),
-             r.L("💸 Jarima yozilgan xabar o'chmaydi — joyida qoladi.",
-                 "💸 Сообщение со штрафом не удаляется — остаётся."),
-             r.L("<i>Buyruq bilan chaqirilganlar (/topweek, /statistika …) va 📌 doska o'chmaydi. Hisob (kim javob berdi, "
-                 "jarima) botda saqlanadi — faqat chatdagi xabar o'chadi. Botga guruhda «Xabarlarni o'chirish» huquqi "
-                 "kerak.</i>",
-                 "<i>Ответы на команды (/topweek, /statistika …) и 📌 доска не удаляются. Учёт (кто ответил, штрафы) "
-                 "остаётся в боте — удаляется только сообщение в чате. Боту нужно право «Удалять сообщения».</i>")]
-    row_d = [(("✅ " if d == v else "") + _mins(r, v), f"ccl:d:{v}") for v in DELAY_CHOICES]
-    row_i = [(("✅ " if i == v else "") + _mins(r, v), f"ccl:i:{v}") for v in INFO_CHOICES]
-    return (ui.join(title("🧹", r.L("«ПРОЁБ»NI TOZALASH", "ОЧИСТКА «ПРОЁБ»")), "", card(lines),
-                    f"<b>{r.L('Zaderjka xabari:', 'Задержка:')}</b>"),
-            kb(*grid(row_d, 3), [(f"— {r.L('Boshqa xabarlar', 'Остальное')} —", "ccl")], *grid(row_i, 3), nav(r, "c")))
-
-
-@screen("cst", "full")
-async def strict_screen(ctx, r: Req):
-    """🔒 Qattiq rejim (reglament jarimalari): nima qiladi — oddiy so'z bilan; yoqish / o'chirish."""
-    db = ctx.db
-    if r.args and r.args[0] in ("on", "off"):
-        db.set("strict_on", "1" if r.args[0] == "on" else "0")
-        ui.view(r, "cst")
-    on = db.flag("strict_on")
-    limit = db.get_int("limit_minutes", 20)
-    lines = [f"{r.L('Holat', 'Состояние')}: " + (r.L("🟢 <b>yoqiq</b>", "🟢 <b>включён</b>") if on else
-                                                 r.L("⚪ o'chiq", "⚪ выключен")),
-             r.L("Jarima = hujjatdagi $ × xodim foizi (masalan, $15 × 41% = $6.15).",
-                 "Штраф = $ из регламента × процент сотрудника (например, $15 × 41% = $6.15)."),
-             "",
-             r.L("<b>🕘 Kechikish</b> (o'sha kungi zp dan)", "<b>🕘 Опоздание</b> (от дневной ЗП)"),
-             r.L("15 daqiqagacha — ogohlantirish · 15–30 — 15% · 30–60 — 30% · 60+ — 50%",
-                 "до 15 мин — предупреждение · 15–30 — 15% · 30–60 — 30% · 60+ — 50%"),
-             r.L("Haftada 3-kechikishdan boshlab — yana 10%. Summa kechki hisobotdan keyin aniqlanadi.",
-                 "С 3-го опоздания за неделю — ещё 10%. Сумма — после вечернего отчёта."),
-             "",
-             r.L(f"<b>🐢 Sekin javob</b> ({limit}+ daqiqa), har hafta yangidan",
-                 f"<b>🐢 Долгий ответ</b> ({limit}+ мин), каждую неделю заново"),
-             r.L("1-marta — ogohlantirish · 2-marta — $15 × % · 3-dan boshlab har biri — $25 × %",
-                 "1-й раз — предупреждение · 2-й — $15 × % · с 3-го каждый — $25 × %"),
-             r.L("Kimga: o'sha kuni o'sha papkada ishlayotgan xodimlarga.",
-                 "Кому: сотрудникам этой папки, которые сегодня на работе."),
-             "",
-             r.L("<b>🚪 Papkani tashlab ketish</b>", "<b>🚪 Уход с папки</b>"),
-             r.L("Lid kutib turibdi, xodim tanaffus demasdan yo'q: 15+ daqiqa — $15 × % · 60+ daqiqa — jami $40 × %. "
-                 "O'sha paytdagi sekin javoblar alohida jarima bo'lmaydi.",
-                 "Лид ждёт, сотрудник отсутствует без объявленного перерыва: 15+ мин — $15 × % · 60+ мин — всего "
-                 "$40 × %. Долгие ответы за это время отдельно не штрафуются."),
-             "",
-             r.L("Yoqilganda papka jarimasi va kechikishga daqiqasiga jarima ishlamaydi. Jarima xabarlari «Проёб»da "
-                 "qoladi. Avtomat jarimalar o'chiq bo'lsa — qattiq rejim ham ishlamaydi.",
-                 "Когда включён — штраф папки и поминутный штраф за опоздание не работают. Сообщения о штрафах "
-                 "остаются в «Проёб». Если автоштрафы выключены — строгий режим тоже не работает.")]
-    btn = [(r.L("⛔ O'chirish", "⛔ Выключить"), "cst:off")] if on else [(r.L("✅ Yoqish", "✅ Включить"), "cst:on")]
-    return ui.join(title("🔒", r.L("QATTIQ REJIM", "СТРОГИЙ РЕЖИМ")), "", card(lines)), kb(btn, nav(r, "c"))
 
 
 @screen("cpb", "full")

@@ -235,7 +235,7 @@ async def cooling_alerts(ctx, now: int) -> int:
             lines.append(small(f"… и ещё {len(fresh) - GROUP_LIMIT}"))
         lines.append(tag(P.folder_people(db, f["id"]), "напишите им, пока не остыли"))
         try:
-            await ctx.notifier.send_group("\n".join(lines), trash="info")
+            await ctx.notifier.send_group("\n".join(lines))
         except Exception:
             continue
         for x in fresh:

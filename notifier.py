@@ -121,23 +121,7 @@ class Notifier:
                 kw["chat_id"] = new_id
         return await fn(*args, **kw)
 
-    def trash(self, gid: int, mid: int, kind: str = "info") -> None:
-        """🧹 Bu xabar vaqti kelganda o'chsin (tidy.sweep)."""
-        try:
-            from .tidy import remember
-            remember(self.db, gid, mid, kind, int(time.time()))
-        except Exception as exc:
-            log.info("Tozalash navbatiga qo'shilmadi: %s", exc)
-
-    async def send_group(self, text: str, done_button=None, reply_to: int | None = None,
-                         trash: str | None = None) -> tuple[int, int]:
-        """«Проёб»ga xabar. trash="info" — vaqti kelganda o'zi o'chadi (🧹 sozlamasi)."""
-        gid, mid = await self._send_group(text, done_button, reply_to)
-        if trash:
-            self.trash(gid, mid, trash)
-        return gid, mid
-
-    async def _send_group(self, text: str, done_button=None, reply_to: int | None = None) -> tuple[int, int]:
+    async def send_group(self, text: str, done_button=None, reply_to: int | None = None) -> tuple[int, int]:
         """«Проёб»ga xabar. Asosiy akkaunt nomidan yozish yoqilgan bo'lsa — o'sha akkaunt (tugmasiz: oddiy akkaunt
         tugma qo'sha olmaydi); u yoza olmasa — bot yozadi (xabar yo'qolmaydi)."""
         gid = self.group_id()

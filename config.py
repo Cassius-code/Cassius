@@ -12,12 +12,6 @@ DEFAULTS: dict[str, str] = {
     # ── nazorat (zaderjka)
     "delay_enabled": "1",
     "limit_minutes": "20",           # mijozga javob limiti
-    "strict_on": "0",                # 🔒 qattiq rejim (reglament jarimalari) — egasi yoqadi
-    "clean_delay_min": "10",         # 🧹 «задержка» xabari javobdan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
-    "clean_info_min": "60",          # 🧹 boshqa avtomat xabarlar yozilganidan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
-    "push_group": "1",               # 📣 Push ketayotganda «Проёб»da panel (hamma ko'radi), tugagach — xodimlarga xabar
-    "push_panel": "",                # ketayotgan Push paneli: bid:gid:mid
-    "push_panel_del": "",            # tugagan Push paneli o'chadigan vaqt: gid:mid:ts
     "board_on": "1",                 # 📌 «Проёб»da qadalgan «Задержки сейчас» (har RD, jonli)
     "board_msg_id": "",
     "board_gid": "",

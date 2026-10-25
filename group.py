@@ -55,20 +55,17 @@ async def react(ctx, message: Message, emoji: str) -> None:
 NOTIFIER = None                 # «Проёб»ga asosiy akkaunt nomidan yozish tanlansa — javoblar ham o'sha nomdan
 
 
-async def reply(message: Message, text: str, trash: str | None = None) -> None:
-    """Faqat «Проёб» da (qulf boshqasini o'tkazmaydi). Matn — HTML (gtext.esc bilan).
-    trash="info" — avtomat xabar, vaqti kelganda o'chadi (buyruqqa javoblar — o'chmaydi)."""
+async def reply(message: Message, text: str) -> None:
+    """Faqat «Проёб» da (qulf boshqasini o'tkazmaydi). Matn — HTML (gtext.esc bilan)."""
     if NOTIFIER is not None and NOTIFIER._main() is not None and is_proyob(SimpleNamespace(db=NOTIFIER.db),
                                                                             message.chat.id):
         try:
-            await NOTIFIER.send_group(text, reply_to=message.message_id, trash=trash)
+            await NOTIFIER.send_group(text, reply_to=message.message_id)
             return
         except Exception as exc:
             log.info("Guruhga javob (asosiy akkaunt) yozilmadi: %s", exc)
     try:
-        sent = await message.reply(text, disable_web_page_preview=True, parse_mode="HTML")
-        if trash and NOTIFIER is not None:
-            NOTIFIER.trash(sent.chat.id, sent.message_id, trash)
+        await message.reply(text, disable_web_page_preview=True, parse_mode="HTML")
     except Exception as exc:
         log.info("Guruhga javob yozilmadi: %s", exc)
 
@@ -284,13 +281,11 @@ def build_router(ctx) -> Router:
                         row = ctx.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
                                          (local_date(message.date.timestamp(), ctx.tz).isoformat(), person["id"]))
                         await react(ctx, message, "👍")
-                        day = local_date(message.date.timestamp(), ctx.tz)
                         await reply(message, ctx.att.late_text(person, row["late_min"] if row else 0,
-                                                               int(message.date.timestamp())),
-                                    trash=None if ctx.att.late_fined(person["id"], day) else "info")
+                                                               int(message.date.timestamp())))
                     elif res == "break_limit":
                         await reply(message, f"⛔ перерыв · {h(P.mention(person))} — перерывы на сегодня "
-                                             f"закончились ({ctx.db.get_int('breaks_per_day', 3)})", trash="info")
+                                             f"закончились ({ctx.db.get_int('breaks_per_day', 3)})")
                     return
         try:
             await kassa_flow.on_group_text(ctx, message, text, staff, uid, name)

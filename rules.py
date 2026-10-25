@@ -498,9 +498,6 @@ class Tracker:
             await self.notifier.edit_group(gid, mid, text, done_button=None if closed else first)
         except Exception as exc:
             log.info("Alert tahrirlanmadi: %s", exc)
-        if closed:                                     # 🧹 hamma lidga javob berildi — N daqiqadan keyin o'chadi
-            from .tidy import remember
-            remember(self.db, gid, mid, "delay", int(self.clock()))
 
     # ------------------------------------------------------------ taymer (har ~10 soniyada)
     async def tick(self, now: int | None = None) -> dict:
@@ -557,7 +554,7 @@ class Tracker:
                    for th in items]
                 + [tag(P.folder_people(self.db, fid))]) if x)
             try:
-                await self.notifier.send_group(text, trash="info")
+                await self.notifier.send_group(text)
             except Exception as exc:
                 log.warning("«ставка» yuborilmadi: %s", exc)
                 continue
@@ -605,7 +602,7 @@ class Tracker:
                     + [tag(P.folder_people(self.db, fid), "доведите работу до конца, чтобы ни один чат "
                                                           "не остался без ответа")]) if x)
                 try:
-                    await self.notifier.send_group(text, trash="info")
+                    await self.notifier.send_group(text)
                     sent += len(part)
                 except Exception as exc:
                     log.warning("Kun oxiri eslatmasi yuborilmadi: %s", exc)
@@ -667,12 +664,6 @@ class Tracker:
                         "decision) VALUES(?,?,?,?,?,?,?,?,?,?)", (now, th["wait_since"], th["chat_id"],
                                                                    th["topic_id"], th["wait_msg_id"], None, "", "",
                                                                    "timer", "alert"))
-        from . import strict
-        if strict.on(self.db):                             # 🔒 qattiq rejim: sekin javob — haftalik hisob
-            try:
-                await strict.slow(self, f, rows, now)
-            except Exception:
-                log.exception("Qattiq rejim (sekin javob)")
         return len(items)
 
     # ------------------------------------------------------------ jarima: «holat» (papkada ko'p lid javobsiz)
@@ -694,9 +685,6 @@ class Tracker:
 
         Har bir «задержка» havolasi faqat BITTA holatga kiradi; oxirgi 1 soatdagi havolalar sanaladi (kunlab javobsiz
         qolib ketgan eski havolalar keyingi holatlarni to'sib qo'ymaydi va qayta sanalmaydi)."""
-        from . import strict
-        if strict.on(self.db):
-            return 0                                       # 🔒 qattiq rejimda papka jarimasi ishlamaydi
         n_min, forgive, grace = self.fine_rules()
         changed = 0
         for f in P.folders(self.db):
@@ -725,7 +713,6 @@ class Tracker:
             if still == 0:
                 self.db.run("UPDATE incidents SET status='ok', ended_ts=? WHERE id=?", (now, active["id"]))
                 await self._render_incident(active["id"])
-                self._trash_incident(active["id"], now)       # vaqtida javob berildi — 🧹 keyin o'chadi
                 changed += 1
             elif now >= (active["deadline"] or now):
                 await self._fine_incident(active, f, now)
@@ -743,26 +730,17 @@ class Tracker:
         self.db.many("INSERT OR IGNORE INTO incident_alerts(incident_id, alert_id) VALUES(?,?)",
                      [(iid, a) for a in open_ids])
         try:
-            # 🧹 ogohlantirish — keyin o'chadi; «⏳ ответьте за N мин» — natijasini kutadi (jarima bo'lsa — qoladi)
-            gid, mid = await self.notifier.send_group(self.incident_text(iid), trash="info" if status == "warn" else None)
+            gid, mid = await self.notifier.send_group(self.incident_text(iid))
             self.db.run("UPDATE incidents SET group_chat_id=?, group_msg_id=? WHERE id=?", (gid, mid, iid))
         except Exception as exc:
             log.warning("Holat xabari yuborilmadi: %s", exc)
         log.info("Holat: %s #%s (%s lid) — %s", f["name"], seq, len(open_ids), status)
 
-    def _trash_incident(self, iid: int, now: int) -> None:
-        inc = self.db.one("SELECT group_chat_id, group_msg_id FROM incidents WHERE id=?", (iid,))
-        if inc is not None and inc["group_msg_id"]:
-            from .tidy import remember
-            remember(self.db, inc["group_chat_id"], inc["group_msg_id"], "info", now)
-
     async def _fine_incident(self, inc, f, now: int) -> None:
-        """Jarima yozilsa — «💸 штраф» xabari «Проёб»da QOLADI (🧹 tozalashga kirmaydi)."""
         amount = float(inc["fine_usd"] or 0)
         if amount <= 0 or not self.db.flag("fines_enabled"):
             self.db.run("UPDATE incidents SET status='ok', ended_ts=? WHERE id=?", (now, inc["id"]))
             await self._render_incident(inc["id"])
-            self._trash_incident(inc["id"], now)
             return
         self.db.run("UPDATE incidents SET status='fined', ended_ts=? WHERE id=?", (now, inc["id"]))
         day = local_date(now, self.tz)
@@ -793,10 +771,8 @@ class Tracker:
         leads = plural_leads(inc["n_leads"])
         amount = f"{inc['fine_usd']:g} $"
         top = head(name, f"{leads} без ответа")
-        if inc["status"] == "warn":                       # imkoniyat sanalmaydi — oddiy, aniq ogohlantirish
-            fine = (f"\n<i>Дальше за такое — штраф {amount} каждому</i>" if inc["fine_usd"]
-                    and self.db.flag("fines_enabled") else "")
-            return "\n".join([top, f"⚠️ <b>Ответьте лидам — без задержек!</b>{fine}", tag(people)])
+        if inc["status"] == "warn":
+            return "\n".join([top, f"предупреждение {inc['seq']} из {forgive} за сегодня — без штрафа", tag(people)])
         if inc["status"] == "grace":
             return "\n".join([top, f"⏳ Ответьте за {grace // 60} мин — иначе штраф {amount} каждому", tag(people)])
         if inc["status"] == "fined":

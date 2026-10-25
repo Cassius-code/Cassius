@@ -42,8 +42,8 @@ def staff_stats(db, s_ts: int, e_ts: int, tz: ZoneInfo) -> list[dict]:
                     (s_ts, e_ts)):
         out.setdefault(a["person_id"], dict(blank))["delays"] = a["n"]
         names.setdefault(a["person_id"], (P.person(db, a["person_id"]) or {"name": "?"})["name"])
-    for a in db.all("SELECT person_id, SUM(usd) s FROM adj WHERE source IN ('delay', 'strict_slow', 'strict_away') "
-                    "AND cancelled=0 AND day BETWEEN ? AND ? GROUP BY person_id", (s_day, e_day)):
+    for a in db.all("SELECT person_id, SUM(usd) s FROM adj WHERE source='delay' AND cancelled=0 "
+                    "AND day BETWEEN ? AND ? GROUP BY person_id", (s_day, e_day)):
         out.setdefault(a["person_id"], dict(blank))["fine"] = float(a["s"] or 0)
         names.setdefault(a["person_id"], (P.person(db, a["person_id"]) or {"name": "?"})["name"])
     for a in db.all("SELECT person_id, COUNT(*) n, SUM(late_min) m FROM attendance WHERE late_min>0 AND day BETWEEN ? "
