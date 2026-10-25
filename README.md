@@ -33,9 +33,6 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   tanlaysiz: 🚨 Nazorat → 🧹 «Проёб»ni tozalash (0 — o'chmaydi). Jarima yozilgan xabar («💸 штраф», jarimali
   kechikish) o'chmaydi. Buyruqqa javoblar va doska ham o'chmaydi; hisob botda qoladi. Botga guruhda «Xabarlarni
   o'chirish» huquqi kerak.
-- **⏰ Javobsiz zaderjka.** «Задержка» chiqqanidan 15 daqiqa o'tib ham javob bo'lmasa (yoki ish kuni tugasa) —
-  o'sha xabarga javob qilib eslatma, xodimlar belgilanadi. Eslatmadan 5 daqiqada javob bo'lmasa — 5 $ jarima
-  o'sha kuni papkada ishlayotgan har xodimga (xabar qoladi). Vaqt va summa: 🚨 Nazorat → ⏰ Javobsiz zaderjka.
 - **🔒 Qattiq rejim** (🚨 Nazorat → 🔒, egasi yoqadi/o'chiradi). Yoqilsa papka jarimasi va daqiqasiga kechikish jarimasi
   ishlamaydi, o'rniga (jarima = reglamentdagi $ × xodim foizi, masalan $15 × 41% = $6.15):
   - 🕘 kechikish — o'sha kungi zp dan: 15 daqiqagacha ogohlantirish; 15–30 — 15%; 30–60 — 30%; 60+ — 50%;

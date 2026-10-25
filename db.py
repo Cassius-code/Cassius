@@ -322,12 +322,6 @@ CREATE TABLE IF NOT EXISTS push_log (
     PRIMARY KEY (bid, chat_id, topic_id)
 );
 CREATE INDEX IF NOT EXISTS idx_push_log_thread ON push_log(chat_id, topic_id, ts);
--- ⏰ javobsiz zaderjka: eslatma (zaderjka xabariga javob) va muhlatdan keyin jarima — har zaderjka xabariga bitta
-CREATE TABLE IF NOT EXISTS alert_reminders (
-    gid INTEGER NOT NULL, mid INTEGER NOT NULL, folder_id INTEGER, reminded_ts INTEGER NOT NULL, rgid INTEGER,
-    rmid INTEGER, deadline INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'open', ended_ts INTEGER,
-    PRIMARY KEY (gid, mid)
-);
 -- 🧹 «Проёб»dagi bot xabarlari: vaqti kelganda o'chadi (delay — yopilgan vaqtdan, info — yozilgan vaqtdan)
 CREATE TABLE IF NOT EXISTS group_msgs (
     gid INTEGER NOT NULL, mid INTEGER NOT NULL, kind TEXT NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY (gid, mid)

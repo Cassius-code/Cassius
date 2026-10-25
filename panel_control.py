@@ -48,7 +48,6 @@ async def control(ctx, r: Req):
              f"⏳ {r.L('Hozir kutyapti', 'Сейчас ждут')} — <b>{waiting}</b>",
              f"📌 {r.L('«Проёб»da doska', 'Доска в «Проёб»')} — {onoff(r, db.flag('board_on'))}",
              clean_line(ctx, r),
-             remind_line(ctx, r),
              f"🔒 {r.L('Qattiq rejim', 'Строгий режим')} — {onoff(r, db.flag('strict_on'))}",
              fine_line(ctx, r)]
     if not group:
@@ -67,7 +66,6 @@ async def control(ctx, r: Req):
                      (f"📌 {r.L('Doska', 'Доска')}", "cpb")])
         rows.append([(f"🧹 {r.L('«Проёб»ni tozalash', 'Очистка «Проёб»')}", "ccl"),
                      (f"🔒 {r.L('Qattiq rejim', 'Строгий режим')}", "cst")])
-        rows.append([(f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')}", "crm")])
     rows += grid([(f"⏳ {r.L('Kutayotganlar', 'Ожидают')}", "cw"), (f"🔍 {r.L('Lidni tekshirish', 'Проверить лид')}", "cc")])
     if r.can("full"):
         rows.append([((r.L("⛔ Zaderjkani o'chirish", "⛔ Выключить контроль") if db.flag("delay_enabled")
@@ -128,79 +126,6 @@ async def clean_settings(ctx, r: Req):
     return (ui.join(title("🧹", r.L("«ПРОЁБ»NI TOZALASH", "ОЧИСТКА «ПРОЁБ»")), "", card(lines),
                     f"<b>{r.L('Zaderjka xabari:', 'Задержка:')}</b>"),
             kb(*grid(row_d, 3), [(f"— {r.L('Boshqa xabarlar', 'Остальное')} —", "ccl")], *grid(row_i, 3), nav(r, "c")))
-
-
-REMIND_CHOICES = (10, 15, 20, 30, 45, 60)
-GRACE_CHOICES = (3, 5, 10, 15, 20, 30)
-
-
-def remind_line(ctx, r: Req) -> str:
-    on, after, grace, usd = ctx.tracker.alert_remind_rules()
-    if not on:
-        return f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')} — {onoff(r, False)}"
-    return (f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')} — "
-            + r.L(f"{after // 60} daq → eslatma → {grace // 60} daq → <b>{usd:g} $</b>",
-                  f"{after // 60} мин → напоминание → {grace // 60} мин → <b>{usd:g} $</b>"))
-
-
-@screen("crm", "full")
-async def remind_screen(ctx, r: Req):
-    """⏰ Zaderjka javobsiz qolsa: N daqiqada eslatma (o'sha xabarga javob qilib), muhlatda javob yo'q — jarima."""
-    db = ctx.db
-    a = r.args
-    if a and a[0] in ("on", "off"):
-        db.set("remind_on", "1" if a[0] == "on" else "0")
-        ui.view(r, "crm")
-    elif len(a) == 2 and a[0] in ("r", "g") and a[1].isdigit():
-        v = int(a[1])
-        if v in (REMIND_CHOICES if a[0] == "r" else GRACE_CHOICES):
-            db.set("remind_min" if a[0] == "r" else "remind_grace_min", str(v))
-        ui.view(r, "crm")
-    on, after, grace, usd = ctx.tracker.alert_remind_rules()
-    lines = [f"{r.L('Holat', 'Состояние')}: " + (r.L("🟢 <b>yoqiq</b>", "🟢 <b>включено</b>") if on else
-                                                 r.L("⚪ o'chiq", "⚪ выключено")),
-             r.L(f"1) Zaderjka xabari chiqqanidan <b>{after // 60} daqiqa</b> o'tib ham javob bo'lmasa — eslatma: o'sha "
-                 "xabarga javob qilib, xodimlar belgilanadi. Ish kuni tugaganda hali javobsiz bo'lsa — darhol.",
-                 f"1) Если через <b>{after // 60} мин</b> после «задержки» ответа нет — напоминание ответом на это "
-                 "сообщение, с отметкой сотрудников. Если рабочий день закончился, а ответа нет — сразу."),
-             r.L(f"2) Eslatmadan keyin <b>{grace // 60} daqiqa</b>da javob bo'lmasa — jarima <b>{usd:g} $</b> o'sha kuni "
-                 "papkada ishlayotgan har xodimga. Jarima xabari «Проёб»da qoladi.",
-                 f"2) Если через <b>{grace // 60} мин</b> после напоминания ответа нет — штраф <b>{usd:g} $</b> каждому "
-                 "сотруднику папки, который сегодня на работе. Сообщение о штрафе остаётся в «Проёб»."),
-             r.L("<i>«Holat» (ko'p lid javobsiz) uchun jarima olgan havolalar bu yerda qayta jarimaga kirmaydi.</i>",
-                 "<i>Ссылки, за которые уже был штраф по «много лидов без ответа», повторно не штрафуются.</i>")]
-    d = r.L("daq", "мин")
-    row_r = [(("✅ " if after // 60 == v else "") + f"⏰ {v} {d}", f"crm:r:{v}") for v in REMIND_CHOICES]
-    row_g = [(("✅ " if grace // 60 == v else "") + f"⏳ {v} {d}", f"crm:g:{v}") for v in GRACE_CHOICES]
-    rows = grid(row_r, 3) + grid(row_g, 3)
-    rows.append([(f"💸 {r.L('Jarima', 'Штраф')}: {usd:g} $", "crmf"),
-                 ((r.L("⛔ O'chirish", "⛔ Выключить"), "crm:off") if on else (r.L("✅ Yoqish", "✅ Включить"), "crm:on"))])
-    rows.append(nav(r, "c"))
-    return ui.join(title("⏰", r.L("JAVOBSIZ ZADERJKA", "ЗАДЕРЖКА БЕЗ ОТВЕТА")), "", card(lines),
-                   r.L("<i>⏰ — eslatma qachon · ⏳ — eslatmadan keyin muhlat</i>",
-                       "<i>⏰ — когда напомнить · ⏳ — срок после напоминания</i>")), kb(*rows)
-
-
-@screen("crmf", "full")
-async def remind_fine_ask(ctx, r: Req):
-    ui.ask(r, "remind_fine", "crm")
-    return (title("💸", r.L("ESLATMADAN KEYIN JARIMA", "ШТРАФ ПОСЛЕ НАПОМИНАНИЯ")) + "\n\n" +
-            card([r.L(f"Hozir: <b>{ctx.db.get('remind_fine_usd')} $</b> har xodimga.",
-                      f"Сейчас: <b>{ctx.db.get('remind_fine_usd')} $</b> каждому."),
-                  r.L("Necha $ bo'lsin? Son yuboring (0 — jarimasiz, faqat eslatma).",
-                      "Сколько $? Пришлите число (0 — без штрафа, только напоминание).")]),
-            ui.cancel_kb(r, "crm"))
-
-
-@on_input("remind_fine")
-async def set_remind_fine(ctx, r: Req):
-    v = parse_number(r.text)
-    if v is None or not 0 <= v <= 1000:
-        return r.L("⚠️ 0 dan 1000 gacha son yuboring", "⚠️ Пришлите число от 0 до 1000")
-    ctx.db.set("remind_fine_usd", f"{v:g}")
-    r.args = []
-    ui.view(r, "crm")
-    return await remind_screen(ctx, r)
 
 
 @screen("cst", "full")

@@ -12,10 +12,6 @@ DEFAULTS: dict[str, str] = {
     # ── nazorat (zaderjka)
     "delay_enabled": "1",
     "limit_minutes": "20",           # mijozga javob limiti
-    "remind_on": "1",                # ⏰ javobsiz zaderjka: eslatma, keyin jarima
-    "remind_min": "15",              # «задержка» chiqqanidan shuncha daqiqa o'tib ham javob yo'q — eslatma
-    "remind_grace_min": "5",         # eslatmadan keyin shuncha daqiqa — javob bo'lmasa jarima
-    "remind_fine_usd": "5",          # jarima ($) — o'sha kuni papkada ishlayotgan har xodimga
     "strict_on": "0",                # 🔒 qattiq rejim (reglament jarimalari) — egasi yoqadi
     "clean_delay_min": "10",         # 🧹 «задержка» xabari javobdan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
     "clean_info_min": "60",          # 🧹 boshqa avtomat xabarlar yozilganidan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
