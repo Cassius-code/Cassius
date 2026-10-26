@@ -55,6 +55,7 @@ def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", messag
 # ───────────────────────── bosh menyu
 @screen("m", "view")
 async def main_menu(ctx, r: Req):
+    ui.view(r, "m")                     # qayerdan ochilsa ham (til almashtirish, /start …) — jonli yangilanadi
     db, now = ctx.db, int(ctx.clock())
     t = datetime.fromtimestamp(now, ctx.tz)
     months = MONTHS_RU if r.lang == "ru" else MONTHS_UZ
@@ -118,7 +119,9 @@ async def main_menu(ctx, r: Req):
 # ───────────────────────── jonli panel: bosh menyu va Push o'z joyida yangilanib turadi
 LIVE_VIEWS = ("m", "u")
 _LIVE_PAUSE: dict[int, float] = {}
-LIVE_EVERY = 2
+LIVE_EVERY = 5                          # soniya: shunchada bir tekshiriladi, son o'zgarsa — o'sha xabar tahrirlanadi
+                                        # (tez-tez tahrir — Telegram botni sekinlashtiradi, tugmalar kech javob beradi)
+QUIET_AFTER_TAP = 6                     # tugma bosilgandan keyin shuncha soniya panelga jonli yangilanish tegmaydi
 
 
 async def live_refresh(ctx) -> int:
@@ -130,14 +133,17 @@ async def live_refresh(ctx) -> int:
     from aiogram.types import LinkPreviewOptions
     n = 0
     for chat, view in list(ui.VIEW.items()):
-        if view not in LIVE_VIEWS or _t.monotonic() < _LIVE_PAUSE.get(chat, 0) or chat in ui.WAIT:
+        base = (view or "").split(":")[0]                  # «m:ru» (til almashtirilgandan keyin) ham — bosh menyu
+        if base not in LIVE_VIEWS or _t.monotonic() < _LIVE_PAUSE.get(chat, 0) or chat in ui.WAIT:
             continue
+        if _t.monotonic() - ui.TOUCH.get(chat, 0) < QUIET_AFTER_TAP or ui.lock(chat).locked():
+            continue                                       # foydalanuvchi hozir panel bilan ishlayapti
         async with ui.lock(chat):
             mid = ui.panel_id(chat)
             if ui.VIEW.get(chat) != view or not mid:
                 continue                                   # foydalanuvchi boshqa ekranga o'tdi
-            req = make_req(ctx, chat, chat, view)
-            fn, need = ui.SCREENS[view]
+            req = make_req(ctx, chat, chat, base)
+            fn, need = ui.SCREENS[base]
             if not req.can(need):
                 ui.VIEW.pop(chat, None)
                 continue
@@ -309,6 +315,7 @@ def build_router(ctx) -> Router:
             await private.on_worker_cb(ctx, cb, data)
             return
         chat = cb.message.chat.id
+        ui.touch(chat)
         before, shown = ui.VIEW.get(chat), ui.SHOW_N.get(chat, 0)
         ui.VIEW[chat] = None                               # tugma bosildi — jonli yangilanish bu panelga tegmaydi
         try:
@@ -389,6 +396,7 @@ def build_router(ctx) -> Router:
 
     @r.message(F.chat.type == "private")
     async def on_message(message: Message) -> None:
+        ui.touch(message.chat.id)
         uid = message.from_user.id if message.from_user else None
         req = make_req(ctx, uid, message.chat.id, text=(message.text or message.caption or "").strip(), message=message)
         if not req.level:

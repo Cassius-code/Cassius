@@ -120,7 +120,8 @@ class TgAccount:
         from telethon import TelegramClient
         from telethon.sessions import StringSession
         return TelegramClient(StringSession(session), self.cfg.api_id, self.cfg.api_hash, connection_retries=-1,
-                              retry_delay=2, auto_reconnect=True, request_retries=5, flood_sleep_threshold=60)
+                              retry_delay=2, auto_reconnect=True, request_retries=5,
+                              flood_sleep_threshold=getattr(self, "flood_threshold", 60))
 
     async def run(self) -> None:
         backoff = 5

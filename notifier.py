@@ -109,11 +109,13 @@ class Notifier:
 
     async def _call(self, fn, *args, **kw):
         from aiogram.exceptions import TelegramMigrateToChat, TelegramRetryAfter
-        for attempt in range(3):
+        for attempt in range(2):
             try:
                 return await fn(*args, **kw)
             except TelegramRetryAfter as exc:
-                await asyncio.sleep(min(60, exc.retry_after + 1))
+                if exc.retry_after > 30:
+                    raise                                      # uzoq kutish — keyingi urinishda (bot qotib qolmasin)
+                await asyncio.sleep(exc.retry_after + 1)
             except TelegramMigrateToChat as exc:              # guruh supergruppaga aylandi — yangi ID
                 new_id = int(exc.migrate_to_chat_id)
                 if str(kw.get("chat_id")) == self.db.get("proyob_group_id"):
@@ -121,7 +123,23 @@ class Notifier:
                 kw["chat_id"] = new_id
         return await fn(*args, **kw)
 
-    async def send_group(self, text: str, done_button=None, reply_to: int | None = None) -> tuple[int, int]:
+    def trash(self, gid: int, mid: int, kind: str = "info") -> None:
+        """🧹 Bu xabar vaqti kelganda o'chsin (tidy.sweep)."""
+        try:
+            from .tidy import remember
+            remember(self.db, gid, mid, kind, int(time.time()))
+        except Exception as exc:
+            log.info("Tozalash navbatiga qo'shilmadi: %s", exc)
+
+    async def send_group(self, text: str, done_button=None, reply_to: int | None = None,
+                         trash: str | None = None) -> tuple[int, int]:
+        """«Проёб»ga xabar. trash="info" — vaqti kelganda o'zi o'chadi (🧹 sozlamasi)."""
+        gid, mid = await self._send_group(text, done_button, reply_to)
+        if trash:
+            self.trash(gid, mid, trash)
+        return gid, mid
+
+    async def _send_group(self, text: str, done_button=None, reply_to: int | None = None) -> tuple[int, int]:
         """«Проёб»ga xabar. Asosiy akkaunt nomidan yozish yoqilgan bo'lsa — o'sha akkaunt (tugmasiz: oddiy akkaunt
         tugma qo'sha olmaydi); u yoza olmasa — bot yozadi (xabar yo'qolmaydi)."""
         gid = self.group_id()

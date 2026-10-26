@@ -40,6 +40,8 @@ async def people_list(ctx, r: Req):
         tag = f" · {folders}" if folders else ""
         btn.append((f"{KIND_ICON.get(p['kassa_kind'], '👤')} {p['name']}{tag}"[:40], f"po:{p['id']}"))
     rows = grid(btn)
+    if not archived:
+        rows.append([(r.L("🏆 Haftalik ball", "🏆 Баллы недели"), "psc")])
     if r.can("full") and not archived:
         rows.append([(r.L("➕ Yangi xodim", "➕ Новый сотрудник"), "pn"), (r.L("🗄 Arxiv", "🗄 Архив"), "p:a")])
     rows.append(nav(r, "p" if archived else "m"))
@@ -48,6 +50,69 @@ async def people_list(ctx, r: Req):
     head = title("👥", r.L("XODIMLAR", "СОТРУДНИКИ") + (r.L(" · ARXIV", " · АРХИВ") if archived else ""))
     body = card([legend]) if ps else r.L("<i>Hozircha hech kim yo'q.</i>", "<i>Пока никого нет.</i>")
     return ui.join(head, "", body), kb(*rows)
+
+
+# ───────────────────────── 🏆 haftalik ball
+@screen("psc", "view")
+async def scores(ctx, r: Req):
+    """🏆 Haftalik ball: har xodim 0–100 (⚡ tezlik · 🚨 zaderjka · 💳 karta · 🕘 intizom), 🔥 seriya, maslahat."""
+    from . import score as S
+    last = bool(r.args and r.args[0] == "lw")
+    day = today(ctx) - dt.timedelta(days=7 if last else 0)
+    s, e, _a, _b = S.week_bounds(day, ctx.tz)
+    rows = S.compute(ctx, s, e)
+    medals = ["🥇", "🥈", "🥉"]
+    lines, place = [], 0
+    for x in rows:
+        name = h(x["p"]["name"])
+        if x["score"] is None:
+            lines.append(f"▫️ {name} — {r.L('ma‘lumot kam', 'мало данных')} ({x['n']} {r.L('javob', 'отв.')})")
+            continue
+        mark = medals[place] if place < 3 else f"{place + 1}."
+        place += 1
+        fire = f" · 🔥{x['streak']}" if x["streak"] >= 3 else ""
+        lines.append(f"{mark} <b>{name} — {x['score']}</b> · {S.parts_line(x)}{fire}")
+        lines.append(f"<i>{h(S.advice(x, r.lang))}</i>")
+    if not lines:
+        lines = [r.L("Hozircha ma'lumot yo'q.", "Пока нет данных.")]
+    head = title("🏆", r.L("HAFTALIK BALL", "БАЛЛЫ НЕДЕЛИ"),
+                 f"{plabel(s, e)} · " + (r.L("o'tgan hafta", "прошлая неделя") if last else r.L("shu hafta", "эта неделя")))
+    legend = r.L("⚡ tezlik · 🚨 zaderjka · 💳 karta · 🕘 intizom — har biri 25 ball. 🔥 — ketma-ket zaderjkasiz "
+                 "ish kunlari. Pulga bog'lanmagan.",
+                 "⚡ скорость · 🚨 задержки · 💳 карты · 🕘 дисциплина — по 25 баллов. 🔥 — рабочие дни подряд без "
+                 "задержек. С деньгами не связано.")
+    rows_kb = [[(r.L("🗓 Shu hafta", "🗓 Эта неделя"), "psc") if last else
+                (r.L("🗓 O'tgan hafta", "🗓 Прошлая неделя"), "psc:lw"),
+                (r.L("ℹ️ Qanday hisoblanadi", "ℹ️ Как считается"), "psci")]]
+    rows_kb.append(nav(r, "p"))
+    return ui.join(head, "", card(lines), f"<i>{legend}</i>"), kb(*rows_kb)
+
+
+@screen("psci", "view")
+async def scores_info(ctx, r: Req):
+    lim = ctx.db.get_int("limit_minutes", 20)
+    lines = [r.L("<b>⚡ Tezlik (25)</b> — o'rtacha javob vaqti: 3 daqiqagacha — 25, "
+                 f"{lim} daqiqa va ko'p — 0.",
+                 "<b>⚡ Скорость (25)</b> — среднее время ответа: до 3 мин — 25, "
+                 f"{lim} мин и больше — 0."),
+             r.L("<b>🚨 Zaderjka (25)</b> — har 100 javobga nechta «задержка» (o'sha kuni papkada ishlagan bo'lsa): "
+                 "0 — 25, 10 va ko'p — 0.",
+                 "<b>🚨 Задержки (25)</b> — сколько «задержек» на 100 ответов (если в тот день работал в папке): "
+                 "0 — 25, 10 и больше — 0."),
+             r.L("<b>💳 Karta (25)</b> — javob bergan lidlaridan nechtasiga karta ketdi, jamoa o'rtachasiga "
+                 "nisbatan: 1.5 barobar va ko'p — 25.",
+                 "<b>💳 Карты (25)</b> — какой доле его лидов ушла карта, по сравнению со средним по команде: "
+                 "в 1.5 раза выше и больше — 25."),
+             r.L("<b>🕘 Intizom (25)</b> — 25 dan ayriladi: har 5 daqiqa kechikish — 1, eslatmadan keyin ham "
+                 "javob bermaslik — 5.",
+                 "<b>🕘 Дисциплина (25)</b> — из 25 вычитается: каждые 5 мин опоздания — 1, нет ответа после "
+                 "напоминания — 5."),
+             r.L("Haftada 20 tadan kam javob bo'lsa — ball qo'yilmaydi.", "Меньше 20 ответов за неделю — без балла."),
+             r.L("Ball pulga bog'lanmagan. Xodim o'z balini haftalik zp xabarida ko'radi, «Проёб»da — /statistika.",
+                 "Балл не связан с деньгами. Сотрудник видит свой балл в недельном сообщении о зп, в «Проёб» — "
+                 "/statistika.")]
+    return ui.join(title("ℹ️", r.L("BALL QANDAY HISOBLANADI", "КАК СЧИТАЕТСЯ БАЛЛ")), "", card(lines)), \
+        kb(nav(r, "psc"))
 
 
 # ───────────────────────── yangi xodim
@@ -287,7 +352,8 @@ async def send_preview(ctx, r: Req):
     row = K.calc(db, s, e)["rows"].get(pid)
     if row is None:
         return r.L("Ma'lumot yo'q", "Данных нет")
-    msg = worker_message(row, s, e)
+    from .score import person_line
+    msg = worker_message(row, s, e, person_line(ctx, pid, s, e))
     if not p["tg_id"]:
         return r.L("⚠️ Xodim Telegram'ga ulanmagan: u botga /start bosishi kerak",
                    "⚠️ Сотрудник не подключён: пусть нажмёт /start у бота")
@@ -309,7 +375,8 @@ async def send_do(ctx, r: Req):
     if row is None or not p["tg_id"]:
         return r.L("⚠️ Yuborib bo'lmadi", "⚠️ Не отправлено")
     try:
-        await ctx.bot.send_message(p["tg_id"], worker_message(row, s, e))
+        from .score import person_line
+        await ctx.bot.send_message(p["tg_id"], worker_message(row, s, e, person_line(ctx, pid, s, e)))
     except Exception:
         return r.L("⚠️ Yuborilmadi: xodim botni bloklagan yoki /start bosmagan",
                    "⚠️ Не отправлено: сотрудник заблокировал бота или не нажал /start")

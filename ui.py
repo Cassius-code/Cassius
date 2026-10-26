@@ -28,6 +28,7 @@ VIEW: dict[int, str | None] = {}       # chat_id -> panelda hozir ochiq ekran (b
 SHOWN: dict[int, str] = {}             # chat_id -> panelda turgan matn
 SHOW_N: dict[int, int] = {}            # chat_id -> panel necha marta ko'rsatildi (o'zgardimi — bilish uchun)
 _LOCKS: dict[int, asyncio.Lock] = {}
+TOUCH: dict[int, float] = {}           # chat_id -> foydalanuvchi oxirgi marta tugma bosgan / yozgan (monotonic)
 STORE = None                           # Database: panel xabari id si qayta ishga tushganda ham esda qolsin
 _bg: set = set()
 
@@ -263,6 +264,11 @@ def bg(coro) -> None:
 
 
 # ───────────────────────── ko'rsatish
+def touch(chat_id: int) -> None:
+    import time as _t
+    TOUCH[chat_id] = _t.monotonic()
+
+
 def lock(chat_id: int) -> asyncio.Lock:
     """Bitta chat paneliga bir vaqtda bitta yozish (tugma bosilishi va jonli yangilanish to'qnashmasin)."""
     if chat_id not in _LOCKS:
@@ -313,26 +319,41 @@ async def show(bot, chat_id: int, text: str, markup=None, edit_id: int | None = 
 
 
 async def _show(bot, chat_id: int, text: str, markup, edit_id: int | None, fresh: bool) -> None:
-    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
     from aiogram.types import LinkPreviewOptions
     kw = dict(reply_markup=markup, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
     old = panel_id(chat_id)
     target = edit_id or (None if fresh else old)
     if target:
         ok = False
-        try:
-            await bot.edit_message_text(text, chat_id=chat_id, message_id=target, **kw)
-            ok = True
-        except TelegramBadRequest as exc:
-            ok = "not modified" in str(exc).lower()
-        except Exception:
-            ok = False
+        for attempt in (1, 2):
+            try:
+                await bot.edit_message_text(text, chat_id=chat_id, message_id=target, **kw)
+                ok = True
+            except TelegramRetryAfter as exc:              # Telegram «biroz kuting»: qisqa bo'lsa — kutib qayta
+                if attempt == 1 and exc.retry_after <= 5:
+                    await asyncio.sleep(exc.retry_after + 0.3)
+                    continue
+                log.info("Panel: Telegram %s s kutishni so'radi", exc.retry_after)
+                return                                     # yangi xabar ham ketmaydi — panel joyida qoladi
+            except TelegramBadRequest as exc:
+                ok = "not modified" in str(exc).lower()
+            except Exception:
+                ok = False
+            break
         if ok:
             _remember(chat_id, target)
             if old and old != target:
                 await _drop(bot, chat_id, old)           # boshqa xabar panelga aylandi — eski panel ketadi
             return
-    sent = await bot.send_message(chat_id, text, **kw)
+    try:
+        sent = await bot.send_message(chat_id, text, **kw)
+    except TelegramRetryAfter as exc:
+        if exc.retry_after > 5:
+            log.info("Panel: Telegram %s s kutishni so'radi", exc.retry_after)
+            return
+        await asyncio.sleep(exc.retry_after + 0.3)
+        sent = await bot.send_message(chat_id, text, **kw)
     _remember(chat_id, sent.message_id)
     if old and old != sent.message_id:
         await _drop(bot, chat_id, old)

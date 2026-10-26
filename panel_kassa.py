@@ -647,6 +647,9 @@ def hist_line(ctx, r: Req, a, names: dict) -> str:
         t = f"🔁 {pd}: {r.L('ishlagan', 'работал')} — {h(to)}"
     elif k == "adj_add":
         src = {"delay": r.L(" · avto (zaderjka)", " · авто (задержка)"), "late": r.L(" · avto (kech qoldi)", " · авто (опоздание)"),
+               "strict_slow": r.L(" · qattiq rejim (sekin javob)", " · строгий режим (долгий ответ)"),
+               "remind": r.L(" · avto (eslatmadan keyin javob yo'q)", " · авто (нет ответа после напоминания)"),
+               "strict_away": r.L(" · qattiq rejim (joyida yo'q)", " · строгий режим (нет на месте)"),
                "group": r.L(" · guruhdan", " · из группы")}.get(old, "")
         icon = "🎁" if new.startswith("bonus") else ("💸" if new.startswith("adv") else "⚠️")
         t = f"{icon} {pd}: {adj_txt(new)}{src}"

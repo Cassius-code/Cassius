@@ -71,6 +71,14 @@ async def on_group_text(ctx, message, text: str, staff: bool, uid: int | None, n
     day = local_date(message.date.timestamp(), ctx.tz)
     edited = message.edit_date is not None
     if staff and K.has_kind(text):
+        rt = getattr(message, "reply_to_message", None)
+        ru = getattr(rt, "from_user", None) if rt is not None else None
+        if ru is not None and not ru.is_bot:                # xodim xabariga javob: «штраф 5» — o'sha xodimga
+            p = P.identify(db, ru.id, ru.username)
+            if p is not None and not any(it["person_id"] for it in K.parse_adjustments(db, text)):
+                text = (f"@{p['username']} " if p["username"] else f"{p['name']} ") + text
+        if not K.adj_command(db, text):
+            return False                                    # e'lon yoki qoida (masalan bonus haqida) — buyruq emas
         if edited:
             K.drop_adj_msg(db, message.chat.id, message.message_id)
         await record_adjustments(ctx, text, day, message.chat.id, message.message_id)

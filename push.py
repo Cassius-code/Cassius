@@ -31,6 +31,14 @@ from .timeutil import day_start, parse_date, parse_hhmm
 log = logging.getLogger("push")
 
 MIN_REPEAT = 180
+_SENDING: dict[tuple[int, int], float] = {}     # (chat, topic) -> Push yuborila boshlagan vaqt
+
+
+def sending_now(chat_id: int, topic_id: int) -> bool:
+    """Shu topikka hozir Push yuborilyaptimi (asosiy akkaunt o'z xabarimizni «xodim javobi» demasin)."""
+    t0 = _SENDING.get((int(chat_id), int(topic_id)))
+    return t0 is not None and time.monotonic() - t0 < 120
+
 RESUME_WINDOW = 30 * 60      # bot qayta ishga tushsa: shuncha vaqt ichida uzilgan Push joyidan davom etadi
 LEGACY_GAP = 120             # eski versiya to'xtashda Push'ni «stopped» deb yozardi: yangilanishdan shuncha oldingisi
 ACCOUNT_WAIT = 180           # davom ettirishdan oldin Push akkauntlari ulanishini kutish (soniya)
@@ -458,13 +466,17 @@ class Pusher:
                     idx, chat_id, topic_id = take(fid)
                     try:
                         async def send_and_mark(c=chat_id, t=topic_id, f_id=fid):
-                            ids = await (sender.send_media(c, t, media, text) if media else
-                                         sender.send_text(c, t, text))
-                            ids = ids if isinstance(ids, list) else [ids]
-                            now = int(self.clock())
-                            for mid in ids:
-                                self.db.run("INSERT OR IGNORE INTO ignored_msgs(chat_id, msg_id, ts) VALUES(?,?,?)",
-                                            (c, int(mid), now))
+                            _SENDING[(int(c), int(t))] = time.monotonic()
+                            try:
+                                ids = await (sender.send_media(c, t, media, text) if media else
+                                             sender.send_text(c, t, text))
+                                ids = ids if isinstance(ids, list) else [ids]
+                                now = int(self.clock())
+                                for mid in ids:
+                                    self.db.run("INSERT OR IGNORE INTO ignored_msgs(chat_id, msg_id, ts) VALUES(?,?,?)",
+                                                (c, int(mid), now))
+                            finally:
+                                _SENDING.pop((int(c), int(t)), None)
                             self.db.run("UPDATE threads SET last_push_ts=? WHERE chat_id=? AND topic_id=?",
                                         (now, c, t))
                             self.db.run("INSERT OR IGNORE INTO push_log(bid, chat_id, topic_id, folder_id, ts) "
@@ -527,6 +539,29 @@ class Pusher:
                                             for f, u in sorted(waiting.items()))
             return out
         self._live = live
+        order = {f["id"]: i for i, f in enumerate(P.folders(self.db))}
+
+        def snap() -> dict:
+            """«Проёб»dagi Push paneli uchun: har RD — nechta ketdi / nechtadan, kutyaptimi."""
+            rows = []
+            for fid in sorted(fids, key=lambda f: order.get(f, 10 ** 6)):
+                ok = per_folder.get(fid, [0, 0])[0]
+                tot = taken.get(fid, 0) if fid in closed else max(taken.get(fid, 0), cap(fid))
+                rows.append({"fid": fid, "name": names.get(fid, "?"), "sent": ok, "total": tot,
+                             "wait": waiting.get(fid)})
+            return {"rows": rows, "sent": stat["sent"], "total": total()}
+
+        gp = None                                  # 📣 «Проёб»da hamma ko'radigan Push paneli
+        if self.db.flag("push_group") and self.db.get("proyob_group_id") and \
+                getattr(self.notifier, "bot", None) is not None:
+            from .push_group import GroupPanel
+            gp = GroupPanel(self, bid, text, media)
+            try:
+                await gp.start(snap())
+            except Exception as exc:
+                log.info("Push paneli guruhga yozilmadi: %s", exc)
+                gp = None
+        updater = asyncio.create_task(gp.loop(snap)) if gp is not None else None
         try:
             self._workers = [asyncio.create_task(worker(k, q)) for k, q in groups.items()]
             results = await asyncio.gather(*self._workers, return_exceptions=True)
@@ -543,6 +578,8 @@ class Pusher:
             status = "interrupted"
             raise
         finally:
+            if updater is not None:
+                updater.cancel()
             n = total()
             self.db.run("UPDATE broadcasts SET sent=?, failed=?, status=?, finished_ts=?, total=? WHERE id=?",
                         (stat["sent"], stat["failed"], status, int(self.clock()), n, bid))
@@ -552,6 +589,11 @@ class Pusher:
         res = {"status": status, "sent": stat["sent"], "failed": stat["failed"], "total": n,
                "reasons": reasons, "reason": stat["aborted"], "per_folder": per_folder, "aud": aud}
         self.last_report = (int(self.clock()), res)
+        if gp is not None and status != "interrupted":   # uzilgan (yangilanish) — davom etganda o'sha panel
+            try:
+                await gp.finish(snap(), status)
+            except Exception as exc:
+                log.info("Push paneli yakunlanmadi: %s", exc)
         return res
 
     async def send_test(self, bot, uid: int) -> None:

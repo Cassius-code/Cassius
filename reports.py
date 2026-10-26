@@ -42,8 +42,9 @@ def staff_stats(db, s_ts: int, e_ts: int, tz: ZoneInfo) -> list[dict]:
                     (s_ts, e_ts)):
         out.setdefault(a["person_id"], dict(blank))["delays"] = a["n"]
         names.setdefault(a["person_id"], (P.person(db, a["person_id"]) or {"name": "?"})["name"])
-    for a in db.all("SELECT person_id, SUM(usd) s FROM adj WHERE source='delay' AND cancelled=0 "
-                    "AND day BETWEEN ? AND ? GROUP BY person_id", (s_day, e_day)):
+    for a in db.all("SELECT person_id, SUM(usd) s FROM adj WHERE source IN ('delay', 'strict_slow', 'strict_away', "
+                    "'remind') "
+                    "AND cancelled=0 AND day BETWEEN ? AND ? GROUP BY person_id", (s_day, e_day)):
         out.setdefault(a["person_id"], dict(blank))["fine"] = float(a["s"] or 0)
         names.setdefault(a["person_id"], (P.person(db, a["person_id"]) or {"name": "?"})["name"])
     for a in db.all("SELECT person_id, COUNT(*) n, SUM(late_min) m FROM attendance WHERE late_min>0 AND day BETWEEN ? "
@@ -154,21 +155,30 @@ def weekly_group(ctx, s: dt.date, e: dt.date) -> str:
     if not st:
         lines.append(card_lines(["Данных пока нет."]))
         return "\n".join(lines)
-    top_n = max(x["n"] for x in st)
-    enough = max(5, int(top_n * 0.2))
+    from . import score as S
+    try:
+        sc = {x["p"]["id"]: x for x in S.compute(ctx, s, e)}           # 🏆 haftalik ball (pulsiz)
+    except Exception:
+        sc = {}
 
     def key(x):
-        return (x["delays"], x["late"], x["avg"] if x["n"] else 10 ** 9, -x["n"])
-    ranked = sorted([x for x in st if x["n"] >= enough], key=key)
-    rest = sorted([x for x in st if x["n"] < enough], key=key)
+        b = sc.get(x["key"])
+        return (-(b["score"]) if b and b["score"] is not None else 1, x["delays"], x["late"],
+                x["avg"] if x["n"] else 10 ** 9, -x["n"])
+    ranked = sorted([x for x in st if (sc.get(x["key"]) or {}).get("score") is not None], key=key)
+    rest = sorted([x for x in st if (sc.get(x["key"]) or {}).get("score") is None], key=key)
 
     def row(x):
-        bits = [f"ответов {x['n']}"]
+        b = sc.get(x["key"]) or {}
+        bits = [f"балл <b>{b['score']}</b>"] if b.get("score") is not None else []
+        bits.append(f"ответов {x['n']}")
         if x["n"]:
             bits.append(f"ср. {minutes_up(x['avg'])} мин")
         bits.append(f"задержек {x['delays']}" if x["delays"] else "без задержек ✅")
         if x["late"]:
             bits.append(f"опозданий {x['late']}")
+        if b.get("streak", 0) >= 3:
+            bits.append(f"🔥 {b['streak']} дн.")
         return f"<b>{esc(x['name'])}</b> — " + " · ".join(bits)
     medals = ["🥇", "🥈", "🥉"]
     if ranked:

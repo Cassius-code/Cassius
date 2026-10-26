@@ -40,6 +40,18 @@ def mentions(people) -> str:
     return " ".join(esc(P.mention(p)) for p in people)
 
 
+def usd(v) -> str:
+    """5 → «5», 2.5 → «2.5», 6.15 → «6.15»."""
+    v = round(float(v or 0), 2)
+    return str(int(v)) if abs(v - int(v)) < 1e-9 else f"{v:g}"
+
+
+def fine_line(people, amount, reason: str = "") -> str:
+    """Jarima yozildi — qisqa va muloyim: «💸 @baxa, вам штраф 5 $ за задержку»."""
+    who = ", ".join(esc(P.mention(p)) for p in people) or "сотрудник"
+    return f"💸 {who}, вам штраф {usd(amount)} $" + (f" {esc(reason)}" if reason else "")
+
+
 def tag(people, note: str = "") -> str:
     """«@ivan @aziza — note» — mayda. Xodim biriktirilmagan bo'lsa — eslatma."""
     m = mentions(people) or "сотрудник папки не назначен"

@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./app/
 # Eski botdan qolgan fayllar (repozitoriy almashtirilmagan bo'lsa) — ishlatilmaydi, olib tashlanadi
 RUN cd app && rm -f breaks.py broadcast.py features.py i18n.py i18n_uz.py monitor.py screens.py sender.py \
-    statuses.py worktime.py
+    statuses.py worktime.py strict.py
 
 RUN mkdir -p /data
 CMD ["python", "-m", "app"]

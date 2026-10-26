@@ -12,6 +12,17 @@ DEFAULTS: dict[str, str] = {
     # ── nazorat (zaderjka)
     "delay_enabled": "1",
     "limit_minutes": "20",           # mijozga javob limiti
+    "remind_on": "1",                # ⏰ javobsiz zaderjka: eslatma, keyin jarima
+    "remind_min": "15",              # «задержка» chiqqanidan shuncha daqiqa o'tib ham javob yo'q — eslatma
+    "remind_grace_min": "5",         # eslatmadan keyin shuncha daqiqa — javob bo'lmasa jarima
+    "remind_fine_usd": "5",          # jarima ($) — o'sha kuni papkada ishlayotgan har xodimga
+    "clean_delay_min": "10",         # 🧹 «задержка» xabari javobdan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
+    "clean_info_min": "60",          # 🧹 boshqa avtomat xabarlar yozilganidan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
+    "newlead_quiet_min": "120",      # 🆕 bugungi yangi lidga shuncha daqiqa (ish vaqtida) hech kim yozmasa — eslatma (0 — o'chiq)
+    "pay_remind_min": "15",          # 💳 karta ketgach shuncha daqiqa hech kim yozmasa — xodimga eslatma (0 — o'chiq)
+    "push_group": "1",               # 📣 Push ketayotganda «Проёб»da panel (hamma ko'radi), tugagach — xodimlarga xabar
+    "push_panel": "",                # ketayotgan Push paneli: bid:gid:mid
+    "push_panel_del": "",            # tugagan Push paneli o'chadigan vaqt: gid:mid:ts
     "board_on": "1",                 # 📌 «Проёб»da qadalgan «Задержки сейчас» (har RD, jonli)
     "board_msg_id": "",
     "board_gid": "",
@@ -52,14 +63,15 @@ DEFAULTS: dict[str, str] = {
     "stavka_count": "3",             # nechta dumaloq video stavkani tugatadi
     "stavka_first": "20",            # yangi chatdan keyin shu daqiqada birinchi stavka kelmasa — «ставка» eslatmasi
     "stavka_next": "20",             # keyingi stavka oldingisidan (yoki eslatmadan) shu daqiqada kelmasa — yana eslatma
-    "stavka_max_remind": "3",        # bitta lidga ko'pi bilan nechta eslatma
-    "stavka_cap": "180",             # stavka eng ko'pi bilan necha daqiqa davom etadi
+    "stavka_max_remind": "3",        # bitta lidga ko'pi bilan nechta eslatma; oxirgisidan keyin stavka tugaydi
     "echo_seconds": "0",             # >0: xodim xabaridan keyin shu soniya ichidagi bot xabari hisoblanmaydi (egasi: kerak emas)
     "bet_text_seconds": "20",        # videodan keyin shu soniya ichidagi bot matni = stavkaning o'zi (jurnalda 0–1 s)
     # ── ishga kelish va tanaffus
     "attendance_enabled": "1",
     "noshow_minutes": "15",          # ish boshlanib N daqiqa o'tib «доброе утро» yo'q bo'lsa — eslatma
     "late_fine": "",                 # kech qolish: «0.5» — har daqiqaga $, «10=2, 30=5» — 10+ daq → 2$, 30+ daq → 5$
+    "late_free_min": "0",            # kech qolish: shuncha daqiqagacha jarima yo'q (bepul daqiqalar)
+    "late_count": "over",            # over — faqat bepuldan ortiq daqiqalar × narx; all — hamma kech daqiqalar × narx
     "breaks_enabled": "1",
     "break_minutes": "30",
     "breaks_per_day": "3",

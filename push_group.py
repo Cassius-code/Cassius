@@ -14,7 +14,7 @@ log = logging.getLogger("push_group")
 
 KIND_RU = {"voice": "🎤 голосовое", "video_note": "⭕ кружок", "video": "🎬 видео", "photo": "🖼 фото",
            "audio": "🎵 аудио", "animation": "🎞 gif", "document": "📄 файл"}
-EVERY = 5                    # soniya: Push ketayotganda panel shunchada bir yangilanadi (son o'zgargan bo'lsa)
+EVERY = 15                   # soniya: Push ketayotganda panel shunchada bir yangilanadi (son o'zgargan bo'lsa)
 DELETE_AFTER = 5 * 60        # Push tugagach panel shuncha vaqtdan keyin o'chadi
 PREVIEW = 300                # Push matnidan ko'rsatiladigan qism (belgi)
 TITLES = {"done": "✅ Пуш завершён", "stopped": "⏹ Пуш остановлен", "aborted": "⛔ Пуш прерван"}

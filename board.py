@@ -11,19 +11,24 @@ from .gtext import esc
 log = logging.getLogger("board")
 
 EVERY = 5                    # soniya: shunchada bir tekshiriladi, son o'zgargandagina tahrirlanadi
+MIN_EDIT = 20                # ikki tahrir orasida kamida shuncha soniya (Telegram guruhga ko'p yozishni cheklaydi)
+_last_edit = [0.0]
 
 
 def text(ctx, now: int) -> str:
+    """Birinchi qator — guruh tepasidagi qadalgan satrda ko'rinadi: jami va qaysi RD da nechta (bosmasdan ham)."""
     db, tr = ctx.db, ctx.tracker
-    lines = ["<b>🚨 Задержки сейчас</b>"]
     if not db.flag("delay_enabled"):
-        return "\n".join(lines + ["⚪ контроль выключен"])
+        return "<b>🚨 Задержки сейчас</b>\n⚪ контроль выключен"
     over = tr.live_counts(now)["overdue"]
     red = max(1, tr.fine_rules()[0])
-    for f in P.folders(db):
-        if not f["delay_on"]:
-            continue
-        n = over.get(f["id"], 0)
+    rows = [(f, over.get(f["id"], 0)) for f in P.folders(db) if f["delay_on"]]
+    total = sum(n for _f, n in rows)
+    worst = sorted((x for x in rows if x[1]), key=lambda x: -x[1])
+    first = (f"<b>🚨 Задержки сейчас: {total}</b> · " + " · ".join(f"{esc(f['name'])} — {n}" for f, n in worst)
+             if total else "<b>🟢 Задержек нет</b>")
+    lines = [first, ""]
+    for f, n in rows:
         lines.append(f"{'🟢' if n == 0 else ('🔴' if n >= red else '🟡')} {esc(f['name'])} — <b>{n}</b>")
     return "\n".join(lines)
 
@@ -42,6 +47,10 @@ async def refresh(ctx, now: int, force: bool = False) -> None:
     if mid and db.get("board_gid") == str(gid):
         if body == db.get("board_text") and not force:
             return
+        import time as _t
+        if not force and _t.monotonic() - _last_edit[0] < MIN_EDIT:
+            return                                                   # keyingi tekshiruvda (son baribir to'g'ri bo'ladi)
+        _last_edit[0] = _t.monotonic()
         try:
             await n._call(n.bot.edit_message_text, chat_id=gid, message_id=mid, text=body, parse_mode="HTML",
                           disable_web_page_preview=True)

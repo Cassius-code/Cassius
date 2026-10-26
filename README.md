@@ -8,8 +8,10 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «✅ Выполнено» tugmasi boradi. Faqat ish vaqtida hisoblanadi: kechasi kelgan xabarlar sanalmaydi.
   Javob — har qanday xodim xabari, papka akkauntidan yozilgani ham (Push yuborgan xabarlar sanalmaydi).
   Xodim yozgandan keyin bot yozsa — bu mijozning yangi xabari, unga ham javob kerak.
-  Ish vaqtida guruhlar har 2 soniyada tekshiriladi (akkaunt «online» qilinmaydi): Telegram jonli
-  yetkazmay qolgan xabar ham topilib, o'z vaqti bilan hisoblanadi.
+  Ish vaqtida guruhlar har 2 soniyada tekshiriladi (akkaunt «online» qilinmaydi): bot jonli kelgan har xabar
+  raqamini eslab qoladi, guruhda tushib qolgan raqam bo'lsa — faqat o'sha xabarlarni olib, tartib bilan ishlaydi.
+  Xodim javobi kech topilsa — kutish javob vaqtida yopiladi (noto'g'ri «задержка» va jarima bo'lmaydi).
+  Lid xabarini qayta ishlash «Проёб»ga yozishni kutmaydi: Telegram botni sekinlashtirsa ham xabarlar o'z vaqtida.
   Bir-biriga yaqin kechikkan lidlar — 40 soniya kutib, bitta xabarda; keyingisi — pastga yangi xabar.
   Mijoz ketma-ket yozsa (birinchi xabaridan 5 daqiqa ichida) — zaderjka oxirgi xabaridan hisoblanadi
   (🚨 Nazorat → 🔁 Ketma-ket: 3/4/5/7/10 daqiqa yoki o'chiq).
@@ -21,20 +23,50 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   keladi), ✅ — ochish: 👤 javob beradigan xodimlar, nazorat, o'chirish. Har papkada 🔥 lidlar soni.
 - **🎬 Stavka.** Yangi chatda birinchi stavka 20 daqiqada, keyingilari ham 20 daqiqada kelishi kerak.
   Kelmasa, «ставка» deb eslatadi (eng ko'pi 3 marta). Xodimning o'z videosi ham stavka hisoblanadi.
-  3 ta stavkadan keyin oddiy zaderjka nazorati boshlanadi.
+  3 ta stavka kelsa — stavka tugaydi. Kelmasa — 3-eslatmadan keyin stavka tugaydi va keyingi xabarlar oddiy
+  zaderjka hisoblanadi (vaqt chegarasi yo'q). Stavka paytida lid ham, xodim ham nima yozsa — zaderjka emas.
+  Topik ma'lumoti kech kelsa ham (yangi lid aniqlanmay qolsa) — birinchi stavka videosi kelganda yoki topik
+  ochilgan vaqti bilinganda stavka o'sha paytdan boshlanadi. (Eski versiyada «🔒 Qattiq rejim» tugmasi aslida
+  stavkani o'chirardi — yangilangach stavka bir marta o'zi qayta yoqiladi.)
+- **🔔 Eslatmalar** (🚨 Nazorat → 🔔), faqat xodimlarga, «Проёб»da, faqat ish vaqtida:
+  - 🆕 **Yangi lid jim** — bugun kelgan yangi lidga stavkadan keyin 2 soat hech kim yozmasa (lid ham, xodim ham,
+    Push ham) — har RD alohida xabar, o'sha kuni ishdagi xodimlar belgilanadi.
+  - 💳 **To'lov eslatmasi** — xodim kartani yubordi (/rek /dep /cash), keyin 15 daqiqa hech kim yozmadi —
+    kartani yuborgan xodim belgilanadi: «уточните у клиента оплату». Mijozga hech narsa ketmaydi.
+  Vaqtlar (yoki o'chirish) — shu ekranda.
 - **🌙 Kun oxiri.** Ish vaqti tugagach (23:01) javobsiz chatlar ro'yxati «Проёб»ga boradi:
   «доведите работу до конца». Ertalab ular uchun zaderjka yozilmaydi.
-- **💸 Jarima.** Har zaderjkaga emas. Ekranda oddiy tilda yozilgan: «papkada bir vaqtda N ta lid javobsiz qolsa…».
-  Raqamni bosib o'zgartirasiz (masalan 5 ta lid, 10 daqiqa). Jarima shu kuni ishda bo'lgan xodimlarga yoziladi
-  («доброе утро» yoki lidga yozgan); hech kim kelmagan bo'lsa — dam olmayotgan hammaga.
-  Kech qolish: o'zingiz kiritasiz, masalan `0.5` (har daqiqa) yoki `10=2, 30=5`.
+- **💸 Jarimalar** (🚨 Nazorat → 💸 Jarimalar) — bitta jadval, har biri aniq summa, alohida yoqiladi:
+  - ⏰ **Zaderjka javobsiz qolsa** — «задержка» → 15 daqiqa → eslatma (xodimlar belgilanadi) → 5 daqiqa → jarima;
+  - 👥 **Ko'p lid birdaniga** — papkada N ta lid bir vaqtda javobsiz → kuniga K marta kechiriladi → G daqiqa → jarima
+    (summa 0 — o'chiq; papkaga alohida summa ham mumkin);
+  - 🕘 **Kech qolish** (💸 → 🕘) — narx: har daqiqaga (masalan `2`) yoki pog'ona (`10=2, 30=5`); necha daqiqa
+    bepul; hisob: faqat bepuldan ortig'i (25 daq kech, 5 bepul, 2 $ → 40 $) yoki hamma daqiqalar (→ 50 $).
+    Xodim kelganda «Проёб»da: «🕘 @xodim, вы опоздали на 25 мин — вам штраф 40 $»;
+  - ✍️ **Qo'lda** — «Проёб»da `@xodim штраф 5` (yoki xodim xabariga javob qilib `штраф 5`).
+  Jarima o'sha kuni papkada ishlayotgan xodimlarga («доброе утро» yoki lidga yozgan); hech kim kelmagan bo'lsa —
+  dam olmayotgan hammaga. «Проёб»da qisqa xabar: «💸 @xodim, вам штраф 5 $ за задержку».
+  Guruhdagi e'lon yoki qoida (masalan «bugun 10 000 kassa qilganga 20 $ бонус») jarima/bonus deb o'qilmaydi —
+  faqat xodim ko'rsatilgan qisqa buyruq.
+- **🧹 «Проёб»ni tozalash.** Zaderjka xabari — xodim javob berganidan 10 daqiqa keyin o'chadi; boshqa avtomat
+  xabarlar (soviyotgan va jim yangi lidlar, to'lov eslatmasi, kechikish, Push tugadi, jarima ogohlantirishi,
+  stavka) — 1 soatdan keyin. Vaqtni o'zingiz
+  tanlaysiz: 🚨 Nazorat → 🧹 Tozalash (0 — o'chmaydi). Jarima yozilgan xabar («💸 штраф», jarimali
+  kechikish) o'chmaydi. Buyruqqa javoblar va doska ham o'chmaydi; hisob botda qoladi. Botga guruhda «Xabarlarni
+  o'chirish» huquqi kerak.
 - **📌 Doska.** «Проёб» tepasida qadalgan «Задержки сейчас»: har RD — hozir nechta lid limitdan oshib javobsiz
-  (🟢 / 🟡 / 🔴). Hamma ko'radi, pul yo'q. Son o'zgarsa — o'sha xabar joyida yangilanadi. 🚨 Nazorat → 📌 Doska
-  (yoqish / o'chirish). Botga guruhda «Xabarlarni qadash» huquqi kerak.
+  (🟢 / 🟡 / 🔴). Hamma ko'radi, pul yo'q. Son o'zgarsa — o'sha xabar joyida yangilanadi (kamida 20 soniyada bir,
+  Telegram guruhga ko'p yozishni cheklaydi). 🚨 Nazorat → 📌 Doska (yoqish / o'chirish). Botga guruhda «Xabarlarni
+  qadash» huquqi kerak.
 - **🙋 Ishga kelish.** Xodim «доброе утро» yozsa YOKI lidga yoza boshlasa — ishga kelgan (qaysi biri oldin bo'lsa).
-  Kech qolish shu vaqtdan; kech qolsa «Проёб»ga: «🕘 Опоздание — 25 мин · начало работы в 10:25 (по графику 10:00)».
+  Kech qolish shu vaqtdan; kech qolsa «Проёб»ga: «🕘 @xodim, вы опоздали на 25 мин — вам штраф 40 $»
+  (tagida mayda: «начало в 10:25 · по графику 10:00»).
   Ish boshlanib 15 daqiqada hali ko'rinmaganlarga eslatma boradi; lidga yozib ishlayotganlarga — yo'q.
-- **☕ Tanaffus.** «атайду» / «перерыв» — boshlanadi, «тут» — tugaydi. Vaqt oshsa, faqat eslatma boradi.
+- **☕ Tanaffus.** «атайду» / «перерыв» — boshlanadi, «тут» / «вернулся» / «вернулась» — tugaydi. Vaqt oshsa,
+  faqat eslatma boradi.
+- **🏆 Haftalik ball** (👥 Xodimlar → 🏆). Har xodimga 0–100: ⚡ tezlik · 🚨 zaderjka · 💳 karta · 🕘 intizom (har
+  biri 25). 🔥 — ketma-ket zaderjkasiz ish kunlari, bir qator maslahat. Haftada 20 tadan kam javob — ball yo'q.
+  «Проёб»da /statistika — ball bo'yicha 🥇🥈🥉; xodim o'z balini haftalik zp xabarida ko'radi. Pulga bog'lanmagan.
 - **💵 Kassa.** Kassa — cheklar yig'indisi (1950 + 2600 = 4 550); zp — $ da. «Проёб»dagi cheklar, jarima, bonus, avanslar.
   - **Hisobotni botning o'ziga yozish mumkin:** tepasida ism bilan, masalan `Baxa` / `rd 19.10` / `1950` / `2600`.
     Ism bo'lmasa yoki bot tanimasa — «Kimning hisoboti?» deb so'raydi, tagida «➕ Yangi xodim» tugmasi bor
@@ -43,7 +75,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     Ism notanish bo'lsa — «➕ Yangi xodim: Baxa» tugmasi chiqadi (shunday tanishtirasiz). Jarima ham:
     `@ivan штраф 5`. Guruhda ham xuddi shunday.
   - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
-    da hozir nechta zaderjka (🟢 yo'q · 🟡 bor · 🔴 ko'p). Menyu o‘z joyida har 2 soniyada yangilanadi.
+    da hozir nechta zaderjka (🟢 yo'q · 🟡 bor · 🔴 ko'p). Menyu o‘z joyida yangilanadi (5 soniyada bir; tugma
+    bosilgan paytda tegmaydi).
     Kassa bo'limida — cheklar yig'indisi, har birining $ i va jami, 🏆 top 3.
   - **🏆 Umumiy reyting** kassa bo'limida: boshlang'ich (oldingi haftalar) kassa + 19.10 dan keyingi cheklar.
     Guruhda `/topall`. Boshlang'ich raqamlar: 🏆 Reyting → ♾ Hammasi → 📌.
@@ -70,8 +103,14 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   🌙 kechqurun (19:00 dan) — avval bugungilar, keyin kechagi va eskiroqlar.
   Baza — 28.08.2026 dan keyin o'zi yozgan har bir lid (yangi kelgani ham, eskisi ham). Bot ularni bir marta to'liq
   tekshiradi (tugagach xabar keladi; qayta: 📣 Push → ⚙️ → 🔍 Bazani tekshirish). Vaqtlar va sana: 📣 Push → ⚙️.
+  CRM'ning o'z xabarlari («Статус: …», «Реквизиты отправлены», /rek /status buyrug'iga javob va menyusi) «lid o'zi
+  yozdi» hisoblanmaydi. Yangilangandan keyin baza bir marta qaytadan, shu qoida bilan yig'iladi.
+  ⏹ bosilsa — Push to'xtaydi va darhol «▶️ Davom ettirish» chiqadi: faqat hali olmaganlarga, ikki marta yuborilmaydi.
   Papkaga akkaunt: 📣 Push → 📁 Papkalar → papka → 📲 Akkaunt (➕ yangisini shu yerning o'zida ulash mumkin).
   Push ketayotganda sonini o'zgartirsangiz (⚙️ → 🔢 Soni yoki papkaning o'z soni) — darhol shu son bilan davom etadi.
+  «Проёб»da Push paneli (hamma ko'radi): nima ketyapti (matn / ovozli …), har RD — nechtadan nechtasi. Tugagach —
+  shu xabarga javob qilib xodimlar belgilanadi («Пуш завершён … будьте на связи»), panel 5 daqiqada o'chadi.
+  O'chirish: 📣 Push → ⚙️ → 👥 Guruhda panel.
   Push paytida bot yangilansa (GitHub'ga yuklasangiz) yoki qayta ishga tushsa — Push o'zi joyidan davom etadi:
   yuborilganlarga qayta yubormaydi, son o'sha. ⏹ bilan to'xtatilgani davom etmaydi.
   Telegram akkauntga «kuting» desa (FloodWait) — o'sha papka kutadi (30 daqiqagacha), ekranda «⏳ RD 9 → 12:44»,

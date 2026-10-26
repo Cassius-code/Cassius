@@ -49,7 +49,8 @@ def break_minutes(text: str | None) -> int | None:
     if _HOUR.search(t):
         return 60
     return None
-_BACK = {norm(w) for w in ("tut", "tutman", "qaytdim", "keldim", "вернулся", "vernulsya")}
+_BACK = {norm(w) for w in ("tut", "tutman", "qaytdim", "keldim", "вернулся", "vernulsya", "вернулась", "vernulas",
+                           "пришел", "пришла", "prishel", "prishla")}
 
 
 def detect_break(text: str | None) -> str | None:
@@ -91,16 +92,25 @@ def parse_late_fine(spec: str | None):
     return ("rate", v) if v > 0 else None
 
 
-def late_fine_amount(spec: str | None, late_min: int) -> float:
+def late_rules(db) -> tuple[str, int, str]:
+    """(narx: «2» yoki «10=2, 30=5», bepul daqiqalar, hisob: over — faqat bepuldan ortig'i | all — hamma daqiqa)."""
+    return (db.get("late_fine"), max(0, db.get_int("late_free_min", 0)),
+            "all" if db.get("late_count") == "all" else "over")
+
+
+def late_fine_amount(spec: str | None, late_min: int, free: int = 0, count: str = "over") -> float:
+    """Kech qolish jarimasi. Bepul daqiqalargacha — 0. Har daqiqaga narx: «over» — (kech − bepul) × narx,
+    «all» — kech × narx. Pog'ona («10=2, 30=5») — kechikkan daqiqalar bo'yicha."""
     try:
         rule = parse_late_fine(spec)
     except ValueError:
         return 0.0
-    if rule is None or late_min <= 0:
+    if rule is None or late_min <= 0 or late_min <= max(0, free):
         return 0.0
     kind, val = rule
     if kind == "rate":
-        return round(late_min * val, 2)
+        mins = late_min if count == "all" else late_min - max(0, free)
+        return round(mins * val, 2)
     amount = 0.0
     for m, usd in val:
         if late_min >= m:
@@ -108,7 +118,7 @@ def late_fine_amount(spec: str | None, late_min: int) -> float:
     return amount
 
 
-def late_fine_text(spec: str | None, lang: str = "uz") -> str:
+def late_fine_text(spec: str | None, lang: str = "uz", free: int = 0) -> str:
     try:
         rule = parse_late_fine(spec)
     except ValueError:
@@ -116,10 +126,11 @@ def late_fine_text(spec: str | None, lang: str = "uz") -> str:
     if rule is None:
         return "jarimasiz" if lang != "ru" else "без штрафа"
     kind, val = rule
-    if kind == "rate":
-        return f"{val:g} $ / daq" if lang != "ru" else f"{val:g} $ / мин"
     w = "daq" if lang != "ru" else "мин"
-    return ", ".join(f"{m}+ {w} → {usd:g} $" for m, usd in val)
+    text = f"{val:g} $ / {w}" if kind == "rate" else ", ".join(f"{m}+ {w} → {usd:g} $" for m, usd in val)
+    if free > 0:
+        text += f" · {free} {w} " + ("bepul" if lang != "ru" else "бесплатно")
+    return text
 
 
 class Attendance:
@@ -178,22 +189,36 @@ class Attendance:
                     "ON CONFLICT(day, person_id) DO UPDATE SET arrived_ts=excluded.arrived_ts, late_min=excluded.late_min, "
                     "greet_ts=COALESCE(attendance.greet_ts, excluded.greet_ts)",
                     (day.isoformat(), person["id"], ts, late, ts if via == "greet" else None))
-        amount = late_fine_amount(self.db.get("late_fine"), late)
+        self.db.run("UPDATE attendance SET last_act_ts=MAX(COALESCE(last_act_ts, 0), ?) WHERE day=? AND person_id=?",
+                    (ts, day.isoformat(), person["id"]))
+        spec, free, count = late_rules(self.db)
+        amount = late_fine_amount(spec, late, free, count)
         if late and amount > 0 and self.db.flag("fines_enabled"):
             from .kassa import add_adj
             add_adj(self.db, person["id"], "fine", amount, day.isoformat(), source="late",
                     note=f"опоздание {late} мин")
         return "late" if late else "arrived"
 
+    def late_fined(self, person_id: int, day) -> bool:
+        """Kechikish uchun jarima yozilganmi — yozilgan bo'lsa, «Опоздание» xabari «Проёб»da qoladi (o'chmaydi)."""
+        return self.db.one("SELECT 1 FROM adj WHERE person_id=? AND day=? AND source='late'",
+                           (person_id, day.isoformat() if hasattr(day, "isoformat") else str(day))) is not None
+
     def late_text(self, person, late_min: int, ts: int) -> str:
-        """«Проёб» uchun: 🕘 Опоздание — 25 мин / @ivan · начало работы в 09:25 (по графику 09:00)."""
-        from .gtext import esc
+        """«Проёб» uchun, qisqa va muloyim (egasi):
+        🕘 @ivan, вы опоздали на 25 мин — вам штраф 40 $
+        начало в 10:25 · по графику 10:00            ← mayda"""
+        from .gtext import esc, small, usd
         from .timeutil import fmt
         ws = self.work_start()
         hrs, mins = divmod(max(0, int(late_min or 0)), 60)
         dur = (f"{hrs} ч {mins:02d} мин" if mins else f"{hrs} ч") if hrs else f"{mins} мин"
-        return (f"<b>🕘 Опоздание — {dur}</b>\n{esc(P.mention(person))} · начало работы в "
-                f"<b>{fmt(ts, self.tz, '%H:%M')}</b> <i>(по графику {ws.hour:02d}:{ws.minute:02d})</i>")
+        text = f"🕘 {esc(P.mention(person))}, вы опоздали на {dur}"
+        fine = self.db.scalar("SELECT SUM(usd) FROM adj WHERE person_id=? AND day=? AND source='late' AND cancelled=0",
+                              (person["id"], local_date(ts, self.tz).isoformat()), default=0)
+        if fine and fine > 0:
+            text += f" — вам штраф {usd(fine)} $"
+        return text + "\n" + small(f"начало в {fmt(ts, self.tz, '%H:%M')} · по графику {ws.hour:02d}:{ws.minute:02d}")
 
     async def work_seen(self, person, ts: int) -> str | None:
         """Xodim lidga yozdi — demak ishga kelgan (ish boshlanishidan 2 soat oldindan boshlab hisoblanadi).
@@ -203,6 +228,8 @@ class Attendance:
         day = local_date(ts, self.tz)
         if ts < at(day, self.work_start(), self.tz) - 2 * 3600:
             return None                                    # tungi yozishmalar — yangi kunga kelish emas
+        self.db.run("UPDATE attendance SET last_act_ts=MAX(COALESCE(last_act_ts, 0), ?) WHERE day=? AND person_id=?",
+                    (ts, day.isoformat(), person["id"]))   # 🔒 oxirgi faollik (joyida yo'qligini bilish uchun)
         row = self.db.one("SELECT arrived_ts FROM attendance WHERE day=? AND person_id=?", (day.isoformat(), person["id"]))
         if row is not None and row["arrived_ts"]:
             return None
@@ -213,7 +240,8 @@ class Attendance:
             row = self.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
                               (day.isoformat(), person["id"]))
             try:
-                await self.notifier.send_group(self.late_text(person, row["late_min"] if row else 0, ts))
+                await self.notifier.send_group(self.late_text(person, row["late_min"] if row else 0, ts),
+                                               trash=None if self.late_fined(person["id"], day) else "info")
             except Exception as exc:
                 log.warning("Kech qolish xabari yuborilmadi: %s", exc)
         return res
@@ -290,7 +318,7 @@ class Attendance:
             p = P.person(self.db, br["person_id"])
             try:
                 from .gtext import esc
-                await self.notifier.send_group(f"☕ перерыв · {esc(P.mention(p))} — время перерыва вышло!")
+                await self.notifier.send_group(f"☕ перерыв · {esc(P.mention(p))} — время перерыва вышло!", trash="info")
                 self.db.run("UPDATE breaks SET reminded=1 WHERE id=?", (br["id"],))
             except Exception as exc:
                 log.warning("Tanaffus eslatmasi yuborilmadi: %s", exc)
@@ -315,7 +343,7 @@ class Attendance:
         from .gtext import mentions, small
         lines = [small("приход · напишите «доброе утро»"), f"{mentions(missing)} — ещё не видно в работе"]
         try:
-            await self.notifier.send_group("\n".join(lines))
+            await self.notifier.send_group("\n".join(lines), trash="info")
         except Exception as exc:
             log.warning("Kelmaganlar eslatmasi yuborilmadi: %s", exc)
             return

@@ -668,19 +668,20 @@ async def attendance(ctx, r: Req):
     db = ctx.db
     if r.args and r.args[0] == "t":
         db.toggle("attendance_enabled")
-    from .attendance import late_fine_text
+    from .attendance import late_fine_text, late_rules
+    spec, free, _count = late_rules(db)
     lines = [f"🙋 {r.L('Nazorat', 'Контроль')} — {onoff(r, db.flag('attendance_enabled'))}",
              f"🕘 {r.L('Ish boshlanishi', 'Начало работы')} — <b>{db.get('work_start')}</b>",
              f"⏰ {r.L('Eslatma', 'Напоминание')} — {r.L('boshlanib', 'через')} <b>{db.get('noshow_minutes')}</b> "
              f"{r.L('daqiqa o‘tsa', 'мин после начала')}",
-             f"💸 {r.L('Kech qolish', 'Опоздание')} — <b>{h(late_fine_text(db.get('late_fine'), r.lang))}</b>"
+             f"💸 {r.L('Kech qolish', 'Опоздание')} — <b>{h(late_fine_text(spec, r.lang, free))}</b>"
              + ("" if db.flag("fines_enabled") else r.L(" · ⚪ jarimalar o'chiq", " · ⚪ штрафы выключены")),
              r.L("Xodim «Проёб»ga «доброе утро» yozadi. Dam olish kunlari — xodim sozlamalarida.",
                  "Сотрудник пишет «доброе утро» в «Проёб». Выходные — в настройках сотрудника.")]
     rows = [[((r.L("⛔ O'chirish", "⛔ Выключить") if db.flag("attendance_enabled") else r.L("✅ Yoqish", "✅ Включить")),
               "st:t")],
             grid([(r.L("⏰ Eslatma vaqti", "⏰ Напоминание"), "sti:noshow_minutes"),
-                  (r.L("💸 Kech qolish jarimasi", "💸 Штраф за опоздание"), "cfi:late_fine")])[0], nav(r, "s")]
+                  (r.L("💸 Kech qolish jarimasi", "💸 Штраф за опоздание"), "cfl")])[0], nav(r, "s")]
     return ui.join(title("🙋", r.L("ISHGA KELISH", "ПРИХОД НА РАБОТУ")), "", card(lines)), kb(*rows)
 
 

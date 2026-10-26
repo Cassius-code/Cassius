@@ -172,7 +172,9 @@ async def _request_screen(ctx, r: Req):
             return ui.join(title("🧮", h(p["name"])), "", card([note])), \
                 kb(*btn, [(r.L("✖️ Rad etish", "✖️ Отказать"), f"rq:{rid}:n")], ui.nav(r))
         row = K.calc(db, s, e)["rows"].get(p["id"])
-        msg = worker_message(row, s, e) if row else f"💰 Зарплата · {plabel(s, e)}\n\nНачислений нет."
+        from .score import person_line
+        msg = (worker_message(row, s, e, person_line(ctx, p["id"], s, e)) if row
+               else f"💰 Зарплата · {plabel(s, e)}\n\nНачислений нет.")
         if op == "v":
             return ui.join(title("👀", r.L("XODIM KO'RADIGAN MATN", "ЧТО УВИДИТ СОТРУДНИК"), h(p["name"])), "",
                            card([h(msg)])), \

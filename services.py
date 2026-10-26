@@ -39,6 +39,16 @@ def first_run(db, now: int, tz) -> None:
     if not db.get("greet_migrated"):                     # eski yozuvlar: kelgan = «доброе утро» yozgan
         db.run("UPDATE attendance SET greet_ts=arrived_ts WHERE greet_ts IS NULL AND arrived_ts IS NOT NULL")
         db.set("greet_migrated", "1")
+    if not db.get("stavka_fix_v1"):
+        # eski versiyada «🔒 Qattiq rejim» tugmasi aslida stavkani o'chirib-yoqardi (ikki tugmaga bitta nom) —
+        # stavka bilmasdan o'chirilgan bo'lishi mumkin: bir marta qayta yoqiladi
+        if db.get("stavka_enabled") == "0":
+            db.set("stavka_enabled", "1")
+            log.info("Stavka qayta yoqildi (eski «Qattiq rejim» tugmasi uni o'chirgan edi)")
+        db.set("stavka_fix_v1", "1")
+    if not db.get("pay_remind_v1"):                      # 💳 eski kartalar uchun eslatma ketmaydi (faqat yangilari)
+        db.run("UPDATE cards SET reminded=1")
+        db.set("pay_remind_v1", "1")
 
 
 def make_backup(ctx) -> tuple[bytes, str]:
@@ -72,6 +82,7 @@ class Scheduler:
         self._push_task: asyncio.Task | None = None
         self._spam_task: asyncio.Task | None = None
         self._last_cool = 0.0
+        self._last_nudge = 0.0
         self._last_prune = 0.0
         self._last_pool = 0.0
         self._last_board = 0.0
@@ -109,10 +120,18 @@ class Scheduler:
         if self._spam_task is None or self._spam_task.done():   # 🛡 @SpamBot — fonda (bir necha soniya oladi)
             from . import guard
             self._spam_task = asyncio.create_task(self._safe("@SpamBot", guard.daily(ctx, now)))
+        from . import push_group, tidy
+        await self._safe("Push paneli", push_group.cleanup(ctx, now))     # tugaganiga 5 daqiqa — panel o'chadi
+        await self._safe("«Проёб»ni tozalash", tidy.sweep(ctx, now))      # 🧹 vaqti kelgan bot xabarlari o'chadi
         if time.monotonic() - self._last_cool >= 120:              # 📉 soviyotgan lidlar — har 2 daqiqada
             self._last_cool = time.monotonic()
             from . import insights
             await self._safe("soviyotgan lidlar", insights.cooling_alerts(ctx, now))
+        if time.monotonic() - self._last_nudge >= 60:              # 🆕 jim yangi lid · 💳 to'lov — har daqiqada
+            self._last_nudge = time.monotonic()
+            from . import insights
+            await self._safe("yangi lid jim", insights.newlead_alerts(ctx, now))
+            await self._safe("to'lov eslatmasi", insights.pay_alerts(ctx, now))
         await self._safe("kunlik hisobot", self.daily_report(now))
         await self._safe("haftalik xulosa", self.weekly(now))
         await self._safe("zaxira nusxa", self.backup(now))

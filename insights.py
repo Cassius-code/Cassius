@@ -165,7 +165,8 @@ def cooling(db, tr, now: int, days: int) -> dict[int, list[dict]]:
     today = day_start(now, tr.tz)
     out: dict[int, list] = {}
     for th in db.all("SELECT th.chat_id, th.topic_id, th.cl_turn, th.cl_avg, th.cl_n, th.cool_noted, th.seen_msg_id, "
-                     "th.stavka, COALESCE(t.created_ts, th.first_seen) AS born FROM threads th "
+                     "th.stavka, th.last_staff_ts, th.last_push_ts, COALESCE(t.created_ts, th.first_seen) AS born "
+                     "FROM threads th "
                      "LEFT JOIN topics t ON t.chat_id=th.chat_id AND t.topic_id=th.topic_id "
                      "WHERE th.cl_turn IS NOT NULL AND th.cl_n>=2"):
         fid = tr.chat_folder.get(th["chat_id"])
@@ -174,7 +175,10 @@ def cooling(db, tr, now: int, days: int) -> dict[int, list[dict]]:
                 or _excluded(tr, th["chat_id"], th["topic_id"], skip):
             continue
         usual = max(1, th["cl_avg"] or 0)
-        silent = work_seconds(th["cl_turn"], now, tr.tz, ws, we)
+        # jimlik — OXIRGI urinishdan: xodim keyin yana yozgan yoki Push ketgan bo'lsa, o'shandan hisoblanadi
+        # (aks holda hozirgina yozilgan yoki Push olgan lid ham «остывает» deb eslatilardi)
+        anchor = max(th["cl_turn"], th["last_staff_ts"] or 0, th["last_push_ts"] or 0)
+        silent = work_seconds(anchor, now, tr.tz, ws, we)
         if silent < max(COOL_FACTOR * usual, COOL_MIN):
             continue
         c = cards.get((th["chat_id"], th["topic_id"]))
@@ -235,12 +239,151 @@ async def cooling_alerts(ctx, now: int) -> int:
             lines.append(small(f"… и ещё {len(fresh) - GROUP_LIMIT}"))
         lines.append(tag(P.folder_people(db, f["id"]), "напишите им, пока не остыли"))
         try:
-            await ctx.notifier.send_group("\n".join(lines))
+            await ctx.notifier.send_group("\n".join(lines), trash="info")
         except Exception:
             continue
         for x in fresh:
             db.run("UPDATE threads SET cool_noted=? WHERE chat_id=? AND topic_id=?", (x["turn"], x["chat_id"],
                                                                                    x["topic_id"]))
+        sent += 1
+    return sent
+
+
+# ═════════════════════════ 🆕 jim yangi lid · 💳 to'lov eslatmasi («Проёб»ga, faqat xodimlarga)
+NEWLEAD_CHOICES = (0, 60, 90, 120, 180)
+PAY_CHOICES = (0, 10, 15, 20, 30)
+
+
+def _nudge_ok(ctx) -> bool:
+    from .timeutil import is_work_time
+    db, tr = ctx.db, ctx.tracker
+    if not db.flag("bot_enabled") or not db.flag("delay_enabled") or not db.get("proyob_group_id"):
+        return False
+    ws, we = tr.work_window()
+    return is_work_time(int(ctx.clock()), tr.tz, ws, we)
+
+
+def _watched(db, tr, chat_id: int) -> int | None:
+    """Lid nazoratdagi papkadami (papkada nazorat yoqiq)? -> papka id."""
+    fid = tr.chat_folder.get(chat_id)
+    if fid is None:
+        return None
+    f = P.folder(db, fid)
+    return fid if f is not None and f["delay_on"] else None
+
+
+def quiet_new_leads(db, tr, now: int, minutes: int) -> dict[int, list[dict]]:
+    """🆕 Bugun ochilgan yangi lid: stavkasi tugagan, javob kutmayapti va N daqiqa (ish vaqtida) hech kim yozmagan —
+    na mijoz, na xodim, na Push. Har jimlik uchun bir marta (keyin kimdir yozib, yana jim bo'lsa — yana).
+    Kecha va undan oldingi lidlar — «📉 soviyotgan»da. -> {papka: [lid, ...]}"""
+    skip = skip_list(db)
+    ws, we = tr.work_window()
+    since = max(day_start(now, tr.tz), db.get_int("delay_from"))
+    out: dict[int, list] = {}
+    for th in db.all("SELECT th.chat_id, th.topic_id, th.stavka, th.stavka_end, th.wait_since, th.last_seen, "
+                     "th.last_staff_ts, th.last_push_ts, th.seen_msg_id, th.newlead_noted, t.created_ts AS born "
+                     "FROM threads th JOIN topics t ON t.chat_id=th.chat_id AND t.topic_id=th.topic_id "
+                     "WHERE th.topic_id>1 AND t.created_ts>=?", (since,)):
+        fid = _watched(db, tr, th["chat_id"])
+        if fid is None or th["stavka"] == "on" or th["wait_since"] is not None \
+                or _excluded(tr, th["chat_id"], th["topic_id"], skip):
+            continue
+        anchor = max(th["born"] or 0, th["stavka_end"] or 0, th["last_seen"] or 0, th["last_staff_ts"] or 0,
+                     th["last_push_ts"] or 0)
+        if th["newlead_noted"] == anchor:
+            continue
+        silent = work_seconds(anchor, now, tr.tz, ws, we)
+        if silent < minutes * 60:
+            continue
+        out.setdefault(fid, []).append({"chat_id": th["chat_id"], "topic_id": th["topic_id"], "anchor": anchor,
+                                        "silent": silent,
+                                        "link": lead_link(th["chat_id"], th["topic_id"], th["seen_msg_id"])})
+    return out
+
+
+async def newlead_alerts(ctx, now: int) -> int:
+    """🆕 «Проёб»ga: HAR RD alohida, o'sha kuni ishdagi xodimlar belgilanadi. Faqat ish vaqtida. -> nechta xabar."""
+    db, tr = ctx.db, ctx.tracker
+    minutes = db.get_int("newlead_quiet_min", 120)
+    if minutes <= 0 or not _nudge_ok(ctx):
+        return 0
+    from .timeutil import local_date
+    day = local_date(now, tr.tz)
+    sent = 0
+    for fid, items in quiet_new_leads(db, tr, now, minutes).items():
+        f = P.folder(db, fid)
+        lines = [small(f"{esc(f['name'])} · 🆕 новый лид — {dur(minutes * 60, 'ru')} никто не пишет · {len(items)}")]
+        lines += [esc(x["link"]) for x in items[:GROUP_LIMIT]]
+        if len(items) > GROUP_LIMIT:
+            lines.append(small(f"… и ещё {len(items) - GROUP_LIMIT}"))
+        lines.append(tag(tr.fine_people(fid, day), "напишите им"))
+        try:
+            await ctx.notifier.send_group("\n".join(lines), trash="info")
+        except Exception:
+            continue
+        for x in items:
+            db.run("UPDATE threads SET newlead_noted=? WHERE chat_id=? AND topic_id=?",
+                   (x["anchor"], x["chat_id"], x["topic_id"]))
+        sent += 1
+    return sent
+
+
+def unpaid_cards(db, tr, now: int, minutes: int) -> dict[int, list[dict]]:
+    """💳 Lidga karta ketdi (/rek /dep /cash), keyin N daqiqa (ish vaqtida) hech kim yozmadi — na mijoz, na xodim,
+    na Push. Har kartaga bir marta; lidning faqat oxirgi kartasi. Chek rasmi tekshirilmaydi (egasi). -> {papka: [..]}"""
+    skip = skip_list(db)
+    ws, we = tr.work_window()
+    lo = max(since_ts(db), now - DAY)
+    out: dict[int, list] = {}
+    for c in db.all("SELECT c.chat_id, c.topic_id, c.msg_id, c.ts, c.person_id, th.last_seen, th.last_staff_ts, "
+                    "th.last_push_ts, th.wait_since, th.stavka FROM cards c "
+                    "JOIN threads th ON th.chat_id=c.chat_id AND th.topic_id=c.topic_id "
+                    "WHERE c.ts>=? AND c.reminded=0 AND c.ts=(SELECT MAX(c2.ts) FROM cards c2 "
+                    "WHERE c2.chat_id=c.chat_id AND c2.topic_id=c.topic_id)", (lo,)):
+        fid = _watched(db, tr, c["chat_id"])
+        if fid is None or c["stavka"] == "on" or c["wait_since"] is not None \
+                or _excluded(tr, c["chat_id"], c["topic_id"], skip):
+            continue
+        if max(c["last_seen"] or 0, c["last_staff_ts"] or 0, c["last_push_ts"] or 0) > c["ts"]:
+            continue                                   # kartadan keyin kimdir yozgan — eslatma kerak emas
+        silent = work_seconds(c["ts"], now, tr.tz, ws, we)
+        if silent < minutes * 60:
+            continue
+        out.setdefault(fid, []).append({"chat_id": c["chat_id"], "msg_id": c["msg_id"], "topic_id": c["topic_id"],
+                                        "person_id": c["person_id"], "ts": c["ts"], "silent": silent,
+                                        "link": lead_link(c["chat_id"], c["topic_id"], c["msg_id"])})
+    return out
+
+
+async def pay_alerts(ctx, now: int) -> int:
+    """💳 «Проёб»ga: kartani yuborgan xodim belgilanadi (aniqlanmasa — o'sha kuni papkada ishlayotganlar).
+    Mijozga hech narsa ketmaydi. -> nechta xabar."""
+    db, tr = ctx.db, ctx.tracker
+    minutes = db.get_int("pay_remind_min", 15)
+    if minutes <= 0 or not _nudge_ok(ctx):
+        return 0
+    from .timeutil import local_date
+    day = local_date(now, tr.tz)
+    sent = 0
+    for fid, items in unpaid_cards(db, tr, now, minutes).items():
+        f = P.folder(db, fid)
+        who = {}
+        for x in items:
+            p = P.person(db, x["person_id"]) if x["person_id"] else None
+            if p is not None and p["active"]:
+                who[p["id"]] = p
+        people = list(who.values()) or tr.fine_people(fid, day)
+        lines = [small(f"{esc(f['name'])} · 💳 карта отправлена — {dur(minutes * 60, 'ru')} никто не пишет · {len(items)}")]
+        lines += [esc(x["link"]) for x in items[:GROUP_LIMIT]]
+        if len(items) > GROUP_LIMIT:
+            lines.append(small(f"… и ещё {len(items) - GROUP_LIMIT}"))
+        lines.append(tag(people, "уточните у клиента оплату"))
+        try:
+            await ctx.notifier.send_group("\n".join(lines), trash="info")
+        except Exception:
+            continue
+        for x in items:
+            db.run("UPDATE cards SET reminded=1 WHERE chat_id=? AND msg_id=?", (x["chat_id"], x["msg_id"]))
         sent += 1
     return sent
 

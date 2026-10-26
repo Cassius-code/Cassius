@@ -345,6 +345,23 @@ def parse_adjustments(db: Database, text: str) -> list[dict]:
     return items
 
 
+def adj_command(db: Database, text: str) -> bool:
+    """Guruhdagi xabar — jarima/bonus BUYRUG'Imi («@baxa штраф 5», «Bayzed бонус 10»)? E'lon, qoida yoki uzun matn
+    («bugun 10 000 kassa qilganga 20 $ бонус» kabi) — buyruq emas: bot uni o'qimaydi va hech kimdan so'ramaydi.
+    Buyruq: qisqa (4 qatorgacha, har qatorda 6 tagacha so'z) va unda xodim ko'rsatilgan (@username yoki ism)."""
+    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    if not lines or len(lines) > 4 or len(text) > 300:
+        return False
+    words = [len(re.findall(r"[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ']+", ln)) for ln in lines]
+    if any(w > 6 for w in words):
+        return False
+    if len(lines) == 1 and words[0] <= 2:
+        return True                                     # «бонус 10» — juda qisqa: kimga ekanini egasidan so'raydi
+    if re.search(r"@[A-Za-z0-9_]{3,32}", text):
+        return True
+    return any(it["person_id"] for it in parse_adjustments(db, text))
+
+
 # ───────────────────────── tarix (o'zgartirishlar raqami ham, tarixi ham saqlanadi)
 def log(db: Database, kind: str, person_id=None, day=None, ref_id=None, old="", new="") -> None:
     db.run("INSERT INTO audit(ts, actor, kind, person_id, day, ref_id, old, new) VALUES(?,?,?,?,?,?,?,?)",

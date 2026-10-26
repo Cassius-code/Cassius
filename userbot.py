@@ -27,6 +27,7 @@ WATCH_EVERY = 2                # ish vaqtida: guruhlarda yangi xabar bormi — h
 BOT_UI_RE = re.compile(r"^\W*((статус|установлен|status)\s*:|реквизиты\s+отправлены)", re.IGNORECASE)
 CMD_WINDOW = 300               # xodim /buyruq yozgandan keyin botning tugmali javobi — menyu (5 daqiqagacha)
 CMD_ECHO = 10                  # xodim /buyruq yozgandan keyin shu soniya ichida bot yozgani — buyruq javobi, mijoz emas
+DEEP_SCAN_V = "2"              # Push bazasini yig'ish qoidasi (o'zgarsa — baza bir marta qaytadan yig'iladi)
 
 
 def thread_of(m, is_forum: bool) -> int:
@@ -70,10 +71,13 @@ class Userbot(TgAccount, PushSender):
         self.tick = 1                              # kuzatuv uchun tez-tez uyg'onadi
         self._watch_pause = 0.0                    # Telegram «sekinlang» (FloodWait) desa — shu vaqtgacha kutish
         self._tops: dict[int, int] = {}            # chat -> oxirgi ko'rilgan xabar id (kuzatuv)
+        self._live_ids: dict[int, set] = {}        # chat -> jonli kelgan xabar raqamlari (tushib qolganini topish uchun)
+        self._hist: dict[int, int] = {}            # chat -> shu raqamgacha hamma xabar ishlangan (jonli yoki tarixdan)
         self._cmd_ts: dict[tuple, float] = {}      # (chat, topik) -> xodim oxirgi /buyruq yozgan vaqt
         self._last_watch = 0.0
         self._sync_task = None                     # papka/topik sinxroni fonda (kuzatuvni ushlab turmaydi)
         self.watch_found = 0                       # kuzatuv topgan (jonli kelmay qolgan) xabarlar
+        self.flood_threshold = 10                  # Telegram 10 s dan ko'p kuttirsa — so'rov kutmasdan xato qaytaradi
         self.reload_ids()
 
     def title(self) -> str:
@@ -156,7 +160,10 @@ class Userbot(TgAccount, PushSender):
                 log.info("Kuzatuv: %s", type(exc).__name__)
 
     async def poll_chats(self, client) -> int:
-        """Bitta so'rov bilan hamma guruhning oxirgi xabari; o'zgargan guruhda — faol topiklar tekshiriladi."""
+        """Bitta so'rov bilan hamma guruhning oxirgi xabar raqami. Guruhda xabar raqamlari ketma-ket: oxirgi
+        tekshirilgandan beri jonli KELMAGAN raqam bo'lsa — faqat o'sha oraliq Telegram'dan olinib, tartib bilan
+        ishlanadi (boshqa topikka jonli xabar kelgan bo'lsa ham, tushib qolgani topiladi)."""
+        from telethon import utils
         from telethon.tl.functions.messages import GetPeerDialogsRequest
         from telethon.tl.types import InputDialogPeer
         chats = list(self.tracker.chat_folder)
@@ -173,42 +180,56 @@ class Userbot(TgAccount, PushSender):
             tops = {}
             for d in getattr(res, "dialogs", []):
                 try:
-                    from telethon import utils
                     tops[int(utils.get_peer_id(d.peer))] = int(d.top_message or 0)
                 except Exception:
                     continue
             for cid, p in part:
                 top = tops.get(cid, 0)
-                old = self._tops.get(cid)
-                self._tops[cid] = max(top, old or 0)
-                if old is None or top <= old:
-                    continue                                   # birinchi marta yoki yangi xabar yo'q
-                seen = self.db.scalar("SELECT COALESCE(MAX(seen_msg_id), 0) FROM threads WHERE chat_id=?", (cid,))
-                if seen >= top:
-                    continue                                   # jonli kelgan va ishlangan
-                found += await self._poll_chat(client, cid, p, top)
+                if not top:
+                    continue
+                self._tops[cid] = max(top, self._tops.get(cid, 0))
+                done = self._hist.get(cid)
+                if done is None:
+                    self._hist[cid] = top                      # birinchi marta: shu joydan (eskisi — catch_up)
+                    continue
+                if top <= done:
+                    continue
+                live = self._live_ids.get(cid, set())
+                if any(x not in live for x in range(done + 1, top + 1)):
+                    found += await self._poll_gap(client, cid, p, done, top)
+                self._hist[cid] = top
+                self._live_ids[cid] = {x for x in live if x > top}
         self.watch_found += found
         if found:
             log.info("Kuzatuv: jonli kelmagan %s ta xabar topildi va ishlandi", found)
         return found
 
-    async def _poll_chat(self, client, chat_id: int, peer, top: int) -> int:
-        """Guruhda yangi xabar bor: forumda — oxirgi faol topiklar, oddiy chatda — o'zi."""
-        before = self.db.scalar("SELECT COALESCE(SUM(msg_count), 0) FROM threads WHERE chat_id=?", (chat_id,))
-        if chat_id not in self.tracker.forums:
-            await self._catch_thread(chat_id, 0, top, None)
-        else:
-            from telethon.tl.functions.channels import GetForumTopicsRequest
-            res = await client(GetForumTopicsRequest(channel=peer, offset_date=None, offset_id=0, offset_topic=0,
-                                                     limit=20))
-            topics = [t for t in res.topics if hasattr(t, "title") and int(t.id) != 1]
-            if topics:
-                await self._store_topics(chat_id, topics)
-            for t in topics:
-                await self._catch_thread(chat_id, int(t.id), int(getattr(t, "top_message", 0) or 0),
-                                         _unix(getattr(t, "date", None)))
-        after = self.db.scalar("SELECT COALESCE(SUM(msg_count), 0) FROM threads WHERE chat_id=?", (chat_id,))
-        return max(0, after - before)
+    async def _poll_gap(self, client, chat_id: int, peer, lo: int, hi: int) -> int:
+        """lo dan keyin hi gacha (shu jumladan) jonli kelmagan xabarlar: olib, eski → yangi tartibda ishlash."""
+        live = self._live_ids.get(chat_id, set())
+        msgs = []
+        async for m in client.iter_messages(peer, min_id=lo, max_id=hi + 1, reverse=True, limit=400):
+            if int(m.id) not in live:
+                msgs.append(m)
+        forum = chat_id in self.tracker.forums
+        n = 0
+        for m in msgs:
+            topic = thread_of(m, forum)
+            if forum and topic == 1:
+                continue
+            async with self._lock:
+                if int(m.id) in self._live_ids.get(chat_id, ()):
+                    continue                                     # shu orada jonli kelib ishlandi
+                th = self.tracker.thread(chat_id, topic)
+                if th is None:
+                    await self._first_sight(chat_id, topic, int(m.id), forum)
+                    th = self.tracker.thread(chat_id, topic)
+                if int(m.id) <= th["seen_msg_id"]:
+                    await self._process(m, chat_id, topic, "watch", late=True)
+                else:
+                    await self._process(m, chat_id, topic, "watch")
+                n += 1
+        return n
 
     async def sync_all(self) -> None:
         """Papkalar → xodimlarning ID si → topiklar va o'tkazib yuborilgan xabarlar."""
@@ -221,7 +242,8 @@ class Userbot(TgAccount, PushSender):
             except Exception:
                 log.exception("Sinxron qadami %s xato", step.__name__)
         base = self.db.get("push_base_from") or "2026-08-28"
-        if self.client is not None and not self.deep_running and self.db.get("deep_scan_base") != base:
+        if self.client is not None and not self.deep_running and (self.db.get("deep_scan_base") != base or
+                                                                    self.db.get("deep_scan_v") != DEEP_SCAN_V):
             self._deep_task = asyncio.create_task(self._deep_bg())    # uzoq ish — sinxronni ushlab turmaydi
 
     async def _deep_bg(self) -> None:
@@ -239,6 +261,7 @@ class Userbot(TgAccount, PushSender):
             if chat_id is None or not self.tracker.is_monitored(chat_id):
                 return
             m = event.message
+            self._live_ids.setdefault(chat_id, set()).add(int(m.id))
             forum = chat_id in self.tracker.forums
             if not forum and getattr(getattr(m, "chat", None), "forum", False):
                 self.db.run("UPDATE chats SET is_forum=1 WHERE chat_id=?", (chat_id,))
@@ -290,7 +313,7 @@ class Userbot(TgAccount, PushSender):
         return None
 
     # ------------------------------------------------------------ xabarni turga ajratish
-    async def classify(self, m, chat_id: int) -> str:
+    async def classify(self, m, chat_id: int, topic: int = 0) -> str:
         if getattr(m, "action", None) is not None:
             return "service"
         if self.db.one("SELECT 1 FROM ignored_msgs WHERE chat_id=? AND msg_id=?", (chat_id, int(m.id))):
@@ -298,28 +321,22 @@ class Userbot(TgAccount, PushSender):
         sid = m.sender_id
         if sid is not None and sid in self._push_ids:
             # papka akkaunti: xodim undan mijozga JAVOB yozadi (jurnal: RD 7 da deyarli hamma javob shundan).
-            # Faqat Push yuborgan xabar (ignored_msgs da) «biz»; qolgani — xodim javobi.
-            return "ours" if await self._is_push_message(chat_id, int(m.id)) else "staff"
+            # Faqat Push yuborgan xabar «biz»; qolgani — xodim javobi.
+            return "ours" if self._is_push_message(chat_id, topic, int(m.id)) else "staff"
         if m.out:                                          # asosiy akkauntdan yozilgan — javob,
             if self.db.one("SELECT 1 FROM folders WHERE push_account_id=-1"):   # agar Push o'zi yubormagan bo'lsa
-                return "ours" if await self._is_push_message(chat_id, int(m.id)) else "staff"
+                return "ours" if self._is_push_message(chat_id, topic, int(m.id)) else "staff"
             return "staff"
         is_bot = await self._is_bot(m)
         return "client" if is_bot else "staff"
 
-    async def _is_push_message(self, chat_id: int, msg_id: int) -> bool:
-        """Push yuborgan xabarmi? Push ketayotgan bo'lsa, yozuv paydo bo'lishini 4 soniyagacha kutamiz
-        (xabar hodisasi yuboruvchi qayd etishidan oldin kelishi mumkin)."""
-        q = "SELECT 1 FROM ignored_msgs WHERE chat_id=? AND msg_id=?"
-        if self.db.one(q, (chat_id, msg_id)):
+    def _is_push_message(self, chat_id: int, topic: int, msg_id: int) -> bool:
+        """Push yuborgan xabarmi? Yuborilgan bo'lsa — ignored_msgs da; hozir yuborilayotgan bo'lsa (Telegram xabarni
+        yuboruvchi qayd etishidan oldin yetkazishi mumkin) — Push yuborayotgan topiklar ro'yxatida. Kutilmaydi."""
+        if self.db.one("SELECT 1 FROM ignored_msgs WHERE chat_id=? AND msg_id=?", (chat_id, msg_id)):
             return True
-        if not self.db.one("SELECT 1 FROM broadcasts WHERE status='running'"):
-            return False
-        for _ in range(8):
-            await asyncio.sleep(0.5)
-            if self.db.one(q, (chat_id, msg_id)):
-                return True
-        return False
+        from .push import sending_now
+        return sending_now(chat_id, topic)
 
     async def _is_bot(self, m) -> bool:
         sid = m.sender_id
@@ -360,11 +377,11 @@ class Userbot(TgAccount, PushSender):
         rm = getattr(m, "reply_markup", None)
         return rm is not None and type(rm).__name__ == "ReplyInlineMarkup" and 0 <= gap <= CMD_WINDOW
 
-    async def _process(self, m, chat_id: int, topic: int, source: str) -> str:
+    async def _process(self, m, chat_id: int, topic: int, source: str, late: bool = False) -> str:
         action = getattr(m, "action", None)
         if source != "live" and action is not None and "TopicEdit" in type(action).__name__ and topic > 1:
             await self.refresh_topic(chat_id, topic)       # status (🔥/⚡/💊) o'zgardi — jonli kelmagan bo'lsa ham
-        who = await self.classify(m, chat_id)
+        who = await self.classify(m, chat_id, topic)
         cmd = ""
         if who == "client" and self._bot_ui(m, chat_id, topic):
             who = "service"
@@ -374,6 +391,8 @@ class Userbot(TgAccount, PushSender):
             who = "service"
         msg = Msg(chat_id, topic, int(m.id), int(m.date.timestamp()), m.sender_id, who,
                   video=bool(getattr(m, "video_note", None)), source=source, cmd=cmd)
+        if late:
+            return await self.tracker.handle_late(msg)
         return await self.tracker.handle(msg)
 
     async def _fetch_and_process(self, chat_id: int, topic: int, min_id: int, upto: int | None, limit: int,
@@ -408,57 +427,45 @@ class Userbot(TgAccount, PushSender):
 
     # ------------------------------------------------------------ Push bazasi: to'liq tekshirish
     async def deep_scan(self, force: bool = False) -> int | None:
-        """Push bazasi 100%: baza sanasidan keyingi HAR bir mijoz (vositachi bot) xabari. Oddiy sinxron eski
-        topiklarning faqat oxirgi xabarlarini ko'radi; bu esa har chatdagi baza sanasidan keyingi hamma xabarni bir
-        marta o'qiydi (matni saqlanmaydi — faqat kim va qachon). Baza sanasi o'zgarmaguncha qayta ishlamaydi.
+        """Push bazasi 100%: baza sanasidan keyin lidning O'ZI yozgan xabarlari (vositachi bot orqali). CRM'ning o'z
+        xabarlari sanalmaydi: menyu va status («Статус: …», «Установлен: …», «Реквизиты отправлены»), xodim
+        buyrug'iga (/rek, /status …) javob. Har chat bo'yicha baza QAYTADAN yoziladi (eski noto'g'ri sanalganlar
+        chiqadi). Matn saqlanmaydi — faqat kim va qachon. Baza sanasi yoki qoida o'zgarmaguncha qayta ishlamaydi.
         -> topilgan lidlar soni yoki None (kerak emas / ketyapti)."""
         from datetime import datetime, time as dtime
         from .timeutil import parse_date
         if self.client is None or self.deep_running:
             return None
         base_iso = self.db.get("push_base_from") or "2026-08-28"
-        if not force and self.db.get("deep_scan_base") == base_iso:
+        if not force and self.db.get("deep_scan_base") == base_iso and self.db.get("deep_scan_v") == DEEP_SCAN_V:
             return None
         try:
             base_ts = int(datetime.combine(parse_date(base_iso), dtime(0, 0), tzinfo=self.tz).timestamp())
         except ValueError:
             return None
         self.deep_running = True
+        started = int(time.time())
         leads: set = set()
         failed = 0
         try:
             for chat_id in list(self.tracker.chat_folder):
-                forum = chat_id in self.tracker.forums
                 try:
-                    entity = await self.client.get_input_entity(chat_id)
-                    async for m in self.client.iter_messages(entity, limit=None):
-                        ts = _unix(m.date) or 0
-                        if ts < base_ts:
-                            break                                       # yangi → eski: bazadan oldingisi kerak emas
-                        if getattr(m, "action", None) is not None or m.out or m.sender_id in self._push_ids:
-                            continue
-                        if not await self._is_bot(m):
-                            continue                                    # mijoz = vositachi bot xabari
-                        topic = thread_of(m, forum)
-                        if forum and topic == 1:
-                            continue
-                        self.db.run("INSERT INTO threads(chat_id, topic_id, first_seen, last_seen) VALUES(?,?,?,?) "
-                                    "ON CONFLICT(chat_id, topic_id) DO UPDATE SET "
-                                    "first_seen=MIN(COALESCE(threads.first_seen, excluded.first_seen), "
-                                    "excluded.first_seen), last_seen=MAX(COALESCE(threads.last_seen, 0), "
-                                    "excluded.last_seen)", (chat_id, topic, ts, ts))
-                        leads.add((chat_id, topic))
+                    found = await self._scan_chat(chat_id, base_ts)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     failed += 1
                     log.warning("Bazani tekshirish: %s o'qilmadi (%s)", chat_id, type(exc).__name__)
+                    continue
+                self._rewrite_base(chat_id, found, base_ts, started)
+                leads |= {(chat_id, t) for t in found}
             from .push import base_count
             n = base_count(self.db, base_ts)                            # bazadagi lidlar: shu sanadan keyin yozganlar
             self.db.set("deep_scan_n", str(n))
             self.db.set("deep_scan_ts", str(int(time.time())))
             if not failed:
                 self.db.set("deep_scan_base", base_iso)                 # tugadi — keyingi sinxronda qaytarilmaydi
+                self.db.set("deep_scan_v", DEEP_SCAN_V)
             from .context import tr
             d = f"{base_iso[8:10]}.{base_iso[5:7]}"
             await self.notifier.notify_owner(lambda: (tr(
@@ -470,6 +477,73 @@ class Userbot(TgAccount, PushSender):
             return n
         finally:
             self.deep_running = False
+
+    async def _scan_chat(self, chat_id: int, base_ts: int) -> dict[int, tuple[int, int]]:
+        """Chatdagi baza sanasidan keyingi hamma xabar (yangi → eski). -> {topik: (lid birinchi, oxirgi o'zi yozgani)}.
+        Telegram «kuting» desa — kutib, to'xtagan joyidan davom etadi."""
+        from telethon import errors
+        forum = chat_id in self.tracker.forums
+        entity = await self.client.get_input_entity(chat_id)
+        events: dict[int, list] = {}                                    # topik -> [(ts, tur)]
+        offset, finished = 0, False
+        while not finished:
+            try:
+                finished = True
+                async for m in self.client.iter_messages(entity, limit=None, offset_id=offset):
+                    offset = int(m.id)
+                    ts = _unix(m.date) or 0
+                    if ts < base_ts:
+                        break                                           # yangi → eski: bazadan oldingisi kerak emas
+                    if getattr(m, "action", None) is not None:
+                        continue
+                    topic = thread_of(m, forum)
+                    if forum and topic == 1:
+                        continue
+                    if m.out or m.sender_id in self._push_ids:
+                        kind = "us"                                     # bizning akkaunt (Push yoki xodim)
+                    elif await self._is_bot(m):
+                        text = (getattr(m, "message", "") or "")[:40]
+                        rm = getattr(m, "reply_markup", None)
+                        kind = "ui" if BOT_UI_RE.match(text) else ("menu" if rm is not None and
+                                                                   type(rm).__name__ == "ReplyInlineMarkup" else "bot")
+                    else:
+                        kind = "cmd" if (getattr(m, "message", "") or "").startswith("/") else "staff"
+                    events.setdefault(topic, []).append((ts, kind))
+            except errors.FloodWaitError as exc:
+                finished = False
+                log.info("Bazani tekshirish: Telegram %s s kutishni so'radi", exc.seconds)
+                await asyncio.sleep(int(exc.seconds) + 1)
+        out: dict[int, tuple[int, int]] = {}
+        for topic, evs in events.items():
+            evs.sort()
+            last_cmd = None
+            for ts, kind in evs:
+                if kind == "cmd":
+                    last_cmd = ts
+                    continue
+                if kind not in ("bot", "menu"):
+                    continue
+                if last_cmd is not None and 0 <= ts - last_cmd <= (CMD_WINDOW if kind == "menu" else CMD_ECHO):
+                    continue                                            # buyruqqa CRM javobi/menyusi — lid yozmagan
+                fs, ls = out.get(topic, (ts, ts))
+                out[topic] = (min(fs, ts), max(ls, ts))
+        return out
+
+    def _rewrite_base(self, chat_id: int, found: dict, base_ts: int, started: int) -> None:
+        """Shu chat bo'yicha baza qaytadan: lid o'zi yozgan oxirgi vaqt. Tekshiruv paytida jonli kelganlari saqlanadi."""
+        for topic, (fs, ls) in found.items():
+            self.db.run("INSERT INTO threads(chat_id, topic_id, first_seen, last_seen) VALUES(?,?,?,?) "
+                        "ON CONFLICT(chat_id, topic_id) DO UPDATE SET "
+                        "first_seen=CASE WHEN threads.first_seen IS NULL OR threads.first_seen>=? "
+                        "THEN excluded.first_seen ELSE threads.first_seen END, "
+                        "last_seen=CASE WHEN threads.last_seen>=? THEN threads.last_seen ELSE excluded.last_seen END",
+                        (chat_id, topic, fs, ls, base_ts, started))
+        keep = set(found)
+        for th in self.db.all("SELECT topic_id FROM threads WHERE chat_id=? AND last_seen>=? AND last_seen<?",
+                              (chat_id, base_ts, started)):
+            if th["topic_id"] not in keep:                              # baza sanasidan keyin o'zi yozmagan
+                self.db.run("UPDATE threads SET last_seen=NULL WHERE chat_id=? AND topic_id=?",
+                            (chat_id, th["topic_id"]))
 
     # ------------------------------------------------------------ o'tkazib yuborilganlarni olish
     async def catch_up(self) -> None:
@@ -538,16 +612,20 @@ class Userbot(TgAccount, PushSender):
 
     async def _store_topics(self, chat_id: int, topics: list) -> None:
         icons = await self._icon_chars({int(t.icon_emoji_id) for t in topics if getattr(t, "icon_emoji_id", None)})
-        changed = []
+        changed, learned = [], []
         for t in topics:
             icon = icons.get(int(t.icon_emoji_id), "") if getattr(t, "icon_emoji_id", None) else ""
-            old = self.db.one("SELECT icon FROM topics WHERE chat_id=? AND topic_id=?", (chat_id, int(t.id)))
+            old = self.db.one("SELECT icon, created_ts FROM topics WHERE chat_id=? AND topic_id=?", (chat_id, int(t.id)))
             if old is not None and old["icon"] != icon:
                 changed.append(int(t.id))
+            if (old is None or old["created_ts"] is None) and getattr(t, "date", None) is not None:
+                learned.append(int(t.id))
             self.db.run("INSERT INTO topics(chat_id, topic_id, title, icon, created_ts) VALUES(?,?,?,?,?) "
                         "ON CONFLICT(chat_id, topic_id) DO UPDATE SET title=excluded.title, icon=excluded.icon, "
                         "created_ts=COALESCE(topics.created_ts, excluded.created_ts)",
                         (chat_id, int(t.id), t.title or "", icon, _unix(getattr(t, "date", None))))
+        for tid in learned:                                # topik qachon ochilgani endi ma'lum (yangi lidmi?)
+            self.tracker.topic_known(chat_id, tid)
         for tid in changed:                                # status ⚡/💊 bo'ldi — kutish va zaderjka bekor
             await self.tracker.status_changed(chat_id, tid)
 

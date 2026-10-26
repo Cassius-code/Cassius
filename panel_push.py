@@ -76,6 +76,7 @@ def slot_info(ctx, r: Req, slot: str) -> tuple[str, str]:
 
 @screen("u", "full")
 async def push_menu(ctx, r: Req):
+    ui.view(r, "u")                                        # jonli yangilanadi (raqamlar shu yerda)
     db, pu = ctx.db, ctx.pusher
     text = db.get("push_text").strip()
     media = pu.media()
@@ -211,22 +212,58 @@ def report_lines(ctx, r: Req, res: dict) -> list[str]:
              "interrupted": r.L("⚠️ Qayta ishga tushish sababli uzildi", "⚠️ Прервано перезапуском")}
     lines = [f"<b>{names.get(res['status'], res['status'])}</b>"]
     if "sent" in res:
-        lines.append(r.L(f"Yuborildi: <b>{res['sent']}</b> / {res['total']}", f"Отправлено: <b>{res['sent']}</b> / "
-                                                                             f"{res['total']}")
-                     + (f" · ✖️ {res['failed']}" if res["failed"] else ""))
+        sent, total, bad = res["sent"], res["total"], res["failed"]
+        lines.append(r.L(f"Yuborildi: <b>{sent}</b> ta", f"Отправлено: <b>{sent}</b>")
+                     + (r.L(f" (rejada {total})", f" (план {total})") if total != sent else ""))
+        if bad:
+            lines.append(r.L(f"Yuborilmadi: <b>{bad}</b> ta", f"Не отправлено: <b>{bad}</b>"))
         folders = {f["id"]: f for f in P.folders(ctx.db)}
-        for fid, (ok, bad) in res.get("per_folder", {}).items():
+        for fid, (ok, no) in res.get("per_folder", {}).items():
             if fid in folders:
-                lines.append(f"📁 {h(folders[fid]['name'])}: {ok}" + (f" · ✖️ {bad}" if bad else ""))
+                lines.append(f"📁 {h(folders[fid]['name'])}: {ok} {r.L('ta', '')}".rstrip()
+                             + (r.L(f" · yuborilmadi {no}", f" · не отправлено {no}") if no else ""))
         if res.get("reasons"):
             top = sorted(res["reasons"].items(), key=lambda kv: -kv[1])[:3]
-            lines.append(r.L("Sabablar: ", "Причины: ") + "; ".join(f"{h(k)} ×{v}" for k, v in top))
+            lines.append(r.L("Nega yuborilmadi: ", "Почему не отправлено: ") +
+                         "; ".join(f"{h(reason_text(r, k))} — {v}" for k, v in top))
     return lines
+
+
+REASONS = [("TopicClosed", "topik yopilgan", "топик закрыт"), ("TopicDeleted", "topik o'chirilgan", "топик удалён"),
+           ("ChatWriteForbidden", "yozishga ruxsat yo'q", "нет права писать"),
+           ("ChatSendMediaForbidden", "guruhda media taqiqlangan", "в группе запрещены медиа"),
+           ("ChatSendVoicesForbidden", "guruhda ovozli xabar taqiqlangan", "в группе запрещены голосовые"),
+           ("ChatSendGifsForbidden", "guruhda gif taqiqlangan", "в группе запрещены gif"),
+           ("UserBannedInChannel", "akkaunt guruhda bloklangan", "аккаунт заблокирован в группе"),
+           ("ChatAdminRequired", "admin huquqi kerak", "нужны права админа"),
+           ("PeerIdInvalid", "chat topilmadi", "чат не найден"), ("ValueError", "chat topilmadi", "чат не найден"),
+           ("akkaunt tarmoqda emas", "akkaunt ulanmagan", "аккаунт не подключён"),
+           ("akkaunt ulanmagan", "akkaunt ulanmagan", "аккаунт не подключён"),
+           ("spam-cheklov", "akkauntda spam-cheklov", "у аккаунта спам-ограничение"),
+           ("PeerFlood", "Telegram akkauntni chekladi (spam)", "Telegram ограничил аккаунт (спам)"),
+           ("media fayli topilmadi", "media fayli topilmadi — qayta yuklang", "файл медиа не найден — загрузите заново")]
+
+
+def reason_text(r: Req, reason: str) -> str:
+    """Yuborilmaslik sababi — oddiy so'z bilan (soniya emas — daqiqa)."""
+    m = re.search(r"Telegram (\d+) daq kutishni so'radi \((\d\d:\d\d) gacha\)", reason)
+    if m:
+        return r.L(f"Telegram {m.group(1)} daqiqa kutishni so'radi ({m.group(2)} gacha)",
+                   f"Telegram попросил подождать {m.group(1)} мин (до {m.group(2)})")
+    m = re.search(r"FloodWait (\d+)", reason)
+    if m:
+        mins = (int(m.group(1)) + 59) // 60
+        return r.L(f"Telegram {mins} daqiqa kutishni so'radi", f"Telegram попросил подождать {mins} мин")
+    for key, uz, ru in REASONS:
+        if key in reason:
+            return r.L(uz, ru)
+    return reason.replace("to'xtatildi: ", "")
 
 
 @screen("ux", "full")
 async def stop(ctx, r: Req):
-    ctx.pusher.stop()                                      # natija shu ekranda o'zi chiqadi (jonli yangilanish)
+    ctx.pusher.stop()
+    await ctx.pusher.wait_idle(8)                          # to'xtaguncha kutamiz — ekranda darhol «▶️ Davom ettirish»
     ui.view(r, "u")
     return await push_menu(ctx, r)
 
@@ -454,6 +491,9 @@ async def settings(ctx, r: Req):
         cur = db.get("push_speed") if db.get("push_speed") in order else "normal"
         db.set("push_speed", order[(order.index(cur) + 1) % 3])
         ui.view(r, "uo")
+    if r.args and r.args[0] == "grp":
+        db.set("push_group", "0" if db.flag("push_group") else "1")
+        ui.view(r, "uo")
     speeds = SPEED_RU if r.lang == "ru" else SPEED_UZ
     mins = r.L("daq", "мин")
     m, e = slot_bounds(db)
@@ -468,7 +508,9 @@ async def settings(ctx, r: Req):
              f"🆕 {r.L('Yangi lidga yo‘q', 'Новым лидам нет')} — {db.get('push_newlead_minutes')} {mins}",
              f"🔁 {r.L('Qayta yubormaslik', 'Не повторять')} — {db.get('push_repeat_minutes')} {mins}",
              f"🔥 {r.L('Faqat shu belgili', 'Только с иконкой')} — {h(db.get('push_emojis') or r.L('hammasi', 'все'))}",
-             f"🚫 {r.L('Chiqarilgan', 'Исключены')} — {h(db.get('skip_emojis'))}"]
+             f"🚫 {r.L('Chiqarilgan', 'Исключены')} — {h(db.get('skip_emojis'))}",
+             f"👥 {r.L('«Проёб»da Push paneli', 'Панель Пуша в «Проёб»')} — "
+             f"{r.L('🟢 yoqiq', '🟢 вкл') if db.flag('push_group') else r.L('⚪ o‘chiq', '⚪ выкл')}"]
     btn = [(f"🔢 {r.L('Soni', 'Количество')}", "uoi:push_limit"), (f"⚡ {r.L('Tezlik', 'Скорость')}", "uo:speed"),
            (f"🕒 {r.L('Kun bo‘laklari', 'Части дня')}", "uoi:slots"),
            (f"⏳ {r.L('Jim turgan', 'Молчит')}", "uoi:push_idle_minutes"),
@@ -476,7 +518,8 @@ async def settings(ctx, r: Req):
            (f"📅 {r.L('Baza', 'База')}", "uoi:push_base_from"), (f"🆕 {r.L('Yangi lid', 'Новый лид')}", "uoi:push_newlead_minutes"),
            (f"🔁 {r.L('Takror', 'Повтор')}", "uoi:push_repeat_minutes"), (f"🔥 {r.L('Belgilar', 'Иконки')}", "uoi:push_emojis"),
            (f"🚫 {r.L('Chiqarilgan', 'Исключены')}", "uoi:skip_emojis"),
-           (f"🔍 {r.L('Bazani tekshirish', 'Проверить базу')}", "uob")]
+           (f"🔍 {r.L('Bazani tekshirish', 'Проверить базу')}", "uob"),
+           (f"👥 {r.L('Guruhda panel', 'Панель в группе')}", "uo:grp")]
     return ui.join(title("⚙️", r.L("PUSH SOZLAMALARI", "НАСТРОЙКИ ПУША")), "", card(lines)), kb(*grid(btn), nav(r, "u"))
 
 
@@ -645,36 +688,43 @@ async def history(ctx, r: Req):
     stats = I.push_stats(db, now, limit=12)
     on = db.flag("an_push")
     win = db.get_int("push_reply_min", 90)
-    lines, best = [], None
+    blocks, best = [], None
+    still = r.L(" — hali sanalmoqda", " — ещё считается")
+    state = {"stopped": r.L(" (to'xtatilgan)", " (остановлен)"), "aborted": r.L(" (uzilgan)", " (прерван)"),
+             "interrupted": r.L(" (uzilgan)", " (прерван)"), "running": r.L(" (ketyapti)", " (идёт)")}
     for x in stats:
         b = x["b"]
-        head = (f"{STATUS_ICON.get(b['status'], b['status'])} {fmt(b['started_ts'], ctx.tz)} · "
-                f"{'⏰' if b['trigger'] == 'auto' else '👆'} {kind_label(r, b['kind'])}".rstrip())
+        head = f"<b>📣 {fmt(b['started_ts'], ctx.tz)}</b> {kind_label(r, b['kind'])}{state.get(b['status'], '')}".rstrip()
         if not on or not x["n"]:
-            lines.append(head + f" · <b>{b['sent']}</b>/{b['total']}" + (f" · ✖️{b['failed']}" if b["failed"] else ""))
+            blocks.append(head + "\n" + r.L(f"Yuborildi: {b['sent']} ta", f"Отправлено: {b['sent']}"))
             continue
-        rep = f"✍️ {x['rep']} ({I.pct(x['rep'], x['n'])})" + (" ⏳" if x["rep_open"] else "")
-        crd = f"💳 {x['card']} ({I.pct(x['card'], x['n'])})" + (" ⏳" if x["card_open"] else "")
-        lines.append(f"{head}\n   {x['n']} {r.L('ta', 'лид.')} → {rep} · {crd}")
+        blocks.append("\n".join([
+            head,
+            r.L(f"Yuborildi: <b>{x['n']}</b> ta lidga", f"Отправлено: <b>{x['n']}</b> лидам"),
+            r.L(f"Javob yozdi: <b>{x['rep']}</b> ta ({I.pct(x['rep'], x['n'])})",
+                f"Ответили: <b>{x['rep']}</b> ({I.pct(x['rep'], x['n'])})") + (still if x["rep_open"] else ""),
+            r.L(f"Karta so'radi: <b>{x['card']}</b> ta ({I.pct(x['card'], x['n'])})",
+                f"Попросили карту: <b>{x['card']}</b> ({I.pct(x['card'], x['n'])})") + (still if x["card_open"] else "")]))
         if not x["rep_open"] and x["n"] >= 20 and (best is None or x["rep"] / x["n"] > best[1]):
             best = (b, x["rep"] / x["n"], x)
     parts = [title("🧾", r.L("PUSH NATIJASI", "РЕЗУЛЬТАТ ПУША")), "",
-             card(lines) if lines else r.L("<i>Hozircha bo'sh.</i>", "<i>Пока пусто.</i>")]
+             card(["\n\n".join(blocks)]) if blocks else r.L("<i>Hozircha bo'sh.</i>", "<i>Пока пусто.</i>")]
     if on and best:
         b, _v, x = best
-        parts.append(card([r.L(f"🏆 Eng yaxshisi: {fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])} — "
-                               f"✍️ {I.pct(x['rep'], x['n'])} · 💳 {I.pct(x['card'], x['n'])}",
-                               f"🏆 Лучший: {fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])} — "
-                               f"✍️ {I.pct(x['rep'], x['n'])} · 💳 {I.pct(x['card'], x['n'])}")]))
+        parts.append(card([r.L(f"🏆 Eng yaxshi Push: {fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])} — "
+                               f"{I.pct(x['rep'], x['n'])} javob yozdi, {I.pct(x['card'], x['n'])} karta so'radi",
+                               f"🏆 Лучший Пуш: {fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])} — "
+                               f"ответили {I.pct(x['rep'], x['n'])}, карту попросили {I.pct(x['card'], x['n'])}")]))
     if on:
-        parts.append(r.L(f"<i>✍️ — Push'dan keyin {win} daqiqa ichida yozgan lidlar · 💳 — 24 soat ichida karta "
-                         "yuborilgan lidlar. Bir lidga bir necha Push bo'lsa — natija oxirgisiga. ⏳ — hali hisoblanmoqda. "
-                         "Push'ning o'zi (matn, ovoz, video) o'qilmaydi.</i>",
-                         f"<i>✍️ — лиды, написавшие в течение {win} мин после Пуша · 💳 — кому за 24 ч отправили карту. "
-                         "Если Пушей было несколько — результат последнему. ⏳ — ещё считается. Сам Пуш (текст, голос, "
-                         "видео) не читается.</i>"))
-    btn = [(f"📁 {fmt(x['b']['started_ts'], ctx.tz)}", f"uhb:{x['b']['id']}") for x in stats if on and x["n"]][:6]
-    return ui.join(*parts), kb(*grid(btn, 2), nav(r, "u"))
+        parts.append(r.L(f"<i>Javob yozdi — Push'dan keyin {win} daqiqa ichida yozgan lidlar. Karta so'radi — 24 soat "
+                         "ichida xodim karta yuborgan lidlar (/rek /dep /cash). «hali sanalmoqda» — vaqt tugamagan, "
+                         "son ko'payishi mumkin.</i>",
+                         f"<i>Ответили — лиды, написавшие в течение {win} мин после Пуша. Попросили карту — кому за 24 ч "
+                         "сотрудник отправил карту (/rek /dep /cash). «ещё считается» — время не вышло, число может "
+                         "вырасти.</i>"))
+    btn = [(f"📁 {fmt(x['b']['started_ts'], ctx.tz)} — {r.L('RD bo‘yicha', 'по RD')}", f"uhb:{x['b']['id']}")
+           for x in stats if on and x["n"]][:6]
+    return ui.join(*parts), kb(*[[b] for b in btn], nav(r, "u"))
 
 
 @screen("uhb", "full")
@@ -684,8 +734,11 @@ async def history_folders(ctx, r: Req):
     bid = int(r.args[0])
     b = must(ctx.db.one("SELECT * FROM broadcasts WHERE id=?", (bid,)))
     names = {f["id"]: f["name"] for f in P.folders(ctx.db)}
-    lines = [f"📁 {h(names.get(fid, '?'))} — {n} {r.L('ta', 'лид.')} → ✍️ {rep} ({I.pct(rep, n)}) · "
-             f"💳 {crd} ({I.pct(crd, n)})" for fid, n, rep, crd in I.push_by_folder(ctx.db, bid)]
+    lines = ["\n".join([f"<b>📁 {h(names.get(fid, '?'))}</b>",
+                        r.L(f"Yuborildi: {n} · javob yozdi: {rep} ({I.pct(rep, n)}) · karta so'radi: {crd} ({I.pct(crd, n)})",
+                            f"Отправлено: {n} · ответили: {rep} ({I.pct(rep, n)}) · карту попросили: {crd} "
+                            f"({I.pct(crd, n)})")])
+             for fid, n, rep, crd in I.push_by_folder(ctx.db, bid)]
     sub = f"{fmt(b['started_ts'], ctx.tz)} {kind_label(r, b['kind'])}".strip()
     return ui.join(title("🧾", r.L("PUSH NATIJASI", "РЕЗУЛЬТАТ ПУША"), sub), "",
                    card(lines or [r.L("Ma'lumot yo'q", "Нет данных")])), kb(nav(r, "uh"))

@@ -333,7 +333,7 @@ def person_view(b: dict, r: dict, s: dt.date, e: dt.date, lang: str, owner: bool
 
 
 # ───────────────────────── xodimga xabar (ruscha): faqat o'z zp si
-def worker_message(r: dict, s: dt.date, e: dt.date) -> str:
+def worker_message(r: dict, s: dt.date, e: dt.date, extra: str = "") -> str:
     lines = [f"💰 Зарплата · {label(s, e)}", ""]
     if r["zp_on"] and r["kind"] in ("worker", "self"):
         lines.append(f"Зп: {money(r['zp'])} $")
@@ -356,6 +356,8 @@ def worker_message(r: dict, s: dt.date, e: dt.date) -> str:
             lines += ["", f"Итого: {money(r['total'])} $"]
     if len(lines) == 2:
         lines.append("Начислений нет.")
+    if extra:
+        lines += ["", extra]
     return "\n".join(lines)
 
 

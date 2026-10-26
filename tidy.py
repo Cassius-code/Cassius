@@ -30,7 +30,11 @@ async def sweep(ctx, now: int) -> int:
     db = ctx.db
     lim = {"delay": minutes(db, "delay"), "info": minutes(db, "info")}
     n = 0
-    for row in db.all("SELECT gid, mid, kind, ts FROM group_msgs ORDER BY ts LIMIT 300"):
+    # faqat vaqti kelganlar (va juda eskilari) olinadi: «0 — o'chmaydi» turidagi xabarlar navbatni to'sib qo'ymasin
+    due_delay = now - lim["delay"] * 60 if lim["delay"] > 0 else -1
+    due_info = now - lim["info"] * 60 if lim["info"] > 0 else -1
+    for row in db.all("SELECT gid, mid, kind, ts FROM group_msgs WHERE ts<? OR (kind='delay' AND ts<=?) "
+                      "OR (kind<>'delay' AND ts<=?) ORDER BY ts LIMIT 300", (now - MAX_AGE, due_delay, due_info)):
         if now - row["ts"] > MAX_AGE:
             db.run("DELETE FROM group_msgs WHERE gid=? AND mid=?", (row["gid"], row["mid"]))
             continue
