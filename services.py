@@ -212,6 +212,8 @@ class Scheduler:
         db, ctx = self.ctx.db, self.ctx
         if now - db.get_int("backup_last") < 7 * 86400:
             return
+        if ctx.notifier.locked(ctx.cfg.main_owner):        # 🔒 panel qulflangan — nusxa qulf ochilganda keladi
+            return
         db.set("backup_last", str(now))
         data, name = await asyncio.to_thread(make_backup, ctx)
         ru = ctx.lang(ctx.cfg.main_owner) == "ru"

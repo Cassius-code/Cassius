@@ -651,13 +651,17 @@ async def admins(ctx, r: Req):
     if r.owner:
         from . import recovery
         rows.append([(r.L("➕ ID bo'yicha admin", "➕ Админ по ID"), "sdn")])
-        rows.append([(r.L("🔐 Tiklash kodi", "🔐 Код восстановления"), "sdr")])
+        rows.append([(r.L("🔐 Tiklash kodi", "🔐 Код восстановления"), "sdr"),
+                     (r.L("🔒 Qulf kodi", "🔒 Код блокировки"), "lkc")])
         ts = db.get("recovery_ts")
         lines.append("")
         lines.append(f"🔐 {r.L('Tiklash kodi', 'Код восстановления')} — " +
                      (r.L(f"o'rnatilgan ({time.strftime('%d.%m.%Y', time.localtime(int(ts)))})",
                           f"задан ({time.strftime('%d.%m.%Y', time.localtime(int(ts)))})")
                       if recovery.is_set(db) and ts else r.L("yo'q ⚠️", "нет ⚠️")))
+        from . import lock
+        lines.append(f"🔒 {r.L('Qulf kodi', 'Код блокировки')} — " +
+                     (r.L("o'rnatilgan", "задан") if lock.is_set(db) else r.L("yo'q", "нет")))
     rows.append(nav(r, "s"))
     return ui.join(title("👮", r.L("ADMINLAR", "АДМИНЫ")), "", card(lines), card(
         [r.L("👑 ega — hammasi (ulushingiz ham) · 🛠 to'liq — boshqaruv, ulushingizni ko'rmaydi · 👁 — faqat ko'radi · "
@@ -736,14 +740,14 @@ async def attendance(ctx, r: Req):
     if r.args and r.args[0] == "t":
         db.toggle("attendance_enabled")
         ui.view(r, "st")
-    lad = fines.ladder(db, "late")
+    tbl = fines.late_table(db)                             # 🕘 necha daqiqa kech — necha $
     late = db.get_int("late_after_min", 15)
     lines = [f"🙋 {r.L('Nazorat', 'Контроль')} — {onoff(r, db.flag('attendance_enabled'))}",
              f"🕘 {r.L('Ish boshlanishi', 'Начало работы')} — <b>{db.get('work_start')}</b>",
              f"⏰ {r.L('Eslatma', 'Напоминание')} — {r.L('boshlanib', 'через')} <b>{db.get('noshow_minutes')}</b> "
              f"{r.L('daqiqa o‘tsa', 'мин после начала')}",
              f"💸 {r.L('Kech qolish', 'Опоздание')} — {r.L(f'{late}+ daq', f'{late}+ мин')} · "
-             f"<b>{fines.ladder_text(lad, r.lang)}</b>"
+             f"<b>{fines.late_table_text(tbl, r.lang)}</b>"
              + ("" if db.flag("fines_enabled") else r.L(" · ⚪ jarimalar o'chiq", " · ⚪ штрафы выключены")),
              r.L("Ishga keldi = «Проёб»ga birinchi xabari (kechki kassa hisobotidan tashqari) yoki lidga birinchi "
                  "yozuvi. Kim ishlaydi — 📅 Bugun kim qayerda; dam olish kunlari — xodim sozlamalarida.",
@@ -788,6 +792,10 @@ async def breaks(ctx, r: Req):
     if r.args and r.args[0] == "t":
         db.toggle("breaks_enabled")
         ui.view(r, "sr")
+    if len(r.args) == 2 and r.args[0] == "u" and r.args[1].isdigit() and int(r.args[1]) in SPEEDUP_CHOICES:
+        db.set("speedup_min", r.args[1])                  # ⚡ tanaffusdan qaytgach — «ускорьтесь»
+        ui.view(r, "sr")
+    sp = db.get_int("speedup_min", 8)
     extra_b = db.get("break_words").strip()
     extra_k = db.get("back_words").strip()
     lines = [f"☕ {r.L('Tanaffus nazorati', 'Контроль перерывов')} — {onoff(r, db.flag('breaks_enabled'))}",
@@ -803,8 +811,17 @@ async def breaks(ctx, r: Req):
                  "<b>Возврат</b> — «тут» / «keldim» / «вернулся» — в любой момент. Пишет лиду во время перерыва — перерыв "
                  "продолжается; после окончания написал лиду или в «Проёб» — вернулся. Время вышло, а он молчит — "
                  "напоминание."),
-             r.L("Papkaning bugungi xodimi tanaffusda bo'lsa — zaderjka hisoblanmaydi.",
-                 "Если сегодняшний сотрудник папки на перерыве — задержка не считается."),
+             r.L("Papkaning bugungi xodimi tanaffusda bo'lsa — zaderjka hisoblanmaydi: «задержка», eslatma va jarima "
+                 "chiqmaydi (vaqt to'xtab turadi).",
+                 "Если сегодняшний сотрудник папки на перерыве — задержка не считается: «задержка», напоминание и "
+                 "штраф не приходят (время стоит)."),
+             (r.L(f"⚡ Qaytgach <b>{sp} daqiqa</b> beriladi. Shunda ham tanaffusda kutgan chatlar javobsiz bo'lsa — "
+                  "«Проёб»da «⚡ @xodim, ускорьтесь — 2 чата ждут ответа» (jarimasiz). Tanaffusdan oldin chiqqan "
+                  "«задержка»ning eslatmasi ham shu vaqtgacha suriladi.",
+                  f"⚡ После возврата даётся <b>{sp} мин</b>. Если чаты, ждавшие во время перерыва, всё ещё без ответа — "
+                  "в «Проёб»: «⚡ @сотрудник, ускорьтесь — 2 чата ждут ответа» (без штрафа). Напоминание по «задержке» "
+                  "до перерыва тоже сдвигается на это время.") if sp else
+              r.L("⚡ Qaytgach «ускорьтесь» — o'chiq.", "⚡ «Ускорьтесь» после перерыва — выкл.")),
              "",
              f"➕ {r.L('Qo‘shimcha boshlash so‘zlari', 'Доп. слова начала')}: <b>{h(extra_b) or '—'}</b>",
              f"➕ {r.L('Qo‘shimcha qaytish so‘zlari', 'Доп. слова возврата')}: <b>{h(extra_k) or '—'}</b>"]
@@ -813,8 +830,14 @@ async def breaks(ctx, r: Req):
             grid([(r.L("⏱ Daqiqa", "⏱ Минуты"), "sti:break_minutes"), (r.L("🔁 Necha marta", "🔁 Сколько раз"),
                                                                         "sti:breaks_per_day")])[0],
             [(r.L("➕ Boshlash so'zlari", "➕ Слова начала"), "srw:break_words"),
-             (r.L("➕ Qaytish so'zlari", "➕ Слова возврата"), "srw:back_words")], nav(r, "s")]
+             (r.L("➕ Qaytish so'zlari", "➕ Слова возврата"), "srw:back_words")]]
+    rows += grid([(("✅ " if sp == v else "") + (f"⚡ {v} {r.L('daq', 'мин')}" if v else r.L("⚡ o'chiq", "⚡ выкл")),
+                   f"sr:u:{v}") for v in SPEEDUP_CHOICES], 3)
+    rows.append(nav(r, "s"))
     return ui.join(title("☕", r.L("TANAFFUS", "ПЕРЕРЫВЫ")), "", card(lines)), kb(*rows)
+
+
+SPEEDUP_CHOICES = (0, 5, 6, 8, 10, 15)
 
 
 @screen("srw", "full")

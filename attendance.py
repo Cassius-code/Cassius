@@ -2,7 +2,8 @@
 
 * Ishga keldi = «Проёб»ga birinchi xabari (kechki kassa hisobotidan tashqari) yoki lidga birinchi yozuvi.
 * Kech qolish — ish boshlanishidan N daqiqa (late_after_min, 15) va undan ko'p kech kelsa: «Проёб»da
-  «🕘 @baxa, вы опоздали на 25 мин — вам штраф 10 $ (2-е опоздание за неделю)». Kamiga — xabar ham, jarima ham yo'q.
+  «🕘 @baxa, вы опоздали на 40 мин — вам штраф 15 $ (2-е опоздание за неделю)». Kamiga — xabar ham, jarima ham yo'q.
+  Summa — necha daqiqa kech qolganiga qarab (💸 jadval: 30 daq → 10 $, 40 → 15 $, 1 soat → 25 $, 2 soat → 50 $).
 * Tanaffus so'zlari har xil yoziladi: отойду / отойди / атайду / otaydu / ataydim / перерыв / tanaffus / obedga /
   perekur / namozga … va egasi qo'shgan so'zlar. Bot javob beradi: «☕ @baxa — перерыв до 14:30».
 * Tanaffus vaqtida lidga yozsa — tanaffus tugamaydi (nozik mijozga yozib qo'yishi mumkin). Vaqti tugagach lidga yozsa
@@ -268,7 +269,8 @@ class Attendance:
         if not late:
             return "arrived"
         from . import fines
-        fines.strike(self.db, person["id"], "late", day, ts, ref=f"late:{iso}", note=f"опоздание {late} мин")
+        fines.strike(self.db, person["id"], "late", day, ts, ref=f"late:{iso}", note=f"опоздание {late} мин",
+                     minutes=late)                          # summa — necha daqiqa kech qolganiga qarab (jadval)
         return "late"
 
     def late_strike(self, person_id: int, day):

@@ -171,8 +171,8 @@ def zp_note(zst: dict | None, lang: str, owner: bool = True) -> str | None:
         return w("zp_off_all", lang)
     weeks = ", ".join(label(x, x + dt.timedelta(days=6)) for x in zst["weeks"])
     if owner:
-        tail = {"uz": f"hafta: {weeks} — «🧮 Haftani hisoblash» ni bosing",
-                "ru": f"неделя: {weeks} — нажмите «🧮 Рассчитать неделю»"}
+        tail = {"uz": f"hafta: {weeks} — «🧮 Haftalik zp» ni bosing",
+                "ru": f"неделя: {weeks} — нажмите «🧮 Зп за неделю»"}
     else:
         tail = {"uz": f"hafta: {weeks} — ega hisoblaydi", "ru": f"неделя: {weeks} — рассчитывает владелец"}
     return f"{w('not_calc', lang)}\n<i>{tail['ru' if lang == 'ru' else 'uz']}</i>"

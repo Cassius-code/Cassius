@@ -26,7 +26,7 @@ from . import people as P
 from . import roster as R
 from .db import Database
 from .links import message_link
-from .gtext import esc, head, link, small, tag
+from .gtext import esc, head, link, mentions, small, tag
 from .timeutil import minutes_up, parse_hhmm, work_seconds, local_date, is_work_time
 
 log = logging.getLogger("rules")
@@ -671,6 +671,7 @@ class Tracker:
             out["alerts"] = await self._delays(now)
             out["eod"] = await self.end_of_day(now)
             out["reminded"] = await self._remind_alerts(now)
+            out["speedup"] = await self._speedup(now)
         return out
 
     def _stavka_timeouts(self, now: int) -> int:
@@ -803,8 +804,8 @@ class Tracker:
                               "ORDER BY wait_since"):
             fid = self.chat_folder.get(th["chat_id"])
             f = folders.get(fid)
-            if f is None or not f["delay_on"] or th["stavka"] == "on":
-                continue
+            if f is None or not f["delay_on"] or th["stavka"] == "on" or self.paused_now(fid):
+                continue                                   # ☕ xodim tanaffusda — «задержка» chiqmaydi
             if label_excluded(self.label(th["chat_id"], th["topic_id"]), skip):
                 self._set(th["chat_id"], th["topic_id"], wait_since=None, wait_msg_id=None)
                 continue
@@ -955,8 +956,8 @@ class Tracker:
                                  "GROUP BY group_chat_id, group_msg_id", (now - 86400,)):
                 if self.db.one("SELECT 1 FROM alert_reminders WHERE gid=? AND mid=?", (g["gid"], g["mid"])):
                     continue
-                if now < g["created"] + after:            # kun oxirida ham odatdagi vaqt (egasi, 2026-10-30)
-                    continue
+                if now < self._after_break(g["folder_id"], g["created"] + after, g["created"], now):
+                    continue                              # kun oxirida ham odatdagi vaqt; ☕ tanaffusda — kutadi
                 rows = await self._unanswered(g["gid"], g["mid"])
                 if not rows:
                     continue
@@ -990,11 +991,79 @@ class Tracker:
                     remember(self.db, r["rgid"], r["rmid"], "info", now)   # 🧹 jarimasiz — keyin o'chadi
                 changed += 1
                 continue
-            if now < r["deadline"]:
-                continue
+            if now < self._after_break(r["folder_id"], r["deadline"], r["reminded_ts"], now):
+                continue                                  # muhlat; ☕ tanaffus paytida jarima ham yo'q
             await self._missed(r, f, now)
             changed += 1
         return changed
+
+    # ------------------------------------------------------------ ☕ tanaffus: zaderjka xabarlari to'xtab turadi
+    def speedup_sec(self) -> int:
+        """Tanaffusdan qaytgach shuncha soniya beriladi (keyin «ускорьтесь» / eslatma). 0 — o'chiq."""
+        return max(0, self.db.get_int("speedup_min", 8)) * 60
+
+    def paused_now(self, fid: int | None) -> bool:
+        """RD ning bugungi xodimi hozir tanaffusdami (pauza ochiq)."""
+        return bool(fid) and self.db.one("SELECT 1 FROM pauses WHERE folder_id=? AND end_ts IS NULL", (fid,)) is not None
+
+    def _after_break(self, fid: int | None, due: int, since: int, now: int) -> int:
+        """Eslatma yoki jarima vaqti tanaffus bilan: tanaffusdagi vaqt qo'shiladi, qaytgach esa kamida N daqiqa
+        (speedup_min, 8) beriladi. Hozir tanaffusda bo'lsa — hali vaqti emas (egasi, 2026-10-30)."""
+        if not fid:
+            return due
+        if self.paused_now(fid):
+            return now + 1
+        shift, back = 0, None
+        for p in self.db.all("SELECT start_ts, end_ts FROM pauses WHERE folder_id=? AND start_ts<? AND end_ts>?",
+                             (fid, now, since)):
+            a, b = max(since, p["start_ts"]), min(now, p["end_ts"])
+            if b > a:
+                shift += b - a
+            back = max(back or 0, p["end_ts"])
+        due += shift
+        if back is not None:
+            due = max(due, back + self.speedup_sec())
+        return due
+
+    async def _speedup(self, now: int) -> int:
+        """☕ Xodim tanaffusdan qaytdi, N daqiqa (8) o'tdi, tanaffusda kutib qolgan chatlar hali javobsiz —
+        «Проёб»ga «⚡ @baxa, ускорьтесь — 2 чата ждут ответа» (jarimasiz). «задержка»si bor chatlar kirmaydi (ularga
+        o'z eslatmasi keladi). Har tanaffusga bir marta. -> nechta xabar."""
+        wait = self.speedup_sec()
+        if not wait:
+            return 0
+        ws, we = self.work_window()
+        skip = skip_list(self.db)
+        sent = 0
+        for p in self.db.all("SELECT * FROM pauses WHERE end_ts IS NOT NULL AND nudged=0 AND end_ts>=? AND end_ts<=?",
+                             (now - 6 * 3600, now - wait)):
+            self.db.run("UPDATE pauses SET nudged=1 WHERE id=?", (p["id"],))
+            f = P.folder(self.db, p["folder_id"])
+            if f is None or not f["delay_on"] or now - (p["end_ts"] + wait) > 30 * 60 \
+                    or not is_work_time(now, self.tz, ws, we):
+                continue                                  # juda kech (bot o'chib turgan) yoki ish vaqti emas
+            items = [th for th in self.db.all("SELECT * FROM threads WHERE wait_since IS NOT NULL AND wait_since<=? "
+                                              "AND alert_id IS NULL AND stavka<>'on' ORDER BY wait_since",
+                                              (p["end_ts"],))
+                     if self.chat_folder.get(th["chat_id"]) == f["id"]
+                     and not label_excluded(self.label(th["chat_id"], th["topic_id"]), skip)]
+            if not items:
+                continue
+            n = len(items)
+            chats = (f"{n} чат ждёт" if n % 10 == 1 and n % 100 != 11 else
+                     f"{n} чата ждут" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else f"{n} чатов ждут")
+            who = mentions(self.workers(f["id"], now)) or "сотрудник"
+            text = "\n".join([head(f["name"], "после перерыва")]
+                             + [link(message_link(th["chat_id"], th["wait_msg_id"] or th["topic_id"], th["topic_id"]))
+                                for th in items[:MAX_LINKS]]
+                             + ([small(f"… и ещё {n - MAX_LINKS}")] if n > MAX_LINKS else [])
+                             + [f"⚡ {who}, ускорьтесь — {chats} ответа"])
+            try:
+                await self.notifier.send_group(text, trash="info")
+                sent += 1
+            except Exception as exc:
+                log.warning("«ускорьтесь» yuborilmadi: %s", exc)
+        return sent
 
     async def _missed(self, r, f, now: int) -> None:
         """Eslatmadan keyin ham javob yo'q: RD ning o'sha kungi xodimiga 1 ta zaderjka (zinapoya bo'yicha jarima)."""

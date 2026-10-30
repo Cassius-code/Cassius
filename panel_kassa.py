@@ -81,14 +81,13 @@ async def kassa_menu(ctx, r: Req):
         lines.append(f"⏳ {r.L('Yopilmagan kunlar', 'Незакрытые дни')} — <b>{', '.join(dm(d) for d in open_days)}</b>")
     if pend:
         lines.append(f"❓ {r.L('Javob kutayotgan savollar', 'Открытые вопросы')} — <b>{pend}</b>")
-    items = [(r.L("📊 Hisobot", "📊 Отчёт"), "kr"), (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc"),
-             (r.L("🗓 Oy yakuni", "🗓 Итоги месяца"), "km"), (r.L("🏆 Reyting", "🏆 Рейтинг"), "kg"),
-             (r.L("❓ Savollar", "❓ Вопросы") + (f" ({pend})" if pend else ""), "kq"),
-             (r.L("💲 Prays", "💲 Прайс"), "kp"), (r.L("📜 Tarix", "📜 История"), "kh"), ("📄 PDF", "kf")]
+    # 6 tugma, ishlatilish tartibida (egasi, 2026-10-30): Oy yakuni, Reyting, PDF — 📊 Hisobot ichida; To'lov ro'yxati —
+    # 🧮 Haftalik zp ichida; Prays, Ulushlar, Tarix — ⚙️ Sozlamalar ichida
+    items = [(r.L("❓ Savollar", "❓ Вопросы") + (f" ({pend})" if pend else ""), "kq"),
+             (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc"), (r.L("📊 Hisobot", "📊 Отчёт"), "kr")]
     if r.owner:
-        items = [(r.L("🧮 Haftani hisoblash", "🧮 Рассчитать неделю"), "kz"),
-                 (r.L("📋 To'lov ro'yxati", "📋 Ведомость выплат"), "kpay")] + items + \
-            [(r.L("🤝 Ulushlar", "🤝 Доли"), "ksh")]
+        items.append((r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), "kz"))
+    items += [(r.L("👥 Xodimlar", "👥 Сотрудники"), "kpl"), (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "kset")]
     rows = grid(items)
     rows.append(nav(r))
     top = K.cumulative_rating(db, t)[:3]
@@ -99,12 +98,62 @@ async def kassa_menu(ctx, r: Req):
     return ui.join(title("💵", r.L("KASSA", "КАССА")), "", card(lines)), kb(*rows)
 
 
+# ───────────────────────── 👥 xodimlar kassasi (har xodim: kassa · Кол-во рд · $ · zp)
+@screen("kpl", "full")
+async def people_kassa(ctx, r: Req):
+    """Shu hafta (yoki o'tgan hafta) har xodim bir qatorda; bosilsa — xodim kartasi (jarima, cheklar, PDF …)."""
+    db = ctx.db
+    key = r.args[0] if r.args and r.args[0] in ("tw", "lw") else "tw"
+    s, e = range_of(ctx, key)
+    b = K.calc(db, s, e)
+    zst = K.zp_state(db, s, e, today(ctx))
+    lines, btn = [], []
+    for i in b["order"]:
+        row = b["rows"].get(i)
+        if row is None or not K.has_data(row) or not visible_acct(r, row) or row["kind"] == "partner":
+            continue
+        name = row["p"]["name"]
+        line = (f"<b>{h(name)}</b> — {num(row['raw'])} · {r.L('Кол-во рд', 'Кол-во рд')} {row['n']} · "
+                f"{money(row['usd'])} $")
+        if row["total"] is not None and zst["mode"] != "off":
+            line += f" · zp {'' if zst['ready'] else '≈ '}{money(row['total'])} $"
+        lines.append(line)
+        btn.append((f"👤 {name}", f"po:{i}:{key}"))
+    other = (r.L("🗓 O'tgan hafta", "🗓 Прошлая неделя"), "kpl:lw") if key == "tw" else \
+        (r.L("🗓 Shu hafta", "🗓 Эта неделя"), "kpl:tw")
+    note = r.L("Kassa · Кол-во рд (cheklar soni) · Kassa ($) · zp. «≈» — hafta hali 🧮 hisoblanmagan (taxminiy). "
+               "Ismni bosing — jarima, bonus, cheklar, PDF.",
+               "Касса · Кол-во рд (число чеков) · Касса ($) · зп. «≈» — неделя ещё не 🧮 рассчитана (примерно). "
+               "Нажмите имя — штраф, бонус, чеки, PDF.")
+    body = card(lines) if lines else r.L("<i>Bu davrda ma'lumot yo'q.</i>", "<i>За этот период данных нет.</i>")
+    return ui.join(title("👥", r.L("XODIMLAR KASSASI", "КАССА СОТРУДНИКОВ"), plabel(s, e)), "", body,
+                   f"<i>{note}</i>"), kb(*grid(btn, 3), [other], nav(r, "k"))
+
+
+# ───────────────────────── ⚙️ kassa sozlamalari (kam kerak bo'ladiganlar)
+@screen("kset", "full")
+async def kassa_settings(ctx, r: Req):
+    lines = [r.L("💲 <b>Prays</b> — chek summasi → necha $.", "💲 <b>Прайс</b> — сумма чека → сколько $."),
+             r.L("📜 <b>Tarix</b> — kim, qachon, nimani o'zgartirdi.", "📜 <b>История</b> — кто, когда, что изменил.")]
+    items = [(r.L("💲 Prays", "💲 Прайс"), "kp"), (r.L("📜 Tarix", "📜 История"), "kh")]
+    if r.owner:
+        lines += [r.L("🤝 <b>Ulushlar</b> — kimning zp sidan kimga necha %.", "🤝 <b>Доли</b> — из чьей зп кому сколько %."),
+                  r.L("⚙️ <b>Zp hisoblash usuli</b> — tugma bilan / avtomatik / o'chiq.",
+                      "⚙️ <b>Режим расчёта зп</b> — по кнопке / автоматически / выкл.")]
+        items += [(r.L("🤝 Ulushlar", "🤝 Доли"), "ksh"), (r.L("⚙️ Zp hisoblash usuli", "⚙️ Режим расчёта зп"), "kzm")]
+    return ui.join(title("⚙️", r.L("KASSA SOZLAMALARI", "НАСТРОЙКИ КАССЫ")), "", card(lines)), \
+        kb(*grid(items), nav(r, "k"))
+
+
 # ───────────────────────── hisobot
 @screen("kr", "full")
 async def report_menu(ctx, r: Req):
     if r.args:
         return report_show(ctx, r, r.args[0])
-    return title("📊", r.L("HISOBOT", "ОТЧЁТ"), r.L("qaysi davr?", "за какой период?")), periods(r, "kr", "k")
+    markup = periods(r, "kr", "k")
+    rows = [[(b.text, b.callback_data) for b in row] for row in markup.inline_keyboard]
+    rows.insert(-1, [(r.L("🏆 Reyting — boshidan", "🏆 Рейтинг — с начала"), "kg:all")])
+    return title("📊", r.L("KASSA HISOBOTI", "ОТЧЁТ КАССЫ"), r.L("qaysi davr?", "за какой период?")), kb(*rows)
 
 
 def report_show(ctx, r: Req, key: str):
@@ -119,12 +168,15 @@ def report_show(ctx, r: Req, key: str):
                   and (r.owner or b["rows"][i]["kind"] in ("worker", "pool"))]
     rows = grid(people_btn, 3)
     if r.owner:
-        rows += grid([(f"🧮 {wlabel(x)}", f"kz:{x.isoformat()}") for x in zst["weeks"]], 2)
+        rows += grid([(f"🧮 {r.L('Haftalik zp', 'Зп за неделю')} · {wlabel(x)}", f"kz:{x.isoformat()}")
+                      for x in zst["weeks"]], 1)
         if s.weekday() == 0 and (e - s).days == 6 and zst["ready"]:
-            rows.append([(r.L("🧮 Foizlar", "🧮 Проценты"), f"kz:{s.isoformat()}"),
+            rows.append([(r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), f"kz:{s.isoformat()}"),
                          (r.L("📋 To'lov ro'yxati", "📋 Ведомость"), f"kpay:{s.isoformat()}")])
     rows.append([(r.L("📅 Kunlar bo'yicha", "📅 По дням"), f"kd:{pkey}" if s != e else f"kdd:{s.isoformat()}"),
-                 ("📄 PDF", f"kf:{key}")])
+                 (r.L("🏆 Reyting", "🏆 Рейтинг"), f"kg:{key}"), ("📄 PDF", f"kf:{key}")])
+    if key in ("tm", "lm"):                                  # 🗓 oy yakuni — oy tanlansa
+        rows.append([(r.L("🗓 Oy yakuni", "🗓 Итоги месяца"), f"km:{s.year}-{s.month:02d}")])
     rows.append(nav(r, "kr"))
     return clip(text), kb(*rows)
 
@@ -232,8 +284,11 @@ async def close_menu(ctx, r: Req):
     btn = []
     for d in recent_days(ctx, 10):
         n, raw, _usd = K.day_totals(db, d)
-        mark = "🔒" if K.is_closed(db, d) else ("⏳" if n else "·")
-        btn.append((f"{mark} {dm(d)} · {n} · {num(raw)}", f"kdd:{d}"))
+        if not n and not K.is_closed(db, d):
+            continue                                       # chek yo'q kun — ro'yxatda kerak emas
+        mark = "🔒" if K.is_closed(db, d) else "⏳"
+        btn.append((f"{mark} {dm(d)} — {n} {r.L('chek', 'чек.')} · {num(raw)}", f"kdd:{d}"))
+    hint_empty = r.L("Oxirgi 10 kunda chek yo'q.", "За последние 10 дней чеков нет.")
     hint = (r.L("Hamma hisobotlar tushgach kunni oching va «🔒 Kunni yopish» ni bosing. Yopilgan kunni faqat siz "
                 "o'zgartira olasiz; yopilgan kunga yangi hisobot kelsa, sizga xabar keladi.",
                 "Когда все отчёты пришли — откройте день и нажмите «🔒 Закрыть день». Закрытый день меняете только "
@@ -242,7 +297,7 @@ async def close_menu(ctx, r: Req):
                 "День закрывает владелец. Закрытый день менять может только владелец."))
     return ui.join(title("✅", r.L("KUNNI YOPISH", "ЗАКРЫТИЕ ДНЯ"), r.L("🔒 yopilgan · ⏳ ochiq",
                                                                         "🔒 закрыт · ⏳ открыт")), "",
-                   card([hint])), kb(*grid(btn, 2), nav(r, "k"))
+                   card([hint] + ([hint_empty] if not btn else []))), kb(*grid(btn, 1), nav(r, "k"))
 
 
 @screen("kcy", "owner")
@@ -447,9 +502,9 @@ async def pay_list(ctx, r: Req):
         if next_s <= K.week_start(t):
             navw.append((f"{dm(next_s)} ›", f"kpay:{next_s.isoformat()}"))
         return ui.join(title("📋", r.L("TO‘LOV RO‘YXATI", "ВЕДОМОСТЬ ВЫПЛАТ"), plabel(s, e)), "",
-                       card([r.L("🧮 Avval haftani hisoblang: foizlarni tasdiqlaysiz, keyin ro'yxat chiqadi.",
-                                 "🧮 Сначала рассчитайте неделю: подтвердите проценты, потом будет ведомость.")])), \
-            kb([(r.L("🧮 Haftani hisoblash", "🧮 Рассчитать неделю"), f"kz:{s.isoformat()}")], navw, nav(r, "k"))
+                       card([r.L("🧮 Avval «🧮 Haftalik zp» da foizlarni tasdiqlang, keyin ro'yxat chiqadi.",
+                                 "🧮 Сначала подтвердите проценты в «🧮 Зп за неделю», потом будет ведомость.")])), \
+            kb([(r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), f"kz:{s.isoformat()}")], navw, nav(r, "k"))
     items = pay_rows(db, s, e)
     lines, btn = [], []
     total = paid = 0.0
@@ -1432,7 +1487,11 @@ async def week_calc(ctx, r: Req):
         status = f"⏳ {r.L('Hali hisoblanmagan', 'Ещё не рассчитана')}"
     if w0 + dt.timedelta(days=6) >= t:
         status += r.L(" · hafta tugamagan", " · неделя не закончилась")
-    parts = [title("🧮", r.L("HAFTANI HISOBLASH", "РАСЧЁТ НЕДЕЛИ"), f"{wlabel(w0)} · {status}")]
+    parts = [title("🧮", r.L("HAFTALIK ZP", "ЗП ЗА НЕДЕЛЮ"), f"{wlabel(w0)} · {status}"),
+             r.L("<i>1) Foizlarni tekshiring → «✅ O'zgarmadi — hisoblash». 2) «📋 To'lov ro'yxati» — kimga qancha, "
+                 "«✅ To'landi».</i>",
+                 "<i>1) Проверьте проценты → «✅ Без изменений — рассчитать». 2) «📋 Ведомость» — кому сколько, "
+                 "«✅ Выплачено».</i>")]
     btn = []
     if not w["accts"] and not w["subs"]:
         parts.append(r.L("<i>Bu haftada chek yo'q.</i>", "<i>За эту неделю чеков нет.</i>"))
@@ -1578,8 +1637,8 @@ async def zp_mode_screen(ctx, r: Req):
         db.set("zp_mode", r.args[0])
     mode = K.zp_mode(db)
     opts = [("button", r.L("🧮 Tugma bilan", "🧮 По кнопке"),
-             r.L("hafta tugagach «Haftani hisoblash» — foizlarni tasdiqlaysiz, keyin zp chiqadi",
-                 "в конце недели «Рассчитать неделю» — подтверждаете проценты, потом видна зп")),
+             r.L("hafta tugagach «🧮 Haftalik zp» — foizlarni tasdiqlaysiz, keyin zp chiqadi",
+                 "в конце недели «🧮 Зп за неделю» — подтверждаете проценты, потом видна зп")),
             ("auto", r.L("⚡ Avtomatik", "⚡ Автоматически"),
              r.L("zp doim ko'rinadi, oxirgi kiritilgan foizlar bilan", "зп видна всегда, по последним процентам")),
             ("off", r.L("⛔ O'chiq", "⛔ Выключено"),

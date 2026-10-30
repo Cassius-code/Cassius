@@ -38,14 +38,17 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Vaqtlar (yoki o'chirish) — shu ekranda.
 - **🌙 Kun oxiri.** Ish vaqti tugagach (23:01) javobsiz chatlar ro'yxati «Проёб»ga boradi:
   «доведите работу до конца». Ertalab ular uchun zaderjka yozilmaydi.
-- **💸 Jarimalar** (🚨 Nazorat → 💸 Jarimalar). Summalarni o'zingiz yozasiz — «zinapoya», masalan `0 5 10 20`:
-  1-si 0 $, 2-si 5 $, 3-si 10 $, 4-si va keyingilari 20 $ (oxirgisi takrorlanadi).
-  - ⏰ **Zaderjka** — har kuni noldan. 1 ta zaderjka = «задержка» → eslatma (3/5/10/15/20/30 daqiqa) → muhlat
+- **💸 Jarimalar** (🚨 Nazorat → 💸 Jarimalar). Summalarni o'zingiz yozasiz va o'zgartirasiz.
+  - ⏰ **Zaderjka** — «zinapoya», masalan `0 5 10 20`: 1-si 0 $, 2-si 5 $, 3-si 10 $, 4-si va keyingilari 20 $
+    (oxirgisi takrorlanadi). Har kuni noldan. 1 ta zaderjka = «задержка» → eslatma (3/5/10/15/20/30 daqiqa) → muhlat
     (3/5/10/15) → javob bo'lmasa. Bir vaqtda va keyingi 30 daqiqada kechikkan lidlar — o'sha 1 ta (5 lid ≠ 5 jarima).
     Eslatma: «⏰ Ответьте в течение 5 мин — иначе штраф 5 $ (каждому)» (summalar har xil bo'lsa — har kimniki
     alohida). Jarima: «💸 @xodim, вам штраф 10 $ за задержку (2-я за сегодня)».
-  - 🕘 **Kech qolish** — har dushanba noldan, faqat 15+ daqiqa kechikkanda (kamiga — xabar ham yo'q):
-    «🕘 @xodim, вы опоздали на 25 мин — вам штраф 10 $ (2-е опоздание за неделю)».
+  - 🕘 **Kech qolish** — necha daqiqa kech qolganiga qarab (🚨 Nazorat → 💸 Jarimalar → 🕘 → ✏️ Jadvalni
+    o'zgartirish). Hozirgi jadval: 30 daq → 10 $, 40 daq → 15 $, 1 soat → 25 $, 2 soat → 50 $. Har summa o'sha
+    daqiqadan boshlab (35 daq → 10 $); birinchisidan kam (masalan, 20 daq) — 0 $, faqat xabar. 15 daqiqadan kam —
+    xabar ham yo'q. Jadvalni shunday yozasiz: `30-10`, `40-15`, `60-25`, `2ч-50` (har biri yangi qatorda), `0` — o'chirish.
+    «🕘 @xodim, вы опоздали на 40 мин — вам штраф 15 $ (2-е опоздание за неделю)» (haftadagi nechanchisi — dushanbadan).
   - ✍️ **Qo'lda** — «Проёб»da `@xodim штраф 5` (yoki xodim xabariga javob qilib `штраф 5`).
   Bitta RD — bitta xodim (📅 Bugun kim qayerda). Tanaffusdagi xodimga jarima yo'q.
   Jarimalar o'chiq bo'lsa — «штраф» so'zi hech qayerda chiqmaydi va hech narsa sanalmaydi.
@@ -71,6 +74,10 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «Проёб»ga yozsa — qaytdi; «тут» / «keldim» — istalgan payt qaytdi (bot 👍 bosadi). Vaqt tugab 3 daqiqa
   hech qayerga yozmasa — «☕ перерыв · @xodim — время перерыва вышло!» (tanaffus oxirida lidga yozib turgan bo'lsa —
   eslatma yo'q, u allaqachon ishlayapti).
+  Xodim tanaffusda bo'lsa — uning RD si bo'yicha «задержка», eslatma va jarima chiqmaydi (vaqt to'xtab turadi).
+  Qaytgach 8 daqiqa beriladi (⚙️ → ☕ Tanaffus → ⚡): tanaffusda kutib qolgan chatlar shunda ham javobsiz bo'lsa —
+  «⚡ @xodim, ускорьтесь — 2 чата ждут ответа» (jarimasiz). Tanaffusdan oldin chiqqan «задержка»ning eslatmasi ham
+  shu vaqtgacha suriladi, keyin odatdagidek: 5 daqiqada javob bo'lmasa — jarima.
 - **👥 Hozir ishda** (bosh menyu). Har 3 soniyada o'zi yangilanadi. Har xodim: 🟢 ishda · ☕ tanaffus (qachongacha) ·
   ⚪ hali kelmagan · 🛌 dam olishda; ⏱ uning RD sida javob kutayotgan lidlar (🔴 — zaderjka); ✍️ lidga oxirgi
   yozgani; 🚨 bugungi «задержка»lar.
@@ -91,19 +98,26 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     da hozir nechta zaderjka (🟢 yo'q · 🟡 bor · 🔴 ko'p). Menyu o‘z joyida yangilanadi (5 soniyada bir; tugma
     bosilgan paytda tegmaydi).
     Kassa bo'limida — cheklar yig'indisi, har birining $ i va jami, 🏆 top 3.
-  - **🏆 Umumiy reyting** kassa bo'limida: boshlang'ich (oldingi haftalar) kassa + 19.10 dan keyingi cheklar.
-    Guruhda `/topall`. Boshlang'ich raqamlar: 🏆 Reyting → ♾ Hammasi → 📌.
-  - **🧮 Haftani hisoblash.** Hafta (Du–Ya) tugagach bosasiz. Bot o'tgan haftadagi foizlarni ko'rsatadi:
-    «Bayzed: Bayzed 41% · Siz 14% · Artur qolgani». O'zgarmagan bo'lsa — bitta tugma. O'zgargan bo'lsa —
-    ismni bosib yangi sonni yozasiz (masalan `41 14`). Yangi xodim bo'lsa, bot o'zi so'raydi.
-    O'zgarish faqat shu haftadan: o'tgan haftalar buzilmaydi. Hafta hisoblanmaguncha zp ko'rinmaydi.
-  - **🤝 Ulushlar.** Masalan «Baxa oyligidan 5% → Bayzed». Kim to'laydi: xodimdan ushlanadi, siz yoki Artur.
-  - **📋 To'lov ro'yxati.** Haftalik: kimga qancha, «✅ To'landi». Keyingi hafta noldan.
-  - **✅ Kunni yopish.** Hamma hisobot tushgach bosasiz. Yopilgan kunni faqat siz o'zgartira olasiz.
-    Yopilgan kunga yangi hisobot kelsa, sizga xabar keladi.
-  - **📜 Tarix.** Kim, qachon, nimani o'zgartirgani (eski → yangi).
+  - **Kassa menyusi — 6 tugma** (ishlatilish tartibida): ❓ Savollar · ✅ Kunni yopish · 📊 Hisobot ·
+    🧮 Haftalik zp · 👥 Xodimlar · ⚙️ Sozlamalar. Hech qaysi funksiya o'chmagan — joyi o'zgargan:
+    🗓 Oy yakuni, 🏆 Reyting, 📄 PDF — 📊 Hisobot ichida; 📋 To'lov ro'yxati — 🧮 Haftalik zp ichida;
+    💲 Prays, 🤝 Ulushlar, 📜 Tarix, ⚙️ Zp hisoblash usuli — ⚙️ Sozlamalar ichida.
+  - **📊 Hisobot.** Davr (bugun / kecha / hafta / oy / sana) → kassa; ichida 📅 Kunlar, 🏆 Reyting, 📄 PDF, oy
+    tanlansa — 🗓 Oy yakuni. O'tgan hafta bilan solishtirish (↑ / ↓ %), kunlar → akkauntlar → cheklar.
+  - **🏆 Umumiy reyting** — 📊 Hisobot → «🏆 Reyting — boshidan»: boshlang'ich (oldingi haftalar) kassa + 19.10 dan
+    keyingi cheklar. Guruhda `/topall`. Boshlang'ich raqamlar: o'sha ekranda 📌.
+  - **🧮 Haftalik zp** — bitta joyda 2 qadam. 1) Hafta (Du–Ya) tugagach bosasiz, bot o'tgan haftadagi foizlarni
+    ko'rsatadi: «Bayzed: Bayzed 41% · Siz 14% · Artur qolgani». O'zgarmagan bo'lsa — «✅ O'zgarmadi — hisoblash».
+    O'zgargan bo'lsa — ismni bosib yangi sonni yozasiz (masalan `41 14`). Yangi xodim bo'lsa, bot o'zi so'raydi.
+    O'zgarish faqat shu haftadan: o'tgan haftalar buzilmaydi. 2) **📋 To'lov ro'yxati** — kimga qancha,
+    «✅ To'landi». Keyingi hafta noldan.
+  - **👥 Xodimlar** (kassa ichida) — shu / o'tgan hafta har xodim bir qatorda: kassa · Кол-во рд · $ · zp
+    («≈» — hafta hali hisoblanmagan). Ismni bosing — xodim kartasi (jarima, bonus, cheklar, PDF).
+  - **🤝 Ulushlar** (⚙️ Sozlamalar). Masalan «Baxa oyligidan 5% → Bayzed». Kim to'laydi: xodimdan ushlanadi, siz yoki Artur.
+  - **✅ Kunni yopish.** Hamma hisobot tushgach bosasiz. Ro'yxatda faqat cheki bor kunlar: «⏳ 29.10 — 5 chek ·
+    10 550». Yopilgan kunni faqat siz o'zgartira olasiz. Yopilgan kunga yangi hisobot kelsa, sizga xabar keladi.
+  - **📜 Tarix** (⚙️ Sozlamalar). Kim, qachon, nimani o'zgartirgani (eski → yangi).
   - **🧮 Tekshiruv.** Hisobotda: Kassa = Artur + xodimlar + ulushlar + sizga ✅.
-  - O'tgan hafta bilan solishtirish (↑ / ↓ %), 🗓 Oy yakuni, kunlar → akkauntlar → cheklar.
   - Zp hisoblash usuli: **tugma bilan** (odatiy) / **avtomatik** / **o'chiq** (o'zingiz hisoblaysiz).
   - Har hisobotdan keyin sizga xodimning shu kungi xulosasi keladi (eski kassa botidagidek):
     `Adam` / `Дата: 19.10` / `Касса: 17,100` / `Кол-во рд: 8` / `Касса ($): 64$`. Shu kunga yana hisobot kelsa —
@@ -216,7 +230,7 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 4. Yangi botni «Проёб» guruhiga qo'shing va **admin** qiling.
 5. Bosh menyuda tekshiring: 🟢 Akkaunt · 🟢 Push · 🟢 «Проёб».
 6. 👥 Xodimlar: bir odam ikki marta chiqsa — uni oching → ⚙️ → 🔗 Birlashtirish.
-7. 💵 Kassa → 🧮 Haftani hisoblash: shu hafta foizlarini bir marta kiriting.
+7. 💵 Kassa → 🧮 Haftalik zp: shu hafta foizlarini bir marta kiriting.
 8. Xodimlarga ayting: yangi botda **Start** ni bossin (oylik so'rash uchun).
 
 > `ADMIN_IDS` dagi odamlar «ega» hisoblanadi va hamma narsani ko'radi, sizning daromadingizni ham.
@@ -246,6 +260,17 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
   - `/id` — guruh ID si
 
 Bot guruhda xabarlarni ko'rishi uchun uni guruhda admin qiling.
+
+## 🔒 Panel qulfi
+
+- Kod: ⚙️ Sozlamalar → 👮 Adminlar → 🔒 Qulf kodi (4–32 belgi, hamma ega akkauntlari uchun bitta). Bazada faqat
+  shifrlangan izi saqlanadi.
+- Bosh menyuda «🔒 Qulflash» — faqat shu akkauntdagi panel yopiladi; ikkinchi ega akkaunti ishlayveradi. Bot o'z ishini
+  davom ettiradi (zaderjka, jarima, Push, «Проёб»).
+- Qulf paytida shu chatda /start, tugma yoki matn — faqat «Бот сейчас не работает.». Xato kod — o'sha matn turaveradi.
+- To'g'ri kodni yozsangiz — panel qaytadi va qulf paytida kelgan xabarlar (savollar, ogohlantirishlar, haftalik baza
+  nusxasi) keladi. Yozgan kodingiz chatdan darhol o'chadi.
+- Kodni unutsangiz: ikkinchi (ochiq) akkauntdan 🔒 Qulf kodini almashtiring.
 
 ## 🫀 Bot tirikligi
 

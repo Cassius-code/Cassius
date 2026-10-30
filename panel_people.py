@@ -427,8 +427,8 @@ async def send_preview(ctx, r: Req):
     s, e, key = period_of(ctx, r, pid, key)
     p = must(P.person(db, pid))
     if not K.zp_state(db, s, e, today(ctx))["ready"]:
-        return r.L("🧮 Avval haftani hisoblang (Kassa → 🧮 Haftani hisoblash)",
-                   "🧮 Сначала рассчитайте неделю (Касса → 🧮 Рассчитать неделю)")
+        return r.L("🧮 Avval haftani hisoblang (Kassa → 🧮 Haftalik zp)",
+                   "🧮 Сначала рассчитайте неделю (Касса → 🧮 Зп за неделю)")
     row = K.calc(db, s, e)["rows"].get(pid)
     if row is None:
         return r.L("Ma'lumot yo'q", "Данных нет")

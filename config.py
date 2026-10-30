@@ -17,7 +17,9 @@ DEFAULTS: dict[str, str] = {
     "remind_grace_min": "5",         # eslatmadan keyin shuncha daqiqa — javob bo'lmasa: 1 ta zaderjka (jarima zinapoyasi)
     "remind_fine_usd": "5",          # eski (bitta summa) — fine_ladder_delay ga ko'chiriladi
     "fine_ladder_delay": "",         # 💸 zaderjka: haftada 1-si, 2-si … ($), masalan «5 10 15 20»; bo'sh — jarimasiz
-    "fine_ladder_late": "",          # 💸 kech qolish: haftada 1-si, 2-si … ($); bo'sh — jarimasiz
+    "fine_ladder_late": "",          # eski (haftalik zinapoya — olib tashlangan, ishlatilmaydi)
+    "fine_late_table": "30=10 40=15 60=25 120=50",   # 🕘 kech qolish: necha daqiqa kech = necha $ (o'sha daqiqadan
+                                     # boshlab; birinchisidan kam — 0 $). Egasi bergan summalar (2026-10-30); bo'sh — jarimasiz
     "late_after_min": "15",          # shuncha daqiqa va undan ko'p kech kelsa — «kech qoldi» (kamiga xabar ham yo'q)
     "break_words": "",               # ☕ egasi qo'shgan tanaffus so'zlari (botning o'zi taniydiganlardan tashqari)
     "back_words": "",                # ☕ egasi qo'shgan «qaytdim» so'zlari
@@ -81,6 +83,8 @@ DEFAULTS: dict[str, str] = {
     "breaks_enabled": "1",
     "break_minutes": "30",
     "breaks_per_day": "3",
+    "speedup_min": "8",              # ☕ tanaffusdan qaytgach shuncha daqiqa: javobsiz chatlar bo'lsa — «ускорьтесь»;
+                                     # tanaffusdan oldingi «задержка» eslatmasi ham kamida shuncha suriladi (0 — o'chiq)
     # ── Push
     "push_enabled": "1",
     "push_text": "",                 # eski (📚 kutubxonaga ko'chiriladi)

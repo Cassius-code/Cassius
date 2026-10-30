@@ -250,6 +250,9 @@ class Notifier:
                         t, k = text()
                     finally:
                         LANG.reset(tok)
+                if self.locked(uid):                      # 🔒 panel qulflangan — xabar qulf ochilganda keladi
+                    self._hold(uid, key, t, k, html)
+                    continue
                 msg = await self._call(self.bot.send_message, chat_id=uid, text=t, reply_markup=k,
                                        parse_mode="HTML" if html else None, disable_web_page_preview=True)
                 out.append(msg)
@@ -287,7 +290,40 @@ class Notifier:
                 pass
         if text is None or kb is None:
             self.db.run("DELETE FROM sent WHERE key=?", (key,))
+        if key:                                            # 🔒 qulf paytida kutib turgan nusxalar ham
+            if text is None:
+                self.db.run("DELETE FROM held WHERE key=?", (key,))
+            else:
+                self.db.run("UPDATE held SET text=?, kb=? WHERE key=?",
+                            (text or "✅", kb.model_dump_json(exclude_none=True) if kb is not None else "", key))
         return len(rows)
+
+    # ───────────── 🔒 panel qulfi: qulflangan egaga xabarlar yuborilmaydi — qulf ochilganda keladi
+    def locked(self, uid) -> bool:
+        return bool(uid) and self.db.get(f"lock:{uid}") == "1"
+
+    def _hold(self, uid: int, key: str, text: str, kb, html: bool) -> None:
+        self.db.run("INSERT INTO held(uid, key, text, kb, html, ts) VALUES(?,?,?,?,?,?)",
+                    (uid, key or "", text, kb.model_dump_json(exclude_none=True) if kb is not None else "",
+                     1 if html else 0, int(time.time())))
+
+    async def release(self, uid: int) -> int:
+        """Qulf ochildi: kutib turgan xabarlar tartib bilan (savollar tugmalari bilan). -> nechta."""
+        from aiogram.types import InlineKeyboardMarkup
+        n = 0
+        for row in self.db.all("SELECT * FROM held WHERE uid=? ORDER BY id", (uid,)):
+            self.db.run("DELETE FROM held WHERE id=?", (row["id"],))
+            try:
+                k = InlineKeyboardMarkup.model_validate_json(row["kb"]) if row["kb"] else None
+                msg = await self._call(self.bot.send_message, chat_id=uid, text=row["text"], reply_markup=k,
+                                       parse_mode="HTML" if row["html"] else None, disable_web_page_preview=True)
+                if row["key"]:
+                    self.db.run("INSERT INTO sent(key, chat_id, msg_id, ts) VALUES(?,?,?,?)",
+                                (row["key"], uid, msg.message_id, int(time.time())))
+                n += 1
+            except Exception as exc:
+                log.info("Kutib turgan xabar yuborilmadi %s: %s", uid, exc)
+        return n
 
     def forget(self, chat_id: int, msg_id: int) -> None:
         """Xabar panelga aylandi — endi u savol nusxasi emas."""

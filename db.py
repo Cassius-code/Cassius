@@ -223,7 +223,8 @@ CREATE TABLE IF NOT EXISTS breaks (
     minutes INTEGER                           -- «отойду на 15 минут» — aytilgan vaqt (umumiy limitdan oshmaydi)
 );
 CREATE TABLE IF NOT EXISTS pauses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER NOT NULL, start_ts INTEGER NOT NULL, end_ts INTEGER
+    id INTEGER PRIMARY KEY AUTOINCREMENT, folder_id INTEGER NOT NULL, start_ts INTEGER NOT NULL, end_ts INTEGER,
+    nudged INTEGER NOT NULL DEFAULT 0          -- ☕ tanaffusdan keyin «ускорьтесь» tekshirildi
 );
 
 -- ── kassa
@@ -389,6 +390,12 @@ CREATE INDEX IF NOT EXISTS idx_sent_key ON sent(key);
 CREATE TABLE IF NOT EXISTS ignored_msgs (
     chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, ts INTEGER NOT NULL, PRIMARY KEY (chat_id, msg_id)
 );
+-- 🔒 panel qulflangan egaga xabarlar: qulf ochilganda tartib bilan yuboriladi (botning o'z xabarlari, lid matni emas)
+CREATE TABLE IF NOT EXISTS held (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER NOT NULL, key TEXT NOT NULL DEFAULT '', text TEXT NOT NULL,
+    kb TEXT NOT NULL DEFAULT '', html INTEGER NOT NULL DEFAULT 1, ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_held_uid ON held(uid, id);
 """
 
 

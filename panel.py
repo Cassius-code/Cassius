@@ -123,7 +123,8 @@ async def main_menu(ctx, r: Req):
     empty = len(R.empty_rds(db, t.date())) if db.flag("delay_enabled") else 0
     rows.append([(r.L("👥 Hozir ishda", "👥 Сейчас на работе"), "lv")])
     rows.append([(r.L("📅 Bugun kim qayerda", "📅 Кто где сегодня") + (f" ❗{empty}" if empty else ""), "rt")])
-    rows.append([(r.L("🌐 Русский язык", "🌐 O'zbek tili"), r.L("lang:ru", "lang:uz"))])
+    lang_btn = (r.L("🌐 Русский язык", "🌐 O'zbek tili"), r.L("lang:ru", "lang:uz"))
+    rows.append([lang_btn, (r.L("🔒 Qulflash", "🔒 Заблокировать"), "lk")] if r.owner else [lang_btn])
     return ui.join(head, "", card(lines), card(live) if len(live) > 1 else "", card([sysline, pushline])), kb(*rows)
 
 
@@ -160,7 +161,7 @@ async def live_refresh(ctx) -> int:
                 continue                                   # foydalanuvchi boshqa ekranga o'tdi
             req = make_req(ctx, chat, chat, base)
             fn, need = ui.SCREENS[base]
-            if not req.can(need):
+            if not req.can(need) or ctx.notifier.locked(chat):  # 🔒 qulflangan panel — yangilanmaydi
                 ui.VIEW.pop(chat, None)
                 continue
             res = await fn(ctx, req)
@@ -226,6 +227,10 @@ async def refresh_panels(ctx, note: str = "") -> None:
             continue
         req = Req(uid=chat, chat_id=chat, level=level, lang=ctx.lang(chat))
         try:
+            if ctx.notifier.locked(chat):                  # 🔒 qulflangan — panel emas, «Бот сейчас не работает.»
+                from .lock import DECOY
+                await ui.show(ctx.bot, chat, DECOY, None, view=None)
+                continue
             text, markup = await main_menu(ctx, req)
             await ui.show(ctx.bot, chat, text, markup, view="m")
             if note and level == "owner":
@@ -265,8 +270,8 @@ async def set_commands(ctx, uid: int | None = None) -> None:
 
 # ───────────────────────── yo'naltirish
 def build_router(ctx) -> Router:
-    from . import (panel_control, panel_insights, panel_kassa, panel_live, panel_people, panel_push,  # noqa: F401
-                   panel_reports, panel_roster, panel_settings, panel_zp, private)
+    from . import (lock, panel_control, panel_insights, panel_kassa, panel_live, panel_people,  # noqa: F401
+                   panel_push, panel_reports, panel_roster, panel_settings, panel_zp, private)
     from .db import EFFECTS
     r = Router(name="panel")
     ui.STORE = ctx.db
@@ -319,6 +324,21 @@ def build_router(ctx) -> Router:
             EFFECTS.set(None)
         await render(req, res, edit_id=edit_id, effects=eff[0])
 
+    async def locked_input(message: Message) -> bool:
+        """🔒 Panel qulflangan ega yozdi: to'g'ri kod — qulf ochiladi; boshqa har narsa — faqat «Бот сейчас не работает.»
+        (xabar chatdan o'chadi — kod ham). -> qulflangan edimi."""
+        uid = message.from_user.id if message.from_user else None
+        if not ctx.notifier.locked(uid):
+            return False
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        from . import lock
+        if not await lock.try_unlock(ctx, uid, message.chat.id, (message.text or "").strip()):
+            await lock.show_decoy(ctx, message.chat.id)
+        return True
+
     @r.callback_query(F.message.chat.type == "private")
     async def on_cb(cb: CallbackQuery) -> None:
         uid = cb.from_user.id
@@ -327,6 +347,10 @@ def build_router(ctx) -> Router:
             await cb.answer()                              # tugma darhol «javob beradi»
         except Exception:
             pass
+        if ctx.notifier.locked(uid):                       # 🔒 qulflangan — hech qaysi tugma ishlamaydi
+            from . import lock
+            await lock.show_decoy(ctx, cb.message.chat.id)
+            return
         req = make_req(ctx, uid, cb.message.chat.id, data, message=cb.message)
         from .kassa import ACTOR
         ACTOR.set(uid)                                     # kassa tarixi: kim o'zgartirdi
@@ -356,6 +380,8 @@ def build_router(ctx) -> Router:
 
     @r.message(F.chat.type == "private", Command("start", "menu"))
     async def on_menu(message: Message) -> None:
+        if await locked_input(message):
+            return
         req = make_req(ctx, message.from_user.id, message.chat.id)
         if not req.level:
             from . import private
@@ -370,6 +396,8 @@ def build_router(ctx) -> Router:
 
     @r.message(F.chat.type == "private", Command("hisobot", "otchet", "report"))
     async def on_report(message: Message) -> None:
+        if await locked_input(message):
+            return
         req = make_req(ctx, message.from_user.id, message.chat.id, data="r:td")
         if not req.level:
             return
@@ -387,6 +415,8 @@ def build_router(ctx) -> Router:
     @r.message(F.chat.type == "private", Command("ega", "owner"))
     async def on_recover(message: Message) -> None:
         """🔐 Ega akkaunti yo'qolsa: yangi akkauntdan «/ega KOD»."""
+        if await locked_input(message):
+            return
         from . import recovery
         u = message.from_user
         parts = (message.text or "").split(maxsplit=1)
@@ -405,19 +435,19 @@ def build_router(ctx) -> Router:
             await message.answer(replies.get(res, "⚠️"))
         except Exception:
             pass
-        for oid in (ctx.notifier.owner_ids() if note else []):
-            if oid != u.id:                                 # boshqa egalarga xabar
-                try:
-                    await ctx.bot.send_message(oid, note, parse_mode="HTML")
-                except Exception:
-                    pass
+        if note:                                            # boshqa egalarga xabar (🔒 qulflanganiga — ochilganda)
+            await ctx.notifier._send_many([oid for oid in ctx.notifier.owner_ids() if oid != u.id], note)
 
     @r.message(F.chat.type == "private", Command("id"))
     async def on_id(message: Message) -> None:
+        if await locked_input(message):
+            return
         await message.answer(f"🆔 <code>{message.from_user.id}</code>", parse_mode="HTML")
 
     @r.message(F.chat.type == "private")
     async def on_message(message: Message) -> None:
+        if await locked_input(message):
+            return
         ui.touch(message.chat.id)
         uid = message.from_user.id if message.from_user else None
         req = make_req(ctx, uid, message.chat.id, text=(message.text or message.caption or "").strip(), message=message)
