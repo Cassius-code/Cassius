@@ -232,7 +232,8 @@ CREATE TABLE IF NOT EXISTS prices (id INTEGER PRIMARY KEY AUTOINCREMENT, lo INTE
 CREATE TABLE IF NOT EXISTS reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER, chat_id INTEGER, msg_id INTEGER, sender_id INTEGER,
     sender_name TEXT NOT NULL DEFAULT '', raw TEXT, status TEXT NOT NULL DEFAULT 'pending', created TEXT NOT NULL DEFAULT '',
-    tag TEXT NOT NULL DEFAULT ''              -- hisobot tepasidagi notanish ism (yangi xodim sifatida taklif qilinadi)
+    tag TEXT NOT NULL DEFAULT '',             -- hisobot tepasidagi notanish ism (yangi xodim sifatida taklif qilinadi)
+    date_ok INTEGER NOT NULL DEFAULT 0        -- ⚠️ sana xato emasmi — so'raldi va javob berildi
 );
 CREATE INDEX IF NOT EXISTS idx_reports_person ON reports(person_id, status);
 CREATE TABLE IF NOT EXISTS checks (
@@ -257,6 +258,23 @@ CREATE TABLE IF NOT EXISTS adj (
     pct REAL                                  -- 🔒 qattiq rejim: kunlik zp ning % i (usd hisobotdan keyin hisoblanadi)
 );
 CREATE INDEX IF NOT EXISTS idx_adj_person ON adj(person_id, day);
+-- 💸 jarima zinapoyasi: «zaderjka» (har kuni noldan) va «kech qolish» (har dushanba noldan): 1-si, 2-si …;
+-- summa — egasi yozgani. period: zaderjka — kun, kech qolish — haftaning dushanbasi
+CREATE TABLE IF NOT EXISTS strikes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, kind TEXT NOT NULL, period TEXT NOT NULL,
+    day TEXT NOT NULL, ts INTEGER NOT NULL, n INTEGER NOT NULL, usd REAL NOT NULL DEFAULT 0, folder_id INTEGER,
+    ref TEXT NOT NULL DEFAULT '', adj_id INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_strikes_person ON strikes(person_id, kind, period);
+CREATE INDEX IF NOT EXISTS idx_strikes_ts ON strikes(ts);
+-- 📅 bugun kim qayerda: shu kunga RD xodimi (odatdagisi o'rniga) va «bugun ishlamaydi»
+CREATE TABLE IF NOT EXISTS roster (
+    day TEXT NOT NULL, folder_id INTEGER NOT NULL, person_id INTEGER NOT NULL, ts INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, folder_id)
+);
+CREATE TABLE IF NOT EXISTS roster_off (
+    day TEXT NOT NULL, person_id INTEGER NOT NULL, ts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, person_id)
+);
 CREATE TABLE IF NOT EXISTS transfers (
     id INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL, from_id INTEGER NOT NULL, to_id INTEGER NOT NULL,
     pct REAL NOT NULL, cancelled INTEGER NOT NULL DEFAULT 0
@@ -314,13 +332,29 @@ CREATE TABLE IF NOT EXISTS broadcasts (
     id INTEGER PRIMARY KEY AUTOINCREMENT, started_ts INTEGER NOT NULL, finished_ts INTEGER, trigger TEXT NOT NULL,
     total INTEGER NOT NULL DEFAULT 0, sent INTEGER NOT NULL DEFAULT 0, failed INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'running', kind TEXT NOT NULL DEFAULT '',
-    slot TEXT NOT NULL DEFAULT ''             -- kun bo'lagi (morning/day/evening): uzilsa — davom etish shu tartibda
+    slot TEXT NOT NULL DEFAULT '',            -- 🌅 morning / ☀️ day: uzilsa — davom etish shu tartibda
+    push_id INTEGER,                          -- 📚 qaysi Push (raqami)
+    control INTEGER NOT NULL DEFAULT 0        -- 🧪 10% nazorat guruhi bilan yuborilgan
 );
--- har Push'ni kim oldi: keyin yozdimi (90 daqiqa) va kartagacha yetdimi (24 soat) — oxirgi Push'ga yoziladi
+-- har Push'ni kim oldi: keyin yozdimi (90 daqiqa) va kartagacha yetdimi (24 soat) — oxirgi Push'ga yoziladi.
+-- held=1 — 🧪 nazorat guruhi: Push yuborilmadi (taqqoslash uchun — ular ham o'zi yozdimi)
 CREATE TABLE IF NOT EXISTS push_log (
     bid INTEGER NOT NULL, chat_id INTEGER NOT NULL, topic_id INTEGER NOT NULL, folder_id INTEGER,
-    ts INTEGER NOT NULL, replied_ts INTEGER, card_ts INTEGER,
+    ts INTEGER NOT NULL, replied_ts INTEGER, card_ts INTEGER, held INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (bid, chat_id, topic_id)
+);
+-- 📚 Push kutubxonasi: har Push — raqam. Nomni bot beradi (№ · turi · sana); mazmun o'qilmaydi, faqat aynan bir
+-- xil nusxani tanish uchun iz (fp) saqlanadi
+CREATE TABLE IF NOT EXISTS pushes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL DEFAULT 'text', text TEXT NOT NULL DEFAULT '',
+    media TEXT NOT NULL DEFAULT '', fp TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
+    created_ts INTEGER NOT NULL DEFAULT 0, updated_ts INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_pushes_fp ON pushes(fp);
+-- bitta raqamli Push bitta lidga hech qachon ikki marta ketmaydi (held=1 — nazorat guruhi, olmagan)
+CREATE TABLE IF NOT EXISTS push_got (
+    push_id INTEGER NOT NULL, chat_id INTEGER NOT NULL, topic_id INTEGER NOT NULL, ts INTEGER NOT NULL,
+    bid INTEGER, held INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (push_id, chat_id, topic_id)
 );
 CREATE INDEX IF NOT EXISTS idx_push_log_thread ON push_log(chat_id, topic_id, ts);
 -- ⏰ javobsiz zaderjka: eslatma (zaderjka xabariga javob) va muhlatdan keyin jarima — har zaderjka xabariga bitta

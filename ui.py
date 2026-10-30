@@ -1,7 +1,7 @@
 """Panel yadrosi: chatda doim BITTA panel xabari (joyida o'zgaradi), tugma bosilishi bilan darhol javob, ekranlar.
 
 Har bir ekran — funksiya: (ctx, u: Req) -> (matn, klaviatura). Ro'yxatga @screen("prefiks", level) bilan qo'shiladi.
-Matn kiritish — @on_input("amal") bilan. Darajalar: view < full < owner.
+Matn kiritish — @on_input("amal") bilan. Darajalar: zp (faqat zp) < view < full < owner.
 
 «‹ Orqaga» — haqiqiy oldingi ekranga (tarix). Oldingi ekran faqat ko'rish bo'lsa — yangilab ochiladi; amal bajargan
 bo'lsa (bazaga yozgan, xabar yuborgan) — qayta bajarilmaydi, o'sha paytdagi ko'rinishi qaytadi.
@@ -18,7 +18,7 @@ from .db import mark_effect
 
 log = logging.getLogger("ui")
 
-LEVELS = {"": 0, "view": 1, "full": 2, "owner": 3}
+LEVELS = {"": 0, "zp": 1, "view": 2, "full": 3, "owner": 4}   # zp — «💵 faqat zp» (faqat zp ekranlari)
 SCREENS: dict[str, tuple] = {}         # prefiks -> (fn, level)
 INPUTS: dict[str, tuple] = {}          # amal -> (fn, level)
 PANEL: dict[int, int] = {}             # chat_id -> panel xabari id
@@ -406,3 +406,31 @@ def previous(uid: int) -> dict | None:
         return None
     st.pop()
     return st[-1]
+
+
+def base_of(view: str | None) -> str | None:
+    """Amal bajargan ekran manzilidan «faqat ko'rish» manzili: oxirgi amal argumenti olib tashlanadi
+    («sa:5:p» → «sa:5», «psw:3:2» → «psw:3»). Topilmasa — None."""
+    if not view or view == "?":
+        return None
+    parts = view.split(":")
+    if len(parts) < 2 or parts[0] not in SCREENS:
+        return None
+    return ":".join(parts[:-1])
+
+
+def history_entry(r: "Req", effects: int) -> tuple[str, bool]:
+    """«‹ Orqaga» uchun shu ekranning manzili va uni qayta ochish xavfsizmi.
+    Orqaga hamisha ekranni YANGIDAN quradi (hozirgi holat bilan) — eski ko'rinish hech qachon qaytmaydi.
+    Amal bajargan ekran (o'chirish/yoqish …) — amalsiz manzili bilan yoziladi (amal qayta bajarilmaydi):
+    amaldan oldin ochiq turgan o'sha ekran («sa:5» → «sa:5:p» bosildi → «sa:5»), bo'lmasa — oxirgi argumentsiz."""
+    view = r.view
+    if not view or view == "?":
+        return "?", False
+    if effects == 0 or r.view_set or r.calls >= 2:
+        return view, True
+    for e in reversed(HIST.get(r.uid) or []):
+        if e["safe"] and not e["ask"] and e["data"] != view and view.startswith(e["data"] + ":"):
+            return e["data"], True
+    base = base_of(view)
+    return (base, True) if base else (view, False)

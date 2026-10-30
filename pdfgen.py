@@ -134,3 +134,37 @@ def overall_pdf(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, zp: boo
     buf = io.BytesIO()
     SimpleDocTemplate(buf, pagesize=A4, leftMargin=32, rightMargin=32, topMargin=32, bottomMargin=32).build(story)
     return buf.getvalue()
+
+
+def person_pdf(b: dict, r: dict, s: dt.date, e: dt.date, lang: str, owner: bool, ready: bool = True) -> bytes:
+    """📄 Bitta xodim: kassa (cheklar soni, $), kunlar bo'yicha cheklar, bonus/jarima va zp (hisoblanmagan bo'lsa —
+    «taxminiy»). Egasining va Arturning ulushi yo'q."""
+    _setup()
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Spacer
+    st = _styles()
+
+    def L(uz, ru):
+        return ru if lang == "ru" else uz
+    story = [_p(r["p"]["name"], st["h"]), _p(V.label(s, e), st["sub"]), Spacer(1, 10)]
+    head = [L("Cheklar (Кол-во рд)", "Кол-во рд"), L("Kassa", "Касса"), L("Kassa ($)", "Касса ($)")]
+    story.append(_table([[_p(x, st["cb"]) for x in head],
+                         [_p(r["n"], st["c"]), _p(V.num(r["raw"]), st["c"]), _p(V.money(r["usd"]) + " $", st["c"])]],
+                        [160, 160, 160]))
+    story += [Spacer(1, 8), _p(L("Zp", "Зп") + ("" if ready else L(" (taxminiy — hafta hali hisoblanmagan)",
+                                                                      " (примерно — неделя ещё не рассчитана)")),
+                               st["b"])]
+    for line in V.zp_lines(b, r, lang, owner, True):
+        story.append(_p(_plain(line), st["p"]))
+    if r["n"]:
+        story += [Spacer(1, 10), _p(L("Kunlar bo'yicha cheklar", "Чеки по дням"), st["b"])]
+        data = [[_p(x, st["cb"]) for x in (L("Kun", "День"), L("Cheklar", "Чеки"), L("Kassa", "Касса"), "$")]]
+        for d, dd in r["days"].items():
+            data.append([_p(V.dshort(d), st["c"]), _p(", ".join(str(a) for a, _u in dd["items"])
+                                                      + (f"  → {', '.join(dd['ops'])}" if dd["ops"] else ""), st["c"]),
+                         _p(V.num(dd["raw"]), st["c"]), _p(V.money(dd["usd"]), st["c"])])
+        story.append(_table(data, [50, 290, 80, 60]))
+    story += [Spacer(1, 12), _p(dt.datetime.now().strftime("%d.%m.%Y %H:%M"), st["sub"])]
+    buf = io.BytesIO()
+    SimpleDocTemplate(buf, pagesize=A4, leftMargin=32, rightMargin=32, topMargin=32, bottomMargin=32).build(story)
+    return buf.getvalue()

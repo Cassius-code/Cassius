@@ -73,6 +73,26 @@ async def reply(message: Message, text: str, trash: str | None = None) -> None:
         log.info("Guruhga javob yozilmadi: %s", exc)
 
 
+async def attendance_reply(ctx, message: Message, person, ev: dict, ts: int) -> None:
+    """Ishga kelish / tanaffus natijasi «Проёб»da: kech qolsa — xabar; tanaffus — «☕ @baxa — перерыв до 14:30»;
+    «тут» — 👍; «доброе утро» — 👍. Oddiy xabar bilan kelgan bo'lsa (kech emas) — jim."""
+    arrive, br = ev.get("arrive"), ev.get("break")
+    if arrive == "late":
+        day = local_date(ts, ctx.tz)
+        row = ctx.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?", (day.isoformat(), person["id"]))
+        await reply(message, ctx.att.late_text(person, row["late_min"] if row else 0, ts),
+                    trash=None if ctx.att.late_fined(person["id"], day) else "info")
+    elif arrive in ("arrived", "greeted") and ev.get("cmd") and not br:
+        await react(ctx, message, "👍")
+    if br == "break_start":
+        await reply(message, ctx.att.break_text(person, ts), trash="info")
+    elif br in ("break_end", "break_end_late"):
+        await react(ctx, message, REACT[br])
+    elif br == "break_limit":
+        await reply(message, f"⛔ перерыв · {h(P.mention(person))} — перерывы на сегодня "
+                             f"закончились ({ctx.db.get_int('breaks_per_day', 3)})", trash="info")
+
+
 def group_lock(ctx):
     """🔒 Bot guruhlardan FAQAT «Проёб» ga yozadi. Boshqa guruh/chatga (lidlarga) xabar, reaksiya, tahrir — texnik
     jihatdan to'xtatiladi (Bot API so'rovi umuman ketmaydi). Shaxsiy chatlar (siz, adminlar) — mumkin."""
@@ -276,22 +296,11 @@ def build_router(ctx) -> Router:
         if not edited and uid is not None:
             person = P.identify(ctx.db, uid, message.from_user.username)
             if person is not None:
-                res = await ctx.att.on_text(person, text, int(message.date.timestamp()))
-                if res:
-                    if res in REACT:
-                        await react(ctx, message, REACT[res])
-                    elif res == "late":
-                        row = ctx.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
-                                         (local_date(message.date.timestamp(), ctx.tz).isoformat(), person["id"]))
-                        await react(ctx, message, "👍")
-                        day = local_date(message.date.timestamp(), ctx.tz)
-                        await reply(message, ctx.att.late_text(person, row["late_min"] if row else 0,
-                                                               int(message.date.timestamp())),
-                                    trash=None if ctx.att.late_fined(person["id"], day) else "info")
-                    elif res == "break_limit":
-                        await reply(message, f"⛔ перерыв · {h(P.mention(person))} — перерывы на сегодня "
-                                             f"закончились ({ctx.db.get_int('breaks_per_day', 3)})", trash="info")
-                    return
+                ts = int(message.date.timestamp())
+                ev = await ctx.att.on_text(person, text, ts, report=K.looks_like_report(ctx.db, text))
+                await attendance_reply(ctx, message, person, ev, ts)
+                if ev.get("cmd"):
+                    return                                  # tanaffus / qaytish / «доброе утро» — hisobot emas
         try:
             await kassa_flow.on_group_text(ctx, message, text, staff, uid, name)
         except Exception:

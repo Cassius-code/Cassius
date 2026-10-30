@@ -14,8 +14,13 @@ DEFAULTS: dict[str, str] = {
     "limit_minutes": "20",           # mijozga javob limiti
     "remind_on": "1",                # ⏰ javobsiz zaderjka: eslatma, keyin jarima
     "remind_min": "15",              # «задержка» chiqqanidan shuncha daqiqa o'tib ham javob yo'q — eslatma
-    "remind_grace_min": "5",         # eslatmadan keyin shuncha daqiqa — javob bo'lmasa jarima
-    "remind_fine_usd": "5",          # jarima ($) — o'sha kuni papkada ishlayotgan har xodimga
+    "remind_grace_min": "5",         # eslatmadan keyin shuncha daqiqa — javob bo'lmasa: 1 ta zaderjka (jarima zinapoyasi)
+    "remind_fine_usd": "5",          # eski (bitta summa) — fine_ladder_delay ga ko'chiriladi
+    "fine_ladder_delay": "",         # 💸 zaderjka: haftada 1-si, 2-si … ($), masalan «5 10 15 20»; bo'sh — jarimasiz
+    "fine_ladder_late": "",          # 💸 kech qolish: haftada 1-si, 2-si … ($); bo'sh — jarimasiz
+    "late_after_min": "15",          # shuncha daqiqa va undan ko'p kech kelsa — «kech qoldi» (kamiga xabar ham yo'q)
+    "break_words": "",               # ☕ egasi qo'shgan tanaffus so'zlari (botning o'zi taniydiganlardan tashqari)
+    "back_words": "",                # ☕ egasi qo'shgan «qaytdim» so'zlari
     "clean_delay_min": "10",         # 🧹 «задержка» xabari javobdan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
     "clean_info_min": "60",          # 🧹 boshqa avtomat xabarlar yozilganidan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)
     "newlead_quiet_min": "120",      # 🆕 bugungi yangi lidga shuncha daqiqa (ish vaqtida) hech kim yozmasa — eslatma (0 — o'chiq)
@@ -34,11 +39,11 @@ DEFAULTS: dict[str, str] = {
     "eod_enabled": "1",              # ish tugagach (1 daqiqadan keyin) javobsiz chatlar ro'yxati «Проёб»ga
     "eod_last": "",
     "fines_enabled": "1",            # avtomat jarimalar (zaderjka va kech qolish): 0 — hech kimga yozilmaydi
-    "fine_min_leads": "3",           # papkada bir vaqtda shuncha lid javobsiz bo'lsa — «holat»
-    "fine_forgive": "2",             # har kuni har papkaga shuncha holat kechiriladi (faqat ogohlantirish)
-    "fine_grace": "3",               # kechirimlar tugagach: ogohlantirishdan keyin shuncha daqiqada javob bo'lmasa — jarima
-    "fine_amount": "0",              # zaderjka jarimasi summasi ($), hamma papkaga (papkada alohida summa bo'lmasa)
-    "fine_episode": "30",            # holatdan keyin shu daqiqa ichidagi kechikishlar — o'sha holatning davomi
+    "fine_min_leads": "3",           # eski «👥 ko'p lid birdaniga» (olib tashlangan, ishlatilmaydi)
+    "fine_forgive": "2",             # eski (ishlatilmaydi)
+    "fine_grace": "3",               # eski (ishlatilmaydi)
+    "fine_amount": "0",              # eski (ishlatilmaydi)
+    "fine_episode": "30",            # zaderjkadan keyin shu daqiqa ichidagi kechikishlar — o'sha 1 ta zaderjka
     "skip_emojis": "⚡ 💊",           # bunday lidlar zaderjka va Push'da hisobga olinmaydi
     "delay_batch": "1",              # yaqin zaderjkalar 40 soniya kutib, bitta xabar bo'lib ketadi
     # ── tahlil (har biri yoqiladi/o'chiriladi)
@@ -50,6 +55,7 @@ DEFAULTS: dict[str, str] = {
     "cool_auto": "1",                # 📉 soviyotgan lidni «Проёб»da o'zi eslatadi (papka xodimini belgilab)
     "an_speed": "1",                 # ⚡ javob tezligi → karta va 🏆 g'oliblar formulasi
     "an_push": "1",                  # 📣 Push natijasi (90 daqiqada yozdi, 24 soatda karta)
+    "an_anomaly": "1",               # 📈 g'ayrioddiy o'zgarish: dushanba ertalab egaga (o'tgan hafta vs oldingi 3 hafta)
     "push_reply_min": "90",
     "an_cards": "1",                 # 💳 kartalar: har RD da qaysi lidga necha marta
     "spam_check": "1",               # 🛡 har kuni Push akkauntlarni @SpamBot da tekshirish
@@ -77,8 +83,10 @@ DEFAULTS: dict[str, str] = {
     "breaks_per_day": "3",
     # ── Push
     "push_enabled": "1",
-    "push_text": "",
-    "push_media": "",
+    "push_text": "",                 # eski (📚 kutubxonaga ko'chiriladi)
+    "push_media": "",                # eski (📚 kutubxonaga ko'chiriladi)
+    "push_current": "",              # 📚 hozirgi Push raqami (yuboriladigani)
+    "push_control": "0",             # 🧪 haqiqiy ta'sir: har 10 lidning 1 tasiga yuborilmaydi (taqqoslash), o'rniga boshqasi
     "push_limit": "50",              # HAR papkaga nechta
     "push_speed": "normal",
     "push_emojis": "",               # bo'sh = hammasi (chiqarilganlardan tashqari)
@@ -90,8 +98,8 @@ DEFAULTS: dict[str, str] = {
     "push_days": "0",                # davr: oxirgi N kun (0 — bazadan beri hammasi)
     "push_range_from": "",           # yoki aniq sana oralig'i
     "push_range_to": "",
-    "push_morning_until": "13:00",   # 🌅 ertalabki push shu vaqtgacha
-    "push_evening_from": "19:00",    # 🌙 kechki push shu vaqtdan
+    "push_morning_until": "13:00",   # eski (endi 🌅/☀️ tugma bilan tanlanadi)
+    "push_evening_from": "19:00",    # eski
     "push_repeat_minutes": "180",
     "push_quiet_from": "",
     "push_quiet_to": "",

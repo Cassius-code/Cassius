@@ -20,7 +20,9 @@ TOGGLES = (("an_heatmap", "🕐", "Soatlar (talab xaritasi)", "Часы (кар�
            ("spam_check", "🛡", "Akkauntlarni @SpamBot da tekshirish", "Проверка аккаунтов в @SpamBot",
             "@SpamBot", "@SpamBot"),
            ("delay_batch", "🧲", "Yaqin zaderjkalarni birlashtirish (40 s)", "Объединять близкие задержки (40 с)",
-            "Birlashtirish 40 s", "Объединять 40 с"))
+            "Birlashtirish 40 s", "Объединять 40 с"),
+           ("an_anomaly", "📈", "G'ayrioddiy o'zgarish (dushanba, egaga)", "Необычные изменения (понедельник, владельцу)",
+            "G'ayrioddiy", "Необычное"))
 
 
 def now_of(ctx) -> int:
@@ -180,7 +182,7 @@ async def post_lists(ctx, kind: str, fid: int = 0) -> int:
     if fid:
         data = {fid: data.get(fid) or []}
     n = 0
-    for text in I.group_messages(db, kind, data, days):
+    for text in I.group_messages(db, kind, data, days, ctx.tracker.day_of(now)):
         await ctx.notifier.send_group(text)
         n += 1
     return n

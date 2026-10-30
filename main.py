@@ -104,7 +104,7 @@ async def amain() -> None:
 
     from aiogram import Bot, Dispatcher
 
-    from . import group, panel
+    from . import board, group, panel
     from .accounts import AccountPool
     from .attendance import Attendance
     from .context import Ctx
@@ -154,11 +154,19 @@ async def amain() -> None:
     except Exception:
         log.exception("Telefon raqami hisobotlarini tozalash")
 
+    from . import alive
+    try:                                                  # 🫀 bot uzoq to'xtab turgan bo'lsa — egaga
+        await alive.startup_note(ctx, now)
+    except Exception:
+        log.exception("Tiriklik: ishga tushish")
+
     sched = Scheduler(ctx)
     tasks = [asyncio.create_task(supervise("Telegram bot", lambda: polling(bot, dp), notifier)),
              asyncio.create_task(supervise("Asosiy akkaunt", userbot.run, notifier)),
              asyncio.create_task(supervise("Nazorat", sched.run, notifier)),
-             asyncio.create_task(supervise("Panel", lambda: panel.live_loop(ctx), notifier))]
+             asyncio.create_task(supervise("Panel", lambda: panel.live_loop(ctx), notifier)),
+             asyncio.create_task(supervise("Doska", lambda: board.loop(ctx), notifier)),
+             asyncio.create_task(supervise("Tiriklik", lambda: alive.loop(ctx), notifier))]
 
     async def resume_push() -> None:                      # yangilanish Push'ni uzgan bo'lsa — joyidan davom
         try:

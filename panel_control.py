@@ -20,7 +20,7 @@ DEC_UZ = {"dup": "takror", "service": "xizmat xabari", "ours": "bizning Push", "
           "echo": "xodimdan keyin darhol bot xabari — mijoz emas", "night": "ish vaqtidan tashqari — hisoblanmaydi",
           "late_reply": "xodim javobi kech topildi ✅ — kutish javob paytida yopildi",
           "late_staff": "xodim yozdi (kech topildi)", "late_client": "mijoz yozdi (kech topildi)",
-          "late_other": "kech topildi"}
+          "late_other": "kech topildi", "late_bet": "stavka videosi (kech topildi) — sanaldi"}
 DEC_RU = {"dup": "повтор", "service": "служебное", "ours": "наш Пуш", "excluded": "⚡/💊 — не учитывается",
           "before": "до начала контроля", "stavka_skip": "идёт ставка — не учитывается", "stavka_bet": "кружок ставки",
           "bet_text": "текст ставки", "stavka_end": "ставка закончилась", "auto_bet": "автоставка",
@@ -30,13 +30,24 @@ DEC_RU = {"dup": "повтор", "service": "служебное", "ours": "на�
           "echo": "сразу после сотрудника сообщение бота — не клиент", "night": "вне рабочего времени — не считается",
           "late_reply": "ответ сотрудника найден позже ✅ — ожидание закрыто временем ответа",
           "late_staff": "сотрудник написал (найдено позже)", "late_client": "клиент написал (найдено позже)",
-          "late_other": "найдено позже"}
+          "late_other": "найдено позже", "late_bet": "кружок ставки (найден позже) — засчитан"}
 WHO_UZ = {"client": "mijoz (bot)", "staff": "xodim", "ours": "Push", "service": "xizmat", "": ""}
 WHO_RU = {"client": "клиент (бот)", "staff": "сотрудник", "ours": "Пуш", "service": "служебное", "": ""}
 
 
 def work_hours(ctx) -> str:
     return f"{ctx.db.get('work_start')}–{ctx.db.get('work_end')}"
+
+
+def today_line(ctx, r: Req, fid: int) -> str:
+    """«📅 Bugun — @baxa» (📅 Bugun kim qayerda bo'yicha)."""
+    from . import roster as R
+    from .timeutil import local_date
+    t = local_date(ctx.clock(), ctx.tz)
+    w = R.workers(ctx.db, fid, t)
+    who = ", ".join(h(P.mention(p)) for p in w) or r.L("❗ hech kim", "❗ никого")
+    extra = r.L(" (bugunga qo'yilgan)", " (на сегодня)") if R.override(ctx.db, fid, t) is not None else ""
+    return f"📅 {r.L('Bugun', 'Сегодня')} — <b>{who}</b>{extra}"
 
 
 @screen("c", "view")
@@ -177,22 +188,130 @@ async def clean_settings(ctx, r: Req):
             kb(*grid(row_d, 3), [(f"— {r.L('Boshqa xabarlar', 'Остальное')} —", "ccl")], *grid(row_i, 3), nav(r, "c")))
 
 
-REMIND_CHOICES = (10, 15, 20, 30, 45, 60)
-GRACE_CHOICES = (3, 5, 10, 15, 20, 30)
+REMIND_CHOICES = (3, 5, 10, 15, 20, 30)
+GRACE_CHOICES = (3, 5, 10, 15)
+LATE_CHOICES = (5, 10, 15, 20, 30)
+
+
+def _ladder_words(r: Req, lad: list, kind: str) -> str:
+    """«1-si 0 $, 2-si 5 $, keyingilari 20 $»."""
+    from .fines import money
+    if not lad:
+        return r.L("summalar yozilmagan — jarimasiz", "суммы не заданы — без штрафа")
+    parts = [r.L(f"{i}-si {money(v)} $", f"{i}-я {money(v)} $" if kind == "delay" else f"{i}-е {money(v)} $")
+             for i, v in enumerate(lad, 1)]
+    if len(lad) > 1:
+        parts[-1] = r.L(f"{len(lad)}-si va keyingilari {money(lad[-1])} $",
+                        (f"{len(lad)}-я и дальше {money(lad[-1])} $" if kind == "delay" else
+                         f"{len(lad)}-е и дальше {money(lad[-1])} $"))
+    else:
+        parts = [r.L(f"har biri {money(lad[0])} $", f"каждая {money(lad[0])} $" if kind == "delay" else
+                     f"каждое {money(lad[0])} $")]
+    return ", ".join(parts)
+
+
+def fine_parts(ctx, r: Req) -> list[tuple[str, str, str, bool]]:
+    """Jarimalar: (belgi, nomi, summalar, ishlayaptimi)."""
+    from . import fines
+    off = r.L("o'chiq", "выкл")
+    out = []
+    for kind, icon, name in (("delay", "⏰", r.L("Zaderjka", "Задержка")), ("late", "🕘", r.L("Kech qolish", "Опоздание"))):
+        lad = fines.ladder(ctx.db, kind)
+        ok = bool(lad) and (kind != "delay" or ctx.db.flag("remind_on"))
+        out.append((icon, name, fines.ladder_text(lad, r.lang) if ok else off, ok))
+    return out
+
+
+def fine_line(ctx, r: Req) -> str:
+    """Nazorat menyusida bitta qator: jarimalar yoqiqmi va summalari."""
+    if not ctx.db.flag("fines_enabled"):
+        return f"💸 {r.L('Jarimalar', 'Штрафы')} — {onoff(r, False)}"
+    parts = " · ".join(f"{icon} {amount}" for icon, _name, amount, _ok in fine_parts(ctx, r))
+    return f"💸 {r.L('Jarimalar', 'Штрафы')} — {parts}"
+
+
+@screen("cfn", "view")
+async def fine_rules(ctx, r: Req):
+    """💸 Jarimalar: zaderjka (har kuni noldan) va kech qolish (har hafta noldan) — egasi yozgan summalar bo'yicha."""
+    from . import fines
+    db = ctx.db
+    if r.args and r.args[0] == "t" and r.can("full"):
+        db.toggle("fines_enabled")
+        ui.view(r, "cfn")
+    on = db.flag("fines_enabled")
+    _on, after, grace = ctx.tracker.alert_remind_rules()
+    ep = db.get_int("fine_episode", 30)
+    late = db.get_int("late_after_min", 15)
+    d = r.L("daq", "мин")
+    lines = [f"💸 {r.L('Avtomat jarimalar', 'Автоштрафы')} — {onoff(r, on)}", ""]
+    lad = fines.ladder(db, "delay")
+    lines += [f"⏰ <b>{r.L('Zaderjka', 'Задержка')}</b> — <b>{fines.ladder_text(lad, r.lang)}</b> "
+              f"<i>({r.L('har kuni noldan', 'каждый день с нуля')})</i>",
+              r.L(f"<i>«задержка» → {after // 60} {d} → eslatma → {grace // 60} {d} → javob bo'lmasa: 1 ta zaderjka. "
+                  f"Bir vaqtda kechikkanlar va keyingi {ep} daqiqadagilari — o'sha 1 ta.</i>",
+                  f"<i>«задержка» → {after // 60} {d} → напоминание → {grace // 60} {d} → нет ответа: 1 задержка. "
+                  f"Задержавшиеся одновременно и в следующие {ep} мин — та же 1.</i>"), ""]
+    lad = fines.ladder(db, "late")
+    lines += [f"🕘 <b>{r.L('Kech qolish', 'Опоздание')}</b> — <b>{fines.ladder_text(lad, r.lang)}</b> "
+              f"<i>({r.L('har dushanba noldan', 'с понедельника с нуля')})</i>",
+              r.L(f"<i>Ish boshlanishidan {late} daqiqa va ko'p kech kelsa. Kamiga — xabar ham, jarima ham yo'q.</i>",
+                  f"<i>Опоздание на {late} мин и больше. Меньше — ни сообщения, ни штрафа.</i>"), ""]
+    lines.append(r.L("✍️ <b>Qo'lda</b> — «Проёб»da: <code>@xodim штраф 5</code>",
+                     "✍️ <b>Вручную</b> — в «Проёб»: <code>@сотрудник штраф 5</code>"))
+    note = [r.L("Kimga: o'sha kuni shu RD da ishlayotgan xodimga (📅 Bugun kim qayerda). Tanaffusdagisiga — yo'q.",
+                "Кому: сотруднику, который сегодня работает в этой RD (📅 Кто где сегодня). На перерыве — нет."),
+            r.L("Oxirgi summa keyingilarga ham. 0 — sanaladi, lekin pulsiz. Jarimalar o'chiq bo'lsa — hech narsa "
+                "sanalmaydi va «штраф» so'zi chiqmaydi.",
+                "Последняя сумма — и для следующих. 0 — считается, но без денег. Штрафы выключены — ничего не "
+                "считается и слово «штраф» не пишется.")]
+    rows = []
+    if r.can("full"):
+        rows.append([(f"⏰ {r.L('Zaderjka', 'Задержка')}", "crm"), (f"🕘 {r.L('Kech qolish', 'Опоздание')}", "cfl")])
+    rows.append([(f"📋 {r.L('Bugun va shu hafta', 'Сегодня и неделя')}", "cfw")])
+    if r.can("full"):
+        rows.append([((r.L("⛔ Jarimalarni o'chirish", "⛔ Выключить штрафы") if on else
+                       r.L("✅ Jarimalarni yoqish", "✅ Включить штрафы")), "cfn:t")])
+    rows.append(nav(r, "c"))
+    return ui.join(title("💸", r.L("JARIMALAR", "ШТРАФЫ")), "", card(lines), card(note)), kb(*rows)
+
+
+@screen("cfw", "view")
+async def fine_week(ctx, r: Req):
+    """📋 Bugungi zaderjkalar va shu haftadagi kech qolishlar — har xodim, nechta va qancha."""
+    from datetime import timedelta
+
+    from . import fines
+    from .timeutil import local_date
+    t = local_date(ctx.clock(), ctx.tz)
+    rows = fines.rows_for(ctx.db, t)
+    show_money = r.can("full")
+    lines = []
+    for x in rows:
+        bits = []
+        if x["delay"]:
+            bits.append(f"⏰ {x['delay']}" + (f" ({fines.money(x['usd_delay'])} $)" if show_money else ""))
+        if x["late"]:
+            bits.append(f"🕘 {x['late']}" + (f" ({fines.money(x['usd_late'])} $)" if show_money else ""))
+        lines.append(f"<b>{h(x['p']['name'])}</b> — " + " · ".join(bits))
+    mon = t - timedelta(days=t.weekday())
+    sub = r.L(f"⏰ bugun {t:%d.%m} · 🕘 {mon:%d.%m} dan", f"⏰ сегодня {t:%d.%m} · 🕘 с {mon:%d.%m}")
+    body = card(lines) if lines else r.L("<i>Hozircha hech kimda yo'q 👏</i>", "<i>Пока ни у кого нет 👏</i>")
+    return ui.join(title("📋", r.L("ZADERJKA VA KECH QOLISH", "ЗАДЕРЖКИ И ОПОЗДАНИЯ"), sub), "", body), \
+        kb(nav(r, "cfn"))
 
 
 def remind_line(ctx, r: Req) -> str:
-    on, after, grace, usd = ctx.tracker.alert_remind_rules()
+    on, after, grace = ctx.tracker.alert_remind_rules()
     if not on:
         return f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')} — {onoff(r, False)}"
     return (f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')} — "
-            + r.L(f"{after // 60} daq → eslatma → {grace // 60} daq → <b>{usd:g} $</b>",
-                  f"{after // 60} мин → напоминание → {grace // 60} мин → <b>{usd:g} $</b>"))
+            + r.L(f"{after // 60} daq → eslatma → {grace // 60} daq", f"{after // 60} мин → напоминание → {grace // 60} мин"))
 
 
 @screen("crm", "full")
 async def remind_screen(ctx, r: Req):
-    """⏰ Zaderjka javobsiz qolsa: N daqiqada eslatma (o'sha xabarga javob qilib), muhlatda javob yo'q — jarima."""
+    """⏰ Zaderjka javobsiz qolsa: N daqiqada eslatma, muhlatda javob yo'q — 1 ta zaderjka (kunlik zinapoya)."""
+    from . import fines
     db = ctx.db
     a = r.args
     if a and a[0] in ("on", "off"):
@@ -203,48 +322,121 @@ async def remind_screen(ctx, r: Req):
         if v in (REMIND_CHOICES if a[0] == "r" else GRACE_CHOICES):
             db.set("remind_min" if a[0] == "r" else "remind_grace_min", str(v))
         ui.view(r, "crm")
-    on, after, grace, usd = ctx.tracker.alert_remind_rules()
+    on, after, grace = ctx.tracker.alert_remind_rules()
+    lad = fines.ladder(db, "delay")
+    ep = db.get_int("fine_episode", 30)
     lines = [f"{r.L('Holat', 'Состояние')}: " + (r.L("🟢 <b>yoqiq</b>", "🟢 <b>включено</b>") if on else
                                                  r.L("⚪ o'chiq", "⚪ выключено")),
-             r.L(f"1) Zaderjka xabari chiqqanidan <b>{after // 60} daqiqa</b> o'tib ham javob bo'lmasa — eslatma: o'sha "
-                 "xabarga javob qilib, xodimlar belgilanadi. Ish kuni tugaganda hali javobsiz bo'lsa — darhol.",
+             r.L(f"1) «задержка» chiqqanidan <b>{after // 60} daqiqa</b> o'tib ham javob bo'lmasa — eslatma: o'sha "
+                 "xabarga javob qilib, RD ning bugungi xodimi belgilanadi. Ish kuni tugaganda hali javobsiz bo'lsa — "
+                 "darhol.",
                  f"1) Если через <b>{after // 60} мин</b> после «задержки» ответа нет — напоминание ответом на это "
-                 "сообщение, с отметкой сотрудников. Если рабочий день закончился, а ответа нет — сразу."),
-             r.L(f"2) Eslatmadan keyin <b>{grace // 60} daqiqa</b>da javob bo'lmasa — jarima <b>{usd:g} $</b> o'sha kuni "
-                 "papkada ishlayotgan har xodimga. Jarima xabari «Проёб»da qoladi.",
-                 f"2) Если через <b>{grace // 60} мин</b> после напоминания ответа нет — штраф <b>{usd:g} $</b> каждому "
-                 "сотруднику папки, который сегодня на работе. Сообщение о штрафе остаётся в «Проёб»."),
-             r.L("<i>«Holat» (ko'p lid javobsiz) uchun jarima olgan havolalar bu yerda qayta jarimaga kirmaydi.</i>",
-                 "<i>Ссылки, за которые уже был штраф по «много лидов без ответа», повторно не штрафуются.</i>")]
+                 "сообщение, с отметкой сегодняшнего сотрудника RD. Если рабочий день закончился — сразу."),
+             r.L(f"2) Eslatmadan keyin <b>{grace // 60} daqiqa</b>da ham javob bo'lmasa — <b>1 ta zaderjka</b>.",
+                 f"2) Если через <b>{grace // 60} мин</b> после напоминания ответа нет — <b>1 задержка</b>."),
+             r.L(f"3) Summalar: <b>{_ladder_words(r, lad, 'delay')}</b>. Har kuni noldan.",
+                 f"3) Суммы: <b>{_ladder_words(r, lad, 'delay')}</b>. Каждый день с нуля."),
+             r.L(f"4) Bir vaqtda kechikkanlar va keyingi <b>{ep} daqiqa</b>dagilari — o'sha 1 ta zaderjka.",
+                 f"4) Задержавшиеся одновременно и в следующие <b>{ep} мин</b> — та же 1 задержка."),
+             r.L("<i>Eslatma paytida tanaffusdagi xodimga jarima yo'q. Matn: «💸 @xodim, вам штраф 10 $ за задержку "
+                 "(2-я за сегодня)».</i>",
+                 "<i>Кто на перерыве в момент напоминания — без штрафа. Текст: «💸 @сотрудник, вам штраф 10 $ за "
+                 "задержку (2-я за сегодня)».</i>")]
     d = r.L("daq", "мин")
     row_r = [(("✅ " if after // 60 == v else "") + f"⏰ {v} {d}", f"crm:r:{v}") for v in REMIND_CHOICES]
     row_g = [(("✅ " if grace // 60 == v else "") + f"⏳ {v} {d}", f"crm:g:{v}") for v in GRACE_CHOICES]
-    rows = grid(row_r, 3) + grid(row_g, 3)
-    rows.append([(f"💸 {r.L('Jarima', 'Штраф')}: {usd:g} $", "crmf"),
+    rows = grid(row_r, 3) + grid(row_g, 4)
+    rows.append([(f"💸 {r.L('Summalar', 'Суммы')}: {fines.ladder_text(lad, r.lang)}", "cfi:fine_ladder_delay")])
+    rows.append([(f"🔁 {ep} {d} — {r.L('bitta zaderjka', 'одна задержка')}", "cfi:fine_episode"),
                  ((r.L("⛔ O'chirish", "⛔ Выключить"), "crm:off") if on else (r.L("✅ Yoqish", "✅ Включить"), "crm:on"))])
     rows.append(nav(r, "cfn"))
-    return ui.join(title("⏰", r.L("JAVOBSIZ ZADERJKA", "ЗАДЕРЖКА БЕЗ ОТВЕТА")), "", card(lines),
+    return ui.join(title("⏰", r.L("ZADERJKA", "ЗАДЕРЖКА")), "", card(lines),
                    r.L("<i>⏰ — eslatma qachon · ⏳ — eslatmadan keyin muhlat</i>",
                        "<i>⏰ — когда напомнить · ⏳ — срок после напоминания</i>")), kb(*rows)
 
 
-@screen("crmf", "full")
-async def remind_fine_ask(ctx, r: Req):
-    ui.ask(r, "remind_fine", "crm")
-    return (title("💸", r.L("ESLATMADAN KEYIN JARIMA", "ШТРАФ ПОСЛЕ НАПОМИНАНИЯ")) + "\n\n" +
-            card([r.L(f"Hozir: <b>{ctx.db.get('remind_fine_usd')} $</b> har xodimga.",
-                      f"Сейчас: <b>{ctx.db.get('remind_fine_usd')} $</b> каждому."),
-                  r.L("Necha $ bo'lsin? Son yuboring (0 — jarimasiz, faqat eslatma).",
-                      "Сколько $? Пришлите число (0 — без штрафа, только напоминание).")]),
-            ui.cancel_kb(r, "crm"))
+@screen("cfl", "full")
+async def fine_late(ctx, r: Req):
+    """🕘 Kech qolish: necha daqiqadan «kech», haftalik zinapoya (har dushanba noldan)."""
+    from . import fines
+    db = ctx.db
+    if len(r.args) == 2 and r.args[0] == "a" and r.args[1].isdigit() and int(r.args[1]) in LATE_CHOICES:
+        db.set("late_after_min", r.args[1])
+        ui.view(r, "cfl")
+    lad = fines.ladder(db, "late")
+    late = db.get_int("late_after_min", 15)
+    d = r.L("daq", "мин")
+    n2 = fines.amount_for(lad, 2)
+    sample = f" — вам штраф {fines.money(n2)} $ (2-е опоздание за неделю)" if lad and n2 > 0 else (
+        " (2-е опоздание за неделю, без штрафа)" if lad else "")
+    lines = [r.L(f"⏳ Kech hisoblanadi — <b>{late} daqiqa</b> va ko'p (kamiga — xabar ham, jarima ham yo'q)",
+                 f"⏳ Опоздание — от <b>{late} мин</b> (меньше — ни сообщения, ни штрафа)"),
+             r.L(f"💵 Summalar — <b>{_ladder_words(r, lad, 'late')}</b>. Har dushanba noldan.",
+                 f"💵 Суммы — <b>{_ladder_words(r, lad, 'late')}</b>. С понедельника с нуля."),
+             r.L("Ishga keldi = «Проёб»ga birinchi xabari (kechki kassa hisobotidan tashqari) yoki lidga birinchi "
+                 "yozuvi. Dam olish kunida — kech qolish yo'q.",
+                 "Пришёл = первое сообщение в «Проёб» (кроме вечернего отчёта кассы) или первое сообщение лиду. "
+                 "В выходной опозданий нет.")]
+    note = [r.L("«Проёб»da:", "В «Проёб»:"), f"<i>🕘 @xodim, вы опоздали на {late + 10} мин{sample}</i>",
+            r.L("<i>начало в … · по графику …</i> — mayda qator.", "<i>начало в … · по графику …</i> — мелкой строкой.")]
+    row_a = [(("✅ " if late == v else "") + f"⏳ {v} {d}", f"cfl:a:{v}") for v in LATE_CHOICES]
+    rows = [[(f"💵 {r.L('Summalar', 'Суммы')}: {fines.ladder_text(lad, r.lang)}", "cfi:fine_ladder_late")]]
+    rows += grid(row_a, 5)
+    rows.append(nav(r, "cfn"))
+    return ui.join(title("🕘", r.L("KECH QOLISH", "ОПОЗДАНИЕ")), "", card(lines), card(note)), kb(*rows)
 
 
-@on_input("remind_fine")
-async def set_remind_fine(ctx, r: Req):
+FINE_KEYS = {"fine_episode": (0, 600), "fine_ladder_delay": None, "fine_ladder_late": None}
+
+
+@screen("cfi", "full")
+async def fine_rule_ask(ctx, r: Req):
+    key = r.args[0] if r.args else ""
+    if key not in FINE_KEYS:
+        r.args = []
+        return await fine_rules(ctx, r)
+    back = "cfl" if key == "fine_ladder_late" else "crm"
+    ui.ask(r, "fine_rule", back, key=key)
+    ladder_help = r.L("Summalarni $ da, bo'sh joy bilan yuboring: 1-si, 2-si, 3-si … Oxirgisi keyingilarga ham.\n"
+                      "Masalan: <code>0 5 10 20</code> — 1-si kechiriladi, 2-si 5 $, 3-si 10 $, 4- va keyingilari 20 $.\n"
+                      "<code>5</code> — har biri 5 $. <code>0</code> — jarimasiz.",
+                      "Пришлите суммы в $ через пробел: 1-я, 2-я, 3-я … Последняя — и для следующих.\n"
+                      "Например: <code>0 5 10 20</code> — 1-я прощается, 2-я 5 $, 3-я 10 $, 4-я и дальше 20 $.\n"
+                      "<code>5</code> — каждая 5 $. <code>0</code> — без штрафа.")
+    prompts = {"fine_episode": r.L("Zaderjkadan keyin necha daqiqa ichidagi yangi kechikishlar o'sha 1 ta zaderjka "
+                                   "hisoblansin? Masalan <code>30</code>. <code>0</code> — har biri alohida.",
+                                   "Сколько минут после задержки новые задержки считать той же одной? Например "
+                                   "<code>30</code>. <code>0</code> — каждая отдельно."),
+               "fine_ladder_delay": r.L("<b>⏰ Zaderjka</b> (har kuni noldan).\n", "<b>⏰ Задержка</b> (каждый день с "
+                                                                                 "нуля).\n") + ladder_help,
+               "fine_ladder_late": r.L("<b>🕘 Kech qolish</b> (har dushanba noldan).\n",
+                                       "<b>🕘 Опоздание</b> (с понедельника с нуля).\n") + ladder_help}
+    cur = ctx.db.get(key) or ("—" if key != "fine_episode" else "0")
+    return title("💸", r.L("JARIMA", "ШТРАФ")) + "\n\n" + card(
+        [r.L(f"Hozir: <code>{h(cur)}</code>", f"Сейчас: <code>{h(cur)}</code>"), prompts[key]]), \
+        ui.cancel_kb(r, back)
+
+
+@on_input("fine_rule")
+async def fine_rule_set(ctx, r: Req, key: str):
+    from . import fines
+    if key in ("fine_ladder_delay", "fine_ladder_late"):
+        try:
+            lad = fines.parse_ladder(r.text)
+        except ValueError:
+            return r.L("⚠️ Masalan: 0 5 10 20 (10 tagacha son)", "⚠️ Например: 0 5 10 20 (до 10 чисел)")
+        ctx.db.set(key, fines.ladder_raw(lad))
+        r.args = []
+        if key == "fine_ladder_late":
+            ui.view(r, "cfl")
+            return await fine_late(ctx, r)
+        ui.view(r, "crm")
+        return await remind_screen(ctx, r)
     v = parse_number(r.text)
-    if v is None or not 0 <= v <= 1000:
-        return r.L("⚠️ 0 dan 1000 gacha son yuboring", "⚠️ Пришлите число от 0 до 1000")
-    ctx.db.set("remind_fine_usd", f"{v:g}")
+    lo, hi = FINE_KEYS[key]
+    if v is None or not lo <= v <= hi or v != int(v):
+        return r.L(f"⚠️ {lo} dan {hi} gacha son", f"⚠️ Число от {lo} до {hi}")
+    ctx.db.set(key, str(int(v)))
     r.args = []
     ui.view(r, "crm")
     return await remind_screen(ctx, r)
@@ -289,253 +481,6 @@ async def slide(ctx, r: Req):
             for v in (0, 3, 4, 5, 7, 10)]
     return ui.join(title("🔁", r.L("KETMA-KET XABARLAR", "СООБЩЕНИЯ ПОДРЯД")), "", card(lines)), \
         kb(*grid(opts, 3), nav(r, "c"))
-
-
-def _usd(v: float) -> str:
-    from .kassa_view import money
-    return f"{money(v)} $"
-
-
-def fine_parts(ctx, r: Req) -> list[tuple[str, str, str, bool]]:
-    """Jarimalar jadvali: (belgi, nomi, summa matni, ishlayaptimi) — hammasi bir joyda, aniq summa bilan."""
-    db, tr = ctx.db, ctx.tracker
-    from .attendance import late_fine_text, late_rules, parse_late_fine
-    on, _after, _grace, usd = tr.alert_remind_rules()
-    remind_ok = on and usd > 0
-    inc_usd = db.get_float("fine_amount")
-    own = [(f["name"], float(f["fine_usd"] or 0)) for f in P.folders(db) if float(f["fine_usd"] or 0) > 0]
-    inc_ok = inc_usd > 0 or bool(own)
-    spec, free, _count = late_rules(db)
-    try:
-        late_ok = parse_late_fine(spec) is not None
-    except ValueError:
-        late_ok = False
-    off = r.L("o'chiq", "выкл")
-    return [("⏰", r.L("Zaderjka javobsiz qolsa", "Задержка без ответа"), _usd(usd) if remind_ok else off, remind_ok),
-            ("👥", r.L("Ko'p lid birdaniga", "Много лидов сразу"), (_usd(inc_usd) if inc_usd > 0 else off) +
-             ("".join(f" · {h(n)}: {_usd(v)}" for n, v in own)), inc_ok),
-            ("🕘", r.L("Kech qolish", "Опоздание"), h(late_fine_text(spec, r.lang, free)) if late_ok else off,
-             late_ok)]
-
-
-def fine_line(ctx, r: Req) -> str:
-    """Nazorat menyusida bitta qator: jarimalar yoqiqmi va har biri qancha."""
-    if not ctx.db.flag("fines_enabled"):
-        return f"💸 {r.L('Jarimalar', 'Штрафы')} — {onoff(r, False)}"
-    parts = " · ".join(f"{icon} {amount}" for icon, _name, amount, _ok in fine_parts(ctx, r))
-    return f"💸 {r.L('Jarimalar', 'Штрафы')} — {parts}"
-
-
-def folder_fine_text(ctx, r: Req, f) -> str:
-    from .kassa_view import money
-    own = float(f["fine_usd"] or 0)
-    if own < 0:
-        return r.L("jarimasiz", "без штрафа")
-    if own > 0:
-        return f"<b>{money(own)} $</b> " + r.L("(shu papka uchun)", "(для этой папки)")
-    return f"<b>{money(ctx.db.get_float('fine_amount'))} $</b> " + r.L("(umumiy)", "(общая)")
-
-
-@screen("cfn", "view")
-async def fine_rules(ctx, r: Req):
-    """💸 Jarimalar jadvali: har bir holat — bitta aniq summa. Shu yerdan har biriga kiriladi."""
-    db = ctx.db
-    if r.args and r.args[0] == "t" and r.can("full"):
-        db.toggle("fines_enabled")
-        ui.view(r, "cfn")
-    on = db.flag("fines_enabled")
-    _r_on, after, grace, _usd_r = ctx.tracker.alert_remind_rules()
-    n, forgive, g2 = ctx.tracker.fine_rules()
-    explain = {
-        "⏰": r.L(f"«задержка» → {after // 60} daq → eslatma → {grace // 60} daq → jarima",
-                  f"«задержка» → {after // 60} мин → напоминание → {grace // 60} мин → штраф"),
-        "👥": r.L(f"papkada {n} ta lid bir vaqtda javobsiz → kuniga {forgive} marta kechiriladi → {g2 // 60} daq → "
-                  "jarima",
-                  f"в папке {n} лидов сразу без ответа → в день прощается {forgive} → {g2 // 60} мин → штраф"),
-        "🕘": r.L("ish boshlanishidan kech kelsa («доброе утро» yoki lidga birinchi yozuv) — kelganda «Проёб»da: "
-                  "«🕘 @xodim, вы опоздали на 25 мин — вам штраф …»",
-                  "пришёл позже начала («доброе утро» или первое сообщение лиду) — при приходе в «Проёб»: "
-                  "«🕘 @сотрудник, вы опоздали на 25 мин — вам штраф …»")}
-    lines = [f"💸 {r.L('Avtomat jarimalar', 'Автоштрафы')} — {onoff(r, on)}", ""]
-    for icon, name, amount, ok in fine_parts(ctx, r):
-        lines.append(f"{icon} <b>{name}</b> — <b>{amount}</b>")
-        if ok:
-            lines.append(f"<i>{explain[icon]}</i>")
-        lines.append("")
-    lines.append(r.L("✍️ <b>Qo'lda</b> — «Проёб»da: <code>@xodim штраф 5</code>",
-                     "✍️ <b>Вручную</b> — в «Проёб»: <code>@сотрудник штраф 5</code>"))
-    note = [r.L("Kimga: o'sha kuni shu papkada ishlayotgan xodimlarga (dam olayotganga emas).",
-                "Кому: сотрудникам этой папки, которые сегодня на работе (не в выходной)."),
-            r.L("«Проёб»da qisqa xabar: «💸 @xodim, вам штраф 5 $ за задержку».",
-                "В «Проёб» короткое сообщение: «💸 @сотрудник, вам штраф 5 $ за задержку».")]
-    rows = []
-    if r.can("full"):
-        rows.append([(f"⏰ {r.L('Javobsiz zaderjka', 'Задержка без ответа')}", "crm"),
-                     (f"👥 {r.L('Ko‘p lid', 'Много лидов')}", "cfm")])
-        rows.append([(f"🕘 {r.L('Kech qolish', 'Опоздание')}", "cfl")])
-        rows.append([((r.L("⛔ Jarimalarni o'chirish", "⛔ Выключить штрафы") if on else
-                       r.L("✅ Jarimalarni yoqish", "✅ Включить штрафы")), "cfn:t")])
-    rows.append(nav(r, "c"))
-    return ui.join(title("💸", r.L("JARIMALAR", "ШТРАФЫ")), "", card(lines), card(note)), kb(*rows)
-
-
-@screen("cfm", "full")
-async def fine_many(ctx, r: Req):
-    """👥 Ko'p lid birdaniga javobsiz qolsa: «holat» qoidalari va summasi."""
-    db = ctx.db
-    from .kassa_view import money
-    n, forgive, grace = ctx.tracker.fine_rules()
-    ep = db.get_int("fine_episode", 30)
-    amount = money(db.get_float("fine_amount"))
-    from .rules import plural_leads
-    raz = "раза" if forgive % 10 in (2, 3, 4) and forgive % 100 not in (12, 13, 14) else "раз"
-    story = [r.L(f"1) Papkada bir vaqtda <b>{n} ta lid</b> javobsiz qolsa — bu «holat».",
-                 f"1) В папке одновременно <b>{plural_leads(n)}</b> без ответа — это «случай»."),
-             r.L(f"2) Kuniga birinchi <b>{forgive} marta</b> — faqat ogohlantirish, jarimasiz.",
-                 f"2) Первые <b>{forgive} {raz}</b> в день — только предупреждение, без штрафа."),
-             r.L(f"3) Keyingisida: «<b>{grace // 60} daqiqada</b> javob bering». Javob bo'lmasa — o'sha kuni papkada "
-                 f"ishlayotgan har xodimga <b>{amount} $</b>.",
-                 f"3) Дальше: «ответьте за <b>{grace // 60} мин</b>». Нет ответа — каждому сотруднику папки, который "
-                 f"сегодня на работе, <b>{amount} $</b>."),
-             r.L(f"4) Jarimadan keyin <b>{ep} daqiqa</b> ichidagi kechikishlar — o'sha holat, ikkinchi jarima yo'q.",
-                 f"4) Задержки в течение <b>{ep} мин</b> после штрафа — тот же случай, второго штрафа нет.")]
-    folders = P.folders(db)
-    other = []
-    if folders:
-        other.append(f"<b>📁 {r.L('Papkalar', 'Папки')}</b>")
-        other += [f"{h(f['name'])} — {folder_fine_text(ctx, r, f)}" for f in folders]
-    d = r.L("daq", "мин")
-    rows = grid([(f"👥 {r.L(f'{n} ta lid', plural_leads(n))}", "cfi:fine_min_leads"),
-                 (f"🙏 {r.L(f'{forgive} marta kechirish', f'прощать {forgive} {raz}')}", "cfi:fine_forgive"),
-                 (f"⏳ {grace // 60} {d}", "cfi:fine_grace"),
-                 (f"💵 {amount} $", "cfi:fine_amount"),
-                 (f"🔁 {ep} {d}", "cfi:fine_episode"),
-                 (f"📁 {r.L('Papka bo‘yicha', 'По папкам')}", "cf")])
-    rows.append(nav(r, "cfn"))
-    hint = r.L("O'zgartirish: raqamni bosing va yangisini yozing. Summa 0 — bu jarima o'chiq.",
-               "Изменить: нажмите на число и напишите новое. Сумма 0 — этот штраф выключен.")
-    return ui.join(title("👥", r.L("KO'P LID BIRDANIGA", "МНОГО ЛИДОВ СРАЗУ")), "", card(story),
-                   card(other) if other else "", f"<i>{hint}</i>"), kb(*rows)
-
-
-@screen("cfl", "full")
-async def fine_late(ctx, r: Req):
-    """🕘 Kech qolish jarimasi: narx (har daqiqaga yoki pog'ona), bepul daqiqalar, qanday hisoblanadi — egasi o'zi."""
-    from .attendance import late_fine_amount, late_fine_text, late_rules, parse_late_fine
-    from .kassa_view import money
-    db = ctx.db
-    if len(r.args) == 2 and r.args[0] == "c" and r.args[1] in ("over", "all"):
-        db.set("late_count", r.args[1])
-        ui.view(r, "cfl")
-    spec, free, count = late_rules(db)
-    try:
-        rule = parse_late_fine(spec)
-    except ValueError:
-        rule = None
-    d = r.L("daq", "мин")
-    late = max(25, free + 20)                                      # misol uchun
-    amount = late_fine_amount(spec, late, free, count)
-    how = {"over": r.L("faqat bepuldan ortiq daqiqalar", "только минуты сверх бесплатных"),
-           "all": r.L("hamma kech daqiqalar", "все минуты опоздания")}
-    lines = [f"💵 {r.L('Narx', 'Цена')} — <b>{h(late_fine_text(spec, r.lang))}</b>",
-             f"⏳ {r.L('Bepul', 'Без штрафа')} — <b>{free} {d}</b> "
-             + r.L("gacha kech qolsa", "опоздания"),
-             f"🧮 {r.L('Hisoblanadi', 'Считаются')} — <b>{how[count]}</b>"]
-    if rule is not None and rule[0] == "rate":
-        mins = late if count == "all" or not free else late - free
-        calc = f"{f'({late} − {free})' if mins != late else late} × {rule[1]:g} $ = {money(amount)} $"
-        lines.append(r.L(f"Masalan: {late} daqiqa kech → {calc}", f"Например: опоздание {late} мин → {calc}"))
-    elif rule is not None:
-        lines.append(r.L(f"Masalan: {late} daqiqa kech → {money(amount)} $",
-                         f"Например: опоздание {late} мин → {money(amount)} $"))
-    shown = f" — вам штраф {money(amount)} $" if amount > 0 else ""
-    note = [r.L("Xodim kelganda («доброе утро» yoki lidga birinchi yozuv) «Проёб»da:",
-                "Когда сотрудник пришёл («доброе утро» или первое сообщение лиду), в «Проёб»:"),
-            f"<i>🕘 @xodim, вы опоздали на {late} мин{shown}</i>",
-            r.L("Jarimali xabar o'chmaydi. Dam olish kunida — kech qolish yo'q.",
-                "Сообщение со штрафом не удаляется. В выходной — опоздания нет.")]
-    rows = [[(f"💵 {r.L('Narx', 'Цена')}", "cfi:late_fine"), (f"⏳ {r.L('Bepul daqiqa', 'Без штрафа, мин')}",
-                                                            "cfi:late_free_min")],
-            [(("✅ " if count == "over" else "") + r.L("Ortiqchasi", "Сверх"), "cfl:c:over"),
-             (("✅ " if count == "all" else "") + r.L("Hammasi", "Все минуты"), "cfl:c:all")],
-            nav(r, "cfn")]
-    return ui.join(title("🕘", r.L("KECH QOLISH JARIMASI", "ШТРАФ ЗА ОПОЗДАНИЕ")), "", card(lines), card(note)), \
-        kb(*rows)
-
-
-FINE_KEYS = {"fine_min_leads": (1, 50), "fine_forgive": (0, 20), "fine_grace": (0, 120), "fine_amount": (0, 1000),
-             "fine_episode": (0, 600), "late_fine": None, "late_free_min": (0, 180)}
-
-
-@screen("cfi", "full")
-async def fine_rule_ask(ctx, r: Req):
-    key = r.args[0] if r.args else ""
-    if key not in FINE_KEYS:
-        r.args = []
-        return await fine_rules(ctx, r)
-    back = "cfl" if key.startswith("late_") else "cfm"
-    ui.ask(r, "fine_rule", back, key=key)
-    prompts = {"fine_min_leads": r.L("Bitta papkada nechta lid BIRDANIGA javobsiz qolsa jarima holati bo'lsin? "
-                                     "(masalan <code>3</code>)",
-                                     "Сколько лидов СРАЗУ без ответа в одной папке — случай для штрафа? "
-                                     "(например <code>3</code>)"),
-               "fine_grace": r.L("Ogohlantirishdan keyin javob uchun necha daqiqa? (masalan <code>3</code>)",
-                                 "Сколько минут на ответ после предупреждения? (например <code>3</code>)"),
-               "fine_amount": r.L("Jarima summasi ($), papkaning har xodimiga. Masalan <code>5</code>. "
-                                  "<code>0</code> — jarimasiz.",
-                                  "Сумма штрафа ($) каждому сотруднику папки. Например <code>5</code>. "
-                                  "<code>0</code> — без штрафа."),
-               "fine_forgive": r.L("Har kuni har papkaga necha marta kechirilsin? (<code>0</code> — kechirilmaydi)",
-                                   "Сколько раз в день прощать каждой папке? (<code>0</code> — не прощать)"),
-               "fine_episode": r.L("Jarimadan keyin necha daqiqa ichidagi yangi kechikishlar o'sha holat hisoblansin "
-                                   "(qayta jarima yo'q)? Masalan <code>30</code>.",
-                                   "Сколько минут после штрафа новые задержки считать тем же случаем (без нового "
-                                   "штрафа)? Например <code>30</code>."),
-               "late_fine": r.L("Kech qolishning har daqiqasiga necha $? Masalan <code>2</code>.\n"
-                                "Pog'ona ham bo'ladi: <code>10=2, 30=5</code> — 10+ daqiqa → 2 $, 30+ daqiqa → 5 $.\n"
-                                "<code>0</code> — jarimasiz.",
-                                "Сколько $ за каждую минуту опоздания? Например <code>2</code>.\n"
-                                "Можно ступенями: <code>10=2, 30=5</code> — 10+ мин → 2 $, 30+ мин → 5 $.\n"
-                                "<code>0</code> — без штрафа."),
-               "late_free_min": r.L("Necha daqiqagacha kech qolsa jarima yo'q? Masalan <code>5</code>. "
-                                    "<code>0</code> — birinchi daqiqadan.",
-                                    "До скольких минут опоздания без штрафа? Например <code>5</code>. "
-                                    "<code>0</code> — с первой минуты.")}
-    cur = ctx.db.get(key) or "0"
-    return title("💸", r.L("JARIMA QOIDASI", "ПРАВИЛА ШТРАФА")) + "\n\n" + card(
-        [r.L(f"Hozir: <code>{h(cur)}</code>", f"Сейчас: <code>{h(cur)}</code>"), prompts[key]]), \
-        ui.cancel_kb(r, back)
-
-
-@on_input("fine_rule")
-async def fine_rule_set(ctx, r: Req, key: str):
-    if key == "late_fine":
-        from .attendance import parse_late_fine
-        try:
-            rule = parse_late_fine(r.text)
-        except ValueError:
-            return r.L("⚠️ Masalan: 0.5 yoki 10=2, 30=5", "⚠️ Например: 0.5 или 10=2, 30=5")
-        if rule is None:
-            ctx.db.set(key, "")
-        elif rule[0] == "rate":
-            ctx.db.set(key, f"{rule[1]:g}")
-        else:
-            ctx.db.set(key, ", ".join(f"{m}={usd:g}" for m, usd in rule[1]))
-        r.args = []
-        ui.view(r, "cfl")
-        return await fine_late(ctx, r)
-    v = parse_number(r.text)
-    lo, hi = FINE_KEYS[key]
-    whole = key != "fine_amount"
-    if v is None or not lo <= v <= hi or (whole and v != int(v)):
-        return r.L(f"⚠️ {lo} dan {hi} gacha son", f"⚠️ Число от {lo} до {hi}")
-    ctx.db.set(key, str(int(v)) if whole else f"{v:g}")
-    r.args = []
-    if key == "late_free_min":
-        ui.view(r, "cfl")
-        return await fine_late(ctx, r)
-    ui.view(r, "cfm")
-    return await fine_many(ctx, r)
 
 
 @screen("ct", "full")
@@ -917,10 +862,9 @@ async def folder_card(ctx, r: Req):
              f"<b>{lc['all']}</b> · {r.L('7 kunda yozgan', 'писали за 7 дней')} <b>{lc['week']}</b> · "
              f"{r.L('bugun', 'сегодня')} <b>{lc['today']}</b>",
              f"🚨 {r.L('Zaderjka nazorati', 'Контроль задержек')} — {onoff(r, f['delay_on'])}",
-             f"💸 {r.L('Jarima', 'Штраф')} — {folder_fine_text(ctx, r, f)}"
-             + ("" if ctx.db.flag("fines_enabled") else r.L(" · ⚪ jarimalar o'chiq", " · ⚪ штрафы выключены"))]
+             today_line(ctx, r, fid)]
     rows = grid([(f"👤 {r.L('Xodimlar', 'Сотрудники')}", f"cfp:{fid}"), (f"💬 {r.L('Guruhlar', 'Группы')}", f"cfc:{fid}"),
-                 (f"💸 {r.L('Jarima', 'Штраф')}", f"cff:{fid}"),
+                 (f"📅 {r.L('Bugun kim', 'Кто сегодня')}", f"rtf:{fid}"),
                  ((r.L("⛔ Nazoratni o'chirish", "⛔ Выкл. контроль") if f["delay_on"] else r.L("✅ Nazoratni yoqish",
                                                                                        "✅ Вкл. контроль")),
                   f"cfd:{fid}"),
@@ -938,34 +882,6 @@ async def folder_card(ctx, r: Req):
 async def folder_delay(ctx, r: Req):
     f = must(P.folder(ctx.db, int(r.args[0])))
     P.set_folder(ctx.db, f["id"], delay_on=0 if f["delay_on"] else 1)
-    return await folder_card(ctx, r)
-
-
-@screen("cff", "full")
-async def folder_fine_ask(ctx, r: Req):
-    fid = int(r.args[0])
-    ui.ask(r, "folder_fine", f"cfo:{fid}", fid=fid)
-    from .kassa_view import money
-    return title("💸", r.L("PAPKA JARIMASI", "ШТРАФ ПАПКИ")) + "\n\n" + card(
-        [r.L(f"Umumiy summa: <b>{money(ctx.db.get_float('fine_amount'))} $</b> (💸 Jarima qoidasi).",
-             f"Общая сумма: <b>{money(ctx.db.get_float('fine_amount'))} $</b> (💸 Правила штрафа)."),
-         r.L("Shu papka uchun alohida summa yuboring, masalan <code>5</code>.\n<code>0</code> — umumiy summa.\n"
-             "<code>-</code> — bu papkada jarima yo'q.",
-             "Пришлите отдельную сумму для этой папки, например <code>5</code>.\n<code>0</code> — общая сумма.\n"
-             "<code>-</code> — в этой папке без штрафа.")]), ui.cancel_kb(r, f"cfo:{fid}")
-
-
-@on_input("folder_fine")
-async def folder_fine(ctx, r: Req, fid: int):
-    t = r.text.strip()
-    if t in ("-", "—", "yo'q", "нет"):
-        v = -1.0
-    else:
-        v = parse_number(t)
-        if v is None or v < 0 or v > 1000:
-            return r.L("⚠️ Son yuboring, masalan 5 (yoki 0, -)", "⚠️ Пришлите число, например 5 (или 0, -)")
-    P.set_folder(ctx.db, fid, fine_usd=v)
-    r.args = [str(fid)]
     return await folder_card(ctx, r)
 
 

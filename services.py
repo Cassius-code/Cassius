@@ -29,9 +29,6 @@ def first_run(db, now: int, tz) -> None:
         db.set("track_from", local_date(now, tz).isoformat())
     if not db.get_int("backup_last"):
         db.set("backup_last", str(now))
-    old_rate = db.one("SELECT value FROM settings WHERE key='late_fine_per_min'")
-    if old_rate is not None and not db.get("late_fine") and old_rate["value"] not in ("", "0"):
-        db.set("late_fine", old_rate["value"])
     K.seed_prices(db)
     K.seed_opening(db)
     if not db.get_int("cards_since"):
@@ -49,6 +46,19 @@ def first_run(db, now: int, tz) -> None:
     if not db.get("pay_remind_v1"):                      # 💳 eski kartalar uchun eslatma ketmaydi (faqat yangilari)
         db.run("UPDATE cards SET reminded=1")
         db.set("pay_remind_v1", "1")
+    if not db.get("fines_v2"):
+        # 💸 jarima zinapoyasi (2026-10-30): eski bitta summa (eslatmadan keyin) → zaderjka zinapoyasi; «ko'p lid
+        # birdaniga» olib tashlandi — ochiq «holat»lar yopiladi. Kech qolish: eski «har daqiqaga» qoidasi o'rniga
+        # haftalik zinapoya (summalarni egasi o'zi yozadi).
+        old = db.one("SELECT value FROM settings WHERE key='remind_fine_usd'")
+        if not db.get("fine_ladder_delay") and old is not None and old["value"] not in ("", "0"):
+            db.set("fine_ladder_delay", old["value"])
+        elif not db.get("fine_ladder_delay") and old is None:
+            db.set("fine_ladder_delay", "5")                 # eski standart: eslatmadan keyin 5 $
+        db.run("UPDATE incidents SET status='ok', ended_ts=? WHERE ended_ts IS NULL", (now,))
+        db.set("fines_v2", "1")
+    from . import push_lib
+    push_lib.migrate(db, now)                            # 📚 eski joriy Push va shablonlar — raqamli kutubxonaga
 
 
 def make_backup(ctx) -> tuple[bytes, str]:
@@ -85,21 +95,18 @@ class Scheduler:
         self._last_nudge = 0.0
         self._last_prune = 0.0
         self._last_pool = 0.0
-        self._last_board = 0.0
 
     async def run(self) -> None:
+        from .alive import beat
         last_full = 0.0
         while True:
+            beat("nazorat")                                  # 🫀 tiriklik
             started = time.monotonic()
             if started - last_full >= TICK:
                 last_full = started
                 await self.step()
             else:
                 await self._safe("zaderjka va stavka", self.ctx.tracker.tick(int(self.ctx.clock())))
-            if time.monotonic() - self._last_board >= 5:          # 📌 «Проёб»dagi doska — son o'zgarsa
-                self._last_board = time.monotonic()
-                from . import board
-                await self._safe("doska", board.refresh(self.ctx, int(self.ctx.clock())))
             await asyncio.sleep(max(0.5, FAST_TICK - (time.monotonic() - started)))
 
     async def _safe(self, name: str, coro) -> None:
@@ -120,7 +127,7 @@ class Scheduler:
         if self._spam_task is None or self._spam_task.done():   # 🛡 @SpamBot — fonda (bir necha soniya oladi)
             from . import guard
             self._spam_task = asyncio.create_task(self._safe("@SpamBot", guard.daily(ctx, now)))
-        from . import push_group, tidy
+        from . import push_group, tidy                   # 📅 bo'sh RD eslatmasi — egasi kerak emas dedi (2026-10-30)
         await self._safe("Push paneli", push_group.cleanup(ctx, now))     # tugaganiga 5 daqiqa — panel o'chadi
         await self._safe("«Проёб»ni tozalash", tidy.sweep(ctx, now))      # 🧹 vaqti kelgan bot xabarlari o'chadi
         if time.monotonic() - self._last_cool >= 120:              # 📉 soviyotgan lidlar — har 2 daqiqada
@@ -132,6 +139,8 @@ class Scheduler:
             from . import insights
             await self._safe("yangi lid jim", insights.newlead_alerts(ctx, now))
             await self._safe("to'lov eslatmasi", insights.pay_alerts(ctx, now))
+        from . import anomaly
+        await self._safe("g'ayrioddiy o'zgarish", anomaly.weekly(ctx, now))      # 📈 dushanba ertalab — egaga
         await self._safe("kunlik hisobot", self.daily_report(now))
         await self._safe("haftalik xulosa", self.weekly(now))
         await self._safe("zaxira nusxa", self.backup(now))
@@ -147,6 +156,8 @@ class Scheduler:
                 self.prune(now)
             except Exception:
                 log.exception("Tozalash")
+            from .panel_people import offer_twins
+            await self._safe("bitta odamning 2 yozuvi", offer_twins(ctx))     # 🔗 egasidan so'raladi (bir marta)
 
     async def _auto_push(self, now: int) -> None:
         res = await self.ctx.pusher.tick_schedule(now)

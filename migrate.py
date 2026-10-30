@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import logging
 import sqlite3
 import time
@@ -168,9 +170,17 @@ def _old_structure(db, con) -> dict:
                    (a["user_id"], level, "", _g(a, "added_ts", 0)))
             n += 1
     st["admin"] = n
+    from . import push_lib as L
     for t in _rows(con, "templates"):
         db.run("INSERT INTO templates(name, text, media) VALUES(?,?,?)", (t["name"], _g(t, "text", ""),
                                                                            _g(t, "media", "")))
+        try:                                               # 📚 kutubxonaga ham (aynan bir xili bo'lsa — qo'shilmaydi)
+            m = json.loads(_g(t, "media", "") or "null")
+        except ValueError:
+            m = None
+        if (_g(t, "text", "") or "").strip() or m:
+            if L.same_as(db, L.fingerprint(_g(t, "text", ""), m), 0) is None:
+                L.create(db, _g(t, "text", ""), m if isinstance(m, dict) else None, note=t["name"])
     return st
 
 

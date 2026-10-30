@@ -74,13 +74,23 @@ class PushSender:
                 if ids and attempt == 1 and exc.seconds <= 1800:   # matn ketdi, kruzhok qoldi — shu yerda kutamiz
                     await asyncio.sleep(exc.seconds + 1)
                     continue
+                if ids:                                  # matn lidga yetdi — Push «olgan» (qayta yuborilmasin)
+                    return ids
                 raise SendWait(exc.seconds) from exc
             except errors.PeerFloodError as exc:
+                if ids:
+                    return ids
                 raise SendAbort("PeerFlood: Telegram akkauntni chekladi") from exc
             except skip_errs as exc:
+                if ids:                                  # matn ketdi, kruzhok taqiqlangan — Push «olgan»
+                    return ids
                 raise SendSkip(f"{type(exc).__name__}") from exc
             except ValueError as exc:
+                if ids:
+                    return ids
                 raise SendSkip(f"ValueError: {str(exc)[:60]}") from exc
+        if ids:
+            return ids
         raise SendAbort("yuborib bo'lmadi")
 
     async def send_text(self, chat_id: int, topic_id: int, text: str) -> int:

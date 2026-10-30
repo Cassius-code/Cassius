@@ -33,20 +33,26 @@ async def _send(ctx, ids, text, markup=None, key: str = ""):
 
 
 # ───────────────────────── hisobot matni (guruhdan yoki botning o'ziga yozilgan)
-def _poster(ctx, uid: int | None, staff: bool, is_owner: bool):
+def _poster(ctx, uid: int | None, staff: bool, is_owner: bool, username: str | None = None):
+    """Hisobotni kim yozdi: Telegram ID yoki @username bo'yicha. Nazoratdagi yozuvi («@baxa», kassasiz) bo'lsa va
+    kassada xuddi shu ismli bitta xodim («Baxa») bo'lsa — o'sha (ikki yozuvni birlashtirish egasidan so'raladi)."""
     db = ctx.db
     if is_owner:
         me = db.one("SELECT id FROM people WHERE kassa_kind='self' AND active=1 LIMIT 1")
         return me["id"] if me else None
     if uid and not staff:
-        p = P.by_tg(db, uid)
+        p = P.identify(db, uid, username)
         if p is not None and p["kassa_kind"]:
             return p["id"]
+        if p is not None:
+            for k, c in P.twins(db):
+                if c["id"] == p["id"]:
+                    return k["id"]
     return None
 
 
 def make_report(ctx, text: str, day: dt.date, chat_id: int, msg_id, uid: int | None, name: str, staff: bool,
-                is_owner: bool) -> int | None:
+                is_owner: bool, username: str | None = None) -> int | None:
     """Matndan hisobot yaratish (savolsiz). -> report id yoki None (hisobot emas)."""
     db = ctx.db
     tag, body, tag_name = K.split_tag(db, text)
@@ -55,7 +61,7 @@ def make_report(ctx, text: str, day: dt.date, chat_id: int, msg_id, uid: int | N
     checks = K.report_checks(body, day, is_owner)
     if not checks:
         return None
-    poster = _poster(ctx, uid, staff, is_owner)
+    poster = _poster(ctx, uid, staff, is_owner, username)
     acct = tag or (None if tag_name else poster)
     rid = K.create_report(db, acct, chat_id, msg_id, uid, text, checks, name)
     if tag_name and not tag:
@@ -84,7 +90,9 @@ async def on_group_text(ctx, message, text: str, staff: bool, uid: int | None, n
         await record_adjustments(ctx, text, day, message.chat.id, message.message_id)
         return True
     is_owner = uid is not None and P.admin_level(db, ctx.cfg.owner_ids, uid) == "owner"
-    rid = make_report(ctx, text, day, message.chat.id, message.message_id, uid, name, staff, is_owner)
+    fu = getattr(message, "from_user", None)
+    rid = make_report(ctx, text, day, message.chat.id, message.message_id, uid, name, staff, is_owner,
+                      getattr(fu, "username", None))
     if rid is None:
         return False
     try:
@@ -123,7 +131,8 @@ async def private_entry(ctx, r, message):
         fname = (" ".join(x for x in (u.first_name, u.last_name) if x) if u else
                  getattr(o, "sender_user_name", "") or "")
         fday = local_date(o.date.timestamp(), ctx.tz) if getattr(o, "date", None) else day
-        rid = make_report(ctx, text, fday, r.chat_id, message.message_id, u.id if u else None, fname, False, False)
+        rid = make_report(ctx, text, fday, r.chat_id, message.message_id, u.id if u else None, fname, False, False,
+                          getattr(u, "username", None))
     else:
         rid = make_report(ctx, text, day, r.chat_id, message.message_id, r.uid, L(ctx, "siz", "вы"), True, r.owner)
     if rid is None:
@@ -222,7 +231,7 @@ def question(ctx, rid: int):
         return None
     need = K.report_needs(db, rid)
     if need is None:
-        return None
+        return date_question(ctx, rid)
     kind, arg = need
     snippet = h((r["raw"] or "")[:300])
     who = f"\n👤 {h(r['sender_name'])}" if r["sender_name"] else ""
@@ -258,6 +267,59 @@ def question(ctx, rid: int):
     return (f"❓ <b>{h(p['name'])} ({days}) — {L(ctx, 'kim ishladi?', 'кто работал?')}</b>\n"
             f"{L(ctx, 'Zp o‘shanga, o‘z foizi bilan.', 'Зп получит он, по своему проценту.')}\n\n<code>{snippet}</code>",
             kb(*btn), ctx.notifier.staff_ids())
+
+
+def date_question(ctx, rid: int):
+    """⚠️ «Baxa: 1950 — 25.10 ga yozilgan, qolgan cheklar esa 29.10. Xato emasmi?» — yozishdan oldin, bir marta."""
+    db = ctx.db
+    r = K.report(db, rid)
+    t = local_date(ctx.clock(), ctx.tz)
+    issue = K.date_issue(db, rid, t)
+    if r is None or issue is None:
+        return None
+    p = P.person(db, r["person_id"])
+    who = h(p["name"]) if p else "?"
+    odd_d = sorted({x["rd"] for x in issue["odd"]})
+    ds = ", ".join(f"{d[8:10]}.{d[5:7]}" for d in odd_d)
+    nums = ", ".join(num(x["amount"]) for x in issue["odd"][:6]) + (" …" if len(issue["odd"]) > 6 else "")
+    snippet = h((r["raw"] or "")[:300])
+    if issue["kind"] == "odd":
+        m = issue["main"]
+        text = (f"⚠️ <b>{who}</b>: {nums} — " + L(ctx, f"{ds} ga yozilgan, qolgan cheklar esa {m[8:10]}.{m[5:7]}. "
+                                                     "Xato emasmi?",
+                                                     f"записано на {ds}, а остальные чеки — {m[8:10]}.{m[5:7]}. "
+                                                     "Не ошибка?"))
+        btn = [[(L(ctx, f"📅 {m[8:10]}.{m[5:7]} ga yozish", f"📅 Записать на {m[8:10]}.{m[5:7]}"), f"qr:{rid}:dm:{m}")],
+               [(L(ctx, f"✅ {ds} to'g'ri", f"✅ {ds} верно"), f"qr:{rid}:dk:0")]]
+    else:
+        days = [t, t - dt.timedelta(days=1)]
+        text = (f"⚠️ <b>{who}</b>: " + L(ctx, f"hisobot {ds} ga yozilgan (bugun {t:%d.%m}). Xato emasmi?",
+                                        f"отчёт записан на {ds} (сегодня {t:%d.%m}). Не ошибка?"))
+        btn = [[(L(ctx, f"📅 {d:%d.%m} ga yozish", f"📅 Записать на {d:%d.%m}"), f"qr:{rid}:dm:{d.isoformat()}")
+                for d in days], [(L(ctx, f"✅ {ds} to'g'ri", f"✅ {ds} верно"), f"qr:{rid}:dk:0")]]
+    return f"{text}\n\n<code>{snippet}</code>", kb(*btn), _who_can_see(ctx, r["person_id"])
+
+
+def _plural_checks(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return f"{n} чек"
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return f"{n} чека"
+    return f"{n} чеков"
+
+
+def confirm_text(ctx, rid: int) -> str:
+    """🧾 «Проёб»da hisobot tasdig'i: «✅ Baxa · 29.10 · 3 чека · 8 550» (pul $ yo'q — hamma ko'radi)."""
+    db = ctx.db
+    r = K.report(db, rid)
+    p = P.person(db, r["person_id"]) if r else None
+    parts = []
+    for d in K.report_days(db, rid):
+        rows = db.all("SELECT amount FROM checks WHERE report_id=? AND rd=? AND skip=0", (rid, d))
+        if rows:
+            parts.append(f"{d[8:10]}.{d[5:7]} · {_plural_checks(len(rows))} · {n3(sum(x['amount'] for x in rows))}"
+                         .replace(",", " "))
+    return f"✅ {h(p['name']) if p else '?'} · " + " · ".join(parts) if parts else ""
 
 
 async def cleanup_phone_reports(ctx) -> int:
@@ -300,6 +362,12 @@ async def finalize(ctx, rid: int) -> None:
                                                reaction=[ReactionTypeEmoji(emoji="👌")])
         except Exception:
             pass
+        text = confirm_text(ctx, rid)                         # 🧾 «✅ Baxa · 29.10 · 3 чека · 8 550»
+        if text:
+            try:
+                await ctx.notifier.send_group(text, reply_to=r["msg_id"], trash="info")
+            except Exception as exc:
+                log.info("Hisobot tasdig'i yozilmadi: %s", exc)
     pid = r["person_id"]
     p = P.person(db, pid)
     for n in K.supersede(db, rid):

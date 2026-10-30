@@ -99,17 +99,39 @@ def by_name(db: Database, name: str):
 
 
 def identify(db: Database, tg_id: int | None, username: str | None):
-    """Guruhda yozgan odam — qaysi xodim? ID bo'yicha, bo'lmasa @username bo'yicha (va ID ni eslab qoladi)."""
+    """Yozgan odam — qaysi xodim? Telegram ID bo'yicha, bo'lmasa @username bo'yicha — va ID ni eslab qoladi
+    (keyingi safar @username o'zgarsa ham taniydi). @username bir vaqtda faqat bitta akkauntda bo'ladi."""
+    u = norm_username(username)
     p = by_tg(db, tg_id)
     if p is not None:
-        if username and norm_username(username) != p["username"]:
-            db.run("UPDATE people SET username=? WHERE id=?", (norm_username(username), p["id"]))
+        if u and u != p["username"] and by_username(db, u) is None:
+            db.run("UPDATE people SET username=? WHERE id=?", (u, p["id"]))
+            p = person(db, p["id"])
         return p
-    p = by_username(db, username)
-    if p is not None and tg_id and not p["tg_id"]:
+    p = by_username(db, u)
+    if p is not None and tg_id and p["tg_id"] != tg_id:
         db.run("UPDATE people SET tg_id=? WHERE id=?", (tg_id, p["id"]))
         p = person(db, p["id"])
     return p
+
+
+def _key(s: str | None) -> str:
+    return re.sub(r"[\W_]+", "", (s or "").casefold())
+
+
+def twins(db: Database) -> list[tuple]:
+    """Bitta odamning ikki yozuvi bo'lishi mumkin: kassadagi «Baxa» (💼) va nazoratdagi «@baxa» (👤). Ism yoki
+    @username bir xil bo'lsa — [(kassa yozuvi, nazorat yozuvi)]. Bot ularni o'zi birlashtirmaydi — egasidan so'raydi."""
+    out = []
+    kassa = [p for p in people(db) if p["kassa_kind"] in ("worker", "self")]
+    for c in people(db, kassa=False):
+        keys = {_key(c["name"]), _key(c["username"])} - {""}
+        hits = [k for k in kassa if keys & ({_key(k["name"]), _key(k["username"])} - {""})
+                and (not k["tg_id"] or not c["tg_id"] or k["tg_id"] == c["tg_id"])
+                and (not k["username"] or not c["username"] or k["username"] == c["username"])]
+        if len(hits) == 1:
+            out.append((hits[0], c))
+    return out
 
 
 def label(p) -> str:
@@ -142,10 +164,17 @@ def merge_people(db: Database, keep: int, drop: int) -> None:
         db.conn.execute("DELETE FROM folder_people WHERE person_id=?", (drop,))
         for table, col in (("reports", "person_id"), ("checks", "pay"), ("adj", "person_id"), ("breaks", "person_id"),
                            ("transfers", "from_id"), ("transfers", "to_id"), ("shares", "from_id"),
-                           ("shares", "to_id"), ("payouts", "person_id"), ("audit", "person_id")):
+                           ("shares", "to_id"), ("payouts", "person_id"), ("audit", "person_id"),
+                           ("strikes", "person_id"), ("replies", "person_id"), ("cards", "person_id"),
+                           ("roster", "person_id")):
             db.conn.execute(f"UPDATE {table} SET {col}=? WHERE {col}=?", (keep, drop))
-        db.conn.execute("UPDATE OR IGNORE attendance SET person_id=? WHERE person_id=?", (keep, drop))
-        db.conn.execute("DELETE FROM attendance WHERE person_id=?", (drop,))
+        for table in ("attendance", "roster_off"):
+            db.conn.execute(f"UPDATE OR IGNORE {table} SET person_id=? WHERE person_id=?", (keep, drop))
+            db.conn.execute(f"DELETE FROM {table} WHERE person_id=?", (drop,))
+        if not a["attend"] and b["attend"] and a["kassa_kind"] in ("", "worker"):
+            db.conn.execute("UPDATE people SET attend=1 WHERE id=?", (keep,))
+        if b["days_off"] and not a["days_off"]:
+            db.conn.execute("UPDATE people SET days_off=? WHERE id=?", (b["days_off"], keep))
         db.conn.execute("DELETE FROM people WHERE id=?", (drop,))
 
 
@@ -170,7 +199,8 @@ def delete_person(db: Database, pid: int) -> None:
         for table, col in (("adj", "person_id"), ("pct", "person_id"), ("folder_people", "person_id"),
                            ("attendance", "person_id"), ("breaks", "person_id"), ("transfers", "from_id"),
                            ("transfers", "to_id"), ("shares", "from_id"), ("shares", "to_id"),
-                           ("payouts", "person_id"), ("owner_pct", "acct")):
+                           ("payouts", "person_id"), ("owner_pct", "acct"), ("strikes", "person_id"),
+                           ("roster", "person_id"), ("roster_off", "person_id")):
             c.execute(f"DELETE FROM {table} WHERE {col}=?", (pid,))
         c.execute("DELETE FROM people WHERE id=?", (pid,))
 
@@ -181,11 +211,11 @@ def wipe(db: Database, what: str) -> None:
         c = db.conn
         if what in ("kassa", "people", "all"):
             for t in ("checks", "reports", "adj", "transfers", "shares", "payouts", "audit", "closed_days", "weeks",
-                      "owner_pct"):
+                      "owner_pct", "strikes"):
                 c.execute(f"DELETE FROM {t}")
             c.execute("DELETE FROM requests WHERE kind='zp'")
         if what in ("people", "all"):
-            for t in ("people", "pct", "folder_people", "attendance", "breaks"):
+            for t in ("people", "pct", "folder_people", "attendance", "breaks", "roster", "roster_off"):
                 c.execute(f"DELETE FROM {t}")
         if what in ("push", "all"):
             c.execute("DELETE FROM accounts")

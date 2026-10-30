@@ -13,6 +13,8 @@ MAIN = -1          # papka Push'i asosiy akkauntdan (alohida sessiya ochilmaydi 
 
 
 class PushAccount(TgAccount, PushSender):
+    DOWN_NOTIFY = 600                 # Push akkaunt 10 daqiqa ulanmasa — egaga xabar (ulanganda o'chadi)
+
     def __init__(self, cfg, db, notifier, acc_id: int, on_identified=None):
         super().__init__(cfg, db, notifier)
         self.acc_id = acc_id
@@ -28,6 +30,15 @@ class PushAccount(TgAccount, PushSender):
     def title(self) -> str:
         r = self.row()
         return f"Push «{r['name']}»" if r else f"Push #{self.acc_id}"
+
+    def key(self) -> str:
+        return f"push-{self.acc_id}"
+
+    def relogin_data(self) -> str:
+        return f"sml:re:{self.acc_id}"
+
+    def accounts_data(self) -> str:
+        return f"sa:{self.acc_id}"
 
     async def on_online(self, client) -> None:
         self.db.run("UPDATE accounts SET user_id=?, label=? WHERE id=?", (self.me_id, self.me_label, self.acc_id))
@@ -85,6 +96,18 @@ class AccountPool:
             return "paused"
         acc = self.sender(acc_id)
         return acc.state if acc is not None else "no_session"
+
+    def account(self, acc_id: int | None):
+        """Akkaunt obyekti (sabab, keyingi urinish vaqti — panel uchun)."""
+        return self.sender(acc_id)
+
+    def relogin(self, acc_id: int, session: str) -> None:
+        """🔑 Qayta kirish: o'sha akkaunt yozuviga yangi seans (papka bog'lanishi va nomi saqlanadi)."""
+        self.db.run("UPDATE accounts SET session=?, paused=0 WHERE id=?", (session, acc_id))
+        acc = self.accounts.get(acc_id)
+        if acc is not None:
+            acc.wake()
+        self.sync()
 
     async def stop(self) -> None:
         for t in self._tasks.values():

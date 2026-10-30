@@ -850,6 +850,26 @@ async def q_ok(ctx, r: Req):                                 # eski xabarlar uch
     return None
 
 
+async def ask_merge(ctx, keep, drop) -> None:
+    """Bitta odamning ikki yozuvi (kassadagi va nazoratdagi) — birlashtirish egasidan so'raladi (bir marta)."""
+    key = f"tw:{keep['id']}x{drop['id']}"
+    if ctx.db.get(f"twin_asked:{keep['id']}:{drop['id']}"):
+        return
+    ctx.db.set(f"twin_asked:{keep['id']}:{drop['id']}", "1")
+    from .context import tr
+
+    def build():
+        who = f"@{drop['username']}" if drop["username"] else drop["name"]
+        return (tr(f"🔗 <b>{h(who)}</b> (nazoratda) va <b>{h(keep['name'])}</b> (kassada) — bitta odammi?\n"
+                   "Bitta bo'lsa — birlashtiring: hisobotlari, jarimalari, ishga kelishi va RD lari bitta yozuvda "
+                   "bo'ladi, bot uni hamma joyda taniydi.",
+                   f"🔗 <b>{h(who)}</b> (в контроле) и <b>{h(keep['name'])}</b> (в кассе) — один человек?\n"
+                   "Если да — объедините: отчёты, штрафы, приход и RD будут в одной записи, бот узнаёт его везде."),
+                kb([(tr("🔗 Ha, birlashtirish", "🔗 Да, объединить"), f"psmy:{keep['id']}:{drop['id']}")],
+                   [(tr("✖️ Yo'q, boshqa odam", "✖️ Нет, разные"), f"qn:tw:{keep['id']}x{drop['id']}")]))
+    await ctx.notifier.send_keyed(ctx.notifier.staff_ids(), build, key=key)
+
+
 @screen("qn", "full")
 async def q_dismiss(ctx, r: Req):
     """Ma'lumot xabari: «👌» — hammadagi nusxa o'chadi."""
@@ -939,6 +959,10 @@ async def q_report(ctx, r: Req):
             if stranger and p["kassa_kind"] == "worker" and not p["tg_id"] and not rep["tag"]:
                 P.update_person(db, p["id"], tg_id=sid)          # keyingi safar o'zi taniydi
             note = f"✅ {h(p['name'])}"
+            other = P.by_tg(db, sid) if sid and not rep["tag"] else None
+            if other is not None and other["id"] != pid and not other["kassa_kind"] and \
+                    (not p["tg_id"] or p["tg_id"] == sid):
+                await ask_merge(ctx, p, other)              # nazoratdagi «@baxa» — kassadagi «Baxa»ning o'zimi?
         db.run("UPDATE reports SET person_id=? WHERE id=?", (pid, rid))
         if rep["tag"]:
             for other in _adopt_tagged(ctx, rep["tag"], pid):
@@ -948,6 +972,15 @@ async def q_report(ctx, r: Req):
     if op == "d":
         db.run("UPDATE checks SET rd=? WHERE report_id=? AND rd IS NULL", (arg, rid))
         return await _next(ctx, r, rid, f"✅ {arg[8:10]}.{arg[5:7]}")
+    if op == "dm":                                          # ⚠️ sana xato edi — to'g'ri kunga
+        issue = K.date_issue(db, rid, today(ctx))
+        for x in (issue["odd"] if issue else []):
+            db.run("UPDATE checks SET rd=? WHERE id=?", (arg, x["id"]))
+        db.run("UPDATE reports SET date_ok=1 WHERE id=?", (rid,))
+        return await _next(ctx, r, rid, f"✅ {arg[8:10]}.{arg[5:7]}")
+    if op == "dk":                                          # ⚠️ sana to'g'ri ekan
+        db.run("UPDATE reports SET date_ok=1 WHERE id=?", (rid,))
+        return await _next(ctx, r, rid, "✅")
     if op == "$":
         ui.ask(r, "price", "k", pid=0, rid=rid)
         if _in_panel(r):

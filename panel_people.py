@@ -40,8 +40,13 @@ async def people_list(ctx, r: Req):
         tag = f" · {folders}" if folders else ""
         btn.append((f"{KIND_ICON.get(p['kassa_kind'], '👤')} {p['name']}{tag}"[:40], f"po:{p['id']}"))
     rows = grid(btn)
+    tw = P.twins(db) if not archived and r.can("full") else []
+    if tw:
+        rows.insert(0, [(r.L(f"🔗 Bitta odamning 2 yozuvi: {len(tw)}", f"🔗 Две записи одного человека: {len(tw)}"),
+                         "ptw")])
     if not archived:
-        rows.append([(r.L("🏆 Haftalik ball", "🏆 Баллы недели"), "psc")])
+        rows.append([(r.L("📅 Bugun kim qayerda", "📅 Кто где сегодня"), "rt"),
+                     (r.L("🏆 Haftalik ball", "🏆 Баллы недели"), "psc")])
     if r.can("full") and not archived:
         rows.append([(r.L("➕ Yangi xodim", "➕ Новый сотрудник"), "pn"), (r.L("🗄 Arxiv", "🗄 Архив"), "p:a")])
     rows.append(nav(r, "p" if archived else "m"))
@@ -50,6 +55,34 @@ async def people_list(ctx, r: Req):
     head = title("👥", r.L("XODIMLAR", "СОТРУДНИКИ") + (r.L(" · ARXIV", " · АРХИВ") if archived else ""))
     body = card([legend]) if ps else r.L("<i>Hozircha hech kim yo'q.</i>", "<i>Пока никого нет.</i>")
     return ui.join(head, "", body), kb(*rows)
+
+
+@screen("ptw", "full")
+async def twins_list(ctx, r: Req):
+    """🔗 Kassadagi «Baxa» va nazoratdagi «@baxa» — bitta odam bo'lsa birlashtiriladi (bot uni hamma joyda taniydi)."""
+    lines, rows = [], []
+    for k, c in P.twins(ctx.db):
+        who = f"@{c['username']}" if c["username"] else c["name"]
+        lines.append(f"💼 {h(k['name'])}  ↔  👤 {h(who)}")
+        rows.append([(f"🔗 {k['name']} + {who}"[:40], f"psmy:{k['id']}:{c['id']}")])
+    note = r.L("Kassadagi va nazoratdagi yozuv bir xil ismli. Bitta odam bo'lsa — bosing: hisobotlari, jarimalari, "
+               "ishga kelishi va RD lari bitta yozuvda bo'ladi. Boshqa-boshqa odam bo'lsa — tegmang.",
+               "Записи в кассе и в контроле с одинаковым именем. Если это один человек — нажмите: отчёты, штрафы, приход "
+               "и RD будут в одной записи. Если разные люди — не трогайте.")
+    rows.append(nav(r, "p"))
+    body = card(lines) if lines else r.L("<i>Hammasi joyida 👍</i>", "<i>Всё в порядке 👍</i>")
+    return ui.join(title("🔗", r.L("BIRLASHTIRISH", "ОБЪЕДИНИТЬ")), "", body, f"<i>{note}</i>"), kb(*rows)
+
+
+async def offer_twins(ctx) -> int:
+    """Yangi topilgan «bitta odamning 2 yozuvi» — egasiga bir marta so'rov (tugma bilan)."""
+    from .panel_kassa import ask_merge
+    n = 0
+    for k, c in P.twins(ctx.db):
+        if not ctx.db.get(f"twin_asked:{k['id']}:{c['id']}"):
+            await ask_merge(ctx, k, c)
+            n += 1
+    return n
 
 
 # ───────────────────────── 🏆 haftalik ball
@@ -147,6 +180,19 @@ async def new_person(ctx, r: Req, fid: int = 0):
 
 
 # ───────────────────────── kabinet
+def tg_line(r: Req, p) -> str | None:
+    """Bot bu xodimni Telegram'da taniydimi: ✅ — ID bog'langan; ⏳ — hali yozmagan (yozsa — o'zi taniydi)."""
+    if p["kassa_kind"] in ("self", "partner", "pool"):
+        return f"✈️ @{h(p['username'])}" if p["username"] else None
+    user = f"@{h(p['username'])}" if p["username"] else r.L("@username yo'q", "нет @username")
+    if p["tg_id"]:
+        return f"✈️ {user} · ✅ {r.L('bot taniydi', 'бот узнаёт')}"
+    if p["username"]:
+        return f"✈️ {user} · ⏳ " + r.L("hali yozmagan — «Проёб»ga yoki lidga yozsa, o'zi taniydi",
+                                       "ещё не писал — напишет в «Проёб» или лиду, бот узнает сам")
+    return f"✈️ {user} · ⚠️ " + r.L("⚙️ Sozlamalar → ✈️ @username yozing", "⚙️ Настройки → ✈️ укажите @username")
+
+
 def period_of(ctx, r: Req, pid: int, key: str | None):
     t = today(ctx)
     if not key or key == "o":
@@ -179,7 +225,7 @@ async def person_card(ctx, r: Req):
             + (f" · <b>{K.percent_on(db, pid, today(ctx)):g}%</b>" if p["kassa_kind"] in ("worker", "self", "partner")
                else ""),
             (f"📁 {h(folders)}" if folders else None),
-            (f"✈️ @{h(p['username'])}" if p["username"] else None) or (f"🆔 {p['tg_id']}" if p["tg_id"] else None)]
+            tg_line(r, p)]
     if p["kassa_kind"] in ("worker", "self"):
         info.append(f"💰 {r.L('Zp hisoblash', 'Расчёт зп')} — {onoff(r, p['zp_on'])}")
     lp = K.last_payout(db, pid)
@@ -195,6 +241,10 @@ async def person_card(ctx, r: Req):
         row = b["rows"].get(pid)
         if row is not None:
             parts.append(person_view(b, row, s, e, r.lang, r.owner, zst["ready"]))
+            if p["kassa_kind"] in ("worker", "self") and p["zp_on"] and \
+                    not db.one("SELECT 1 FROM pct WHERE person_id=? AND percent>0", (pid,)):
+                parts.append(card([r.L("⚠️ Foiz yozilmagan — zp 0 chiqadi. ⚙️ Sozlamalar → 💯 Foiz.",
+                                       "⚠️ Процент не задан — зп будет 0. ⚙️ Настройки → 💯 Процент.")]))
     else:
         adjs = K.person_adjs(db, pid, s, e)
         if adjs:
@@ -215,6 +265,8 @@ async def person_card(ctx, r: Req):
                       (r.L("💸 Avans", "💸 Аванс"), f"paa:{pid}") if r.owner else None]]
         rows += grid([(r.L("📋 Jarima/bonuslar", "📋 Штрафы/бонусы"), f"pa:{pid}"), (r.L("📅 Davr", "📅 Период"),
                                                                                       f"pp:{pid}")])
+        if p["kassa_kind"] in ("worker", "self", "pool") and (p["kassa_kind"] != "self" or r.owner):
+            rows.append([(r.L("📄 PDF (shu davr)", "📄 PDF (за период)"), f"ppf:{pid}:{key}")])
         if p["kassa_kind"] in ("worker", "self", "pool"):
             rows += grid([(r.L("🧾 Cheklar", "🧾 Чеки"), f"kx:{pid}:{key}"), (r.L("🔁 Kim ishladi", "🔁 Кто работал"),
                                                                                f"kw:{pid}")])
@@ -230,6 +282,34 @@ async def person_card(ctx, r: Req):
     rows.append(nav(r, "p"))
     return ui.join(*parts), kb(*rows)
 
+
+
+@screen("ppf", "full")
+async def person_pdf(ctx, r: Req):
+    """📄 Xodimning shu davrdagi kassasi, cheklari (kun bo'yicha), bonus/jarima va zp si — PDF."""
+    import asyncio
+    db = ctx.db
+    pid, key = int(r.args[0]), (r.args[1] if len(r.args) > 1 else "o")
+    p = must(P.person(db, pid))
+    if not visible(r, p):
+        return r.L("⛔ Bu xodim faqat egaga ko'rinadi", "⛔ Только владельцу")
+    s, e, key = period_of(ctx, r, pid, key)
+    b = K.calc(db, s, e)
+    row = b["rows"].get(pid)
+    if row is None:
+        return r.L("Ma'lumot yo'q", "Данных нет")
+    ready = K.zp_state(db, s, e, today(ctx))["ready"]
+    from . import pdfgen
+    ui.effect()
+    try:
+        data = await asyncio.to_thread(pdfgen.person_pdf, b, row, s, e, r.lang, r.owner, ready)
+    except Exception as exc:
+        return r.L(f"⚠️ PDF yaratilmadi: {h(exc)}", f"⚠️ PDF не создан: {h(exc)}")
+    safe = "".join(ch for ch in p["name"] if ch.isalnum())[:20] or "xodim"
+    await ctx.notifier.send_document(r.chat_id, data, f"{safe}_{s.isoformat()}_{e.isoformat()}.pdf",
+                                     f"📄 {p['name']} · {plabel(s, e)}")
+    r.args = [str(pid), key]
+    return await person_card(ctx, r)
 
 
 @screen("pp", "view")
@@ -594,7 +674,14 @@ async def edit_do(ctx, r: Req, pid: int, field: str):
             return r.L("⚠️ @username noto'g'ri", "⚠️ Неверный @username")
         other = P.by_username(db, u) if u else None
         if other is not None and other["id"] != pid:
-            return r.L("⚠️ Bu @username boshqa xodimda", "⚠️ Этот @username у другого сотрудника")
+            ui.WAIT.pop(r.uid, None)
+            me = must(P.person(db, pid))
+            return ui.join(title("🔗", r.L("BU @USERNAME BOSHQA YOZUVDA", "ЭТОТ @USERNAME В ДРУГОЙ ЗАПИСИ")), "", card(
+                [r.L(f"@{h(u)} — «{h(other['name'])}» yozuvida. Bitta odam bo'lsa — birlashtiring: «{h(other['name'])}» "
+                     f"«{h(me['name'])}»ga qo'shiladi (kassa, jarima, papkalar, Telegram).",
+                     f"@{h(u)} — в записи «{h(other['name'])}». Если это один человек — объедините: «{h(other['name'])}» "
+                     f"войдёт в «{h(me['name'])}» (касса, штрафы, папки, Telegram).")])), \
+                kb([(r.L("🔗 Birlashtirish", "🔗 Объединить"), f"psmy:{pid}:{other['id']}")], nav(r, f"ps:{pid}"))
         P.update_person(db, pid, username=u)
         if ctx.userbot is not None and ctx.userbot.state == "online":
             ui.bg(ctx.userbot.resolve_people())
@@ -650,6 +737,12 @@ async def merge_pick(ctx, r: Req):
 @screen("psmy", "full")
 async def merge_do(ctx, r: Req):
     keep, drop = int(r.args[0]), int(r.args[1])
-    P.merge_people(ctx.db, keep, drop)
+    if P.person(ctx.db, drop) is not None:
+        P.merge_people(ctx.db, keep, drop)
+        ctx.tracker.reload()
+        if ctx.userbot is not None:
+            ctx.userbot.reload_ids()
+        await ui.toast(ctx.bot, r.chat_id, r.L("🔗 Birlashtirildi", "🔗 Объединено"))
+    await ctx.notifier.resolve(f"tw:{keep}x{drop}", skip=((r.chat_id, getattr(r.message, "message_id", 0)),))
     r.args = [str(keep)]
     return await person_settings(ctx, r)

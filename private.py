@@ -113,6 +113,7 @@ async def notify_request(ctx, rid: int) -> None:
                         [(L("➕ Yangi xodim", "➕ Новый сотрудник"), f"rq:{rid}:new")],
                         [(L("👮 Admin (👁 ko'radi)", "👮 Админ (👁 просмотр)"), f"rq:{rid}:av"),
                          (L("👮 Admin (🛠 to'liq)", "👮 Админ (🛠 полный)"), f"rq:{rid}:af")],
+                        [(L("💵 Faqat zp ko'radi", "💵 Только зп"), f"rq:{rid}:az")],
                         [(L("✖️ Rad etish", "✖️ Отказать"), f"rq:{rid}:n")])
         return text, markup
     await ctx.notifier.send_keyed(ctx.notifier.owner_ids(), build, key=f"rq:{rid}")
@@ -187,8 +188,8 @@ async def _request_screen(ctx, r: Req):
                                  r.L("YUBORILMADI", "НЕ ОТПРАВЛЕНО"), h(p["name"]))), kb(ui.nav(r))
         return None
     # kirish so'rovi
-    if op in ("av", "af"):
-        P.set_admin(db, q["tg_id"], "view" if op == "av" else "full", q["name"])
+    if op in ("av", "af", "az"):
+        P.set_admin(db, q["tg_id"], {"av": "view", "af": "full", "az": "zp"}[op], q["name"])
         close()
         await _tell(ctx, q["tg_id"], "✅ Доступ выдан. Нажмите /menu")
         return ui.join(title("👮", r.L("ADMIN QO'SHILDI", "АДМИН ДОБАВЛЕН"), h(q["name"]))), kb(ui.nav(r))
@@ -226,4 +227,5 @@ async def _request_screen(ctx, r: Req):
         kb([(L("👤 Xodimga bog'lash", "👤 Привязать к сотруднику"), f"rq:{rid}:p")],
            [(L("➕ Yangi xodim", "➕ Новый сотрудник"), f"rq:{rid}:new")],
            [(L("👮 Admin (👁)", "👮 Админ (👁)"), f"rq:{rid}:av"), (L("👮 Admin (🛠)", "👮 Админ (🛠)"), f"rq:{rid}:af")],
+           [(L("💵 Faqat zp ko'radi", "💵 Только зп"), f"rq:{rid}:az")],
            [(L("✖️ Rad etish", "✖️ Отказать"), f"rq:{rid}:n")])

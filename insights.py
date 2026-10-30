@@ -9,6 +9,7 @@ import statistics
 from datetime import datetime
 
 from . import people as P
+from . import roster as R
 from .gtext import esc, small, tag
 from .links import message_link
 from .rules import CARD_WINDOW, label_excluded, skip_list
@@ -198,7 +199,7 @@ def cooling_line(x: dict, lang: str) -> str:
     return f"{mark}{esc(x['link'])} · odatda {dur(x['usual'], lang)} → {dur(x['silent'], lang)} jim"
 
 
-def group_messages(db, kind: str, data: dict[int, list], days: int) -> list[str]:
+def group_messages(db, kind: str, data: dict[int, list], days: int, day=None) -> list[str]:
     """«Проёб» uchun: HAR RD alohida xabar (aralashmaydi), ruscha, ixcham."""
     out = []
     for f in P.folders(db):
@@ -210,7 +211,7 @@ def group_messages(db, kind: str, data: dict[int, list], days: int) -> list[str]
         lines += [(stale_line if kind == "stale" else cooling_line)(x, "ru") for x in items[:GROUP_LIMIT]]
         if len(items) > GROUP_LIMIT:
             lines.append(small(f"… и ещё {len(items) - GROUP_LIMIT}"))
-        lines.append(tag(P.folder_people(db, f["id"])))
+        lines.append(tag(R.workers(db, f["id"], day) if day else P.folder_people(db, f["id"])))
         out.append("\n".join(lines))
     return out
 
@@ -237,7 +238,7 @@ async def cooling_alerts(ctx, now: int) -> int:
         lines += [cooling_line(x, "ru") for x in fresh[:GROUP_LIMIT]]
         if len(fresh) > GROUP_LIMIT:
             lines.append(small(f"… и ещё {len(fresh) - GROUP_LIMIT}"))
-        lines.append(tag(P.folder_people(db, f["id"]), "напишите им, пока не остыли"))
+        lines.append(tag(tr.workers(f["id"], now), "напишите им, пока не остыли"))
         try:
             await ctx.notifier.send_group("\n".join(lines), trash="info")
         except Exception:
@@ -482,7 +483,7 @@ def push_stats(db, now: int, limit: int = 10) -> list[dict]:
     win = max(1, db.get_int("push_reply_min", 90)) * 60
     out = []
     for b in db.all("SELECT b.*, COUNT(p.bid) n, COUNT(p.replied_ts) rep, COUNT(p.card_ts) card FROM broadcasts b "
-                    "LEFT JOIN push_log p ON p.bid=b.id GROUP BY b.id ORDER BY b.id DESC LIMIT ?", (limit,)):
+                    "LEFT JOIN push_log p ON p.bid=b.id AND p.held=0 GROUP BY b.id ORDER BY b.id DESC LIMIT ?", (limit,)):
         end = b["finished_ts"] or now
         out.append({"b": b, "n": b["n"], "rep": b["rep"], "card": b["card"],
                     "rep_open": b["status"] == "running" or now < end + win,
@@ -490,10 +491,38 @@ def push_stats(db, now: int, limit: int = 10) -> list[dict]:
     return out
 
 
-def push_by_folder(db, bid: int) -> list[tuple]:
+def push_by_number(db, now: int, limit: int = 10) -> list[dict]:
+    """📚 Har Push raqami: necha marta yuborildi, nechta lidga, javob/karta; 🧪 nazorat guruhi (olmaganlar) —
+    o'zi yozdimi. Eng oxirgi yuborilgani tepada."""
+    win = max(1, db.get_int("push_reply_min", 90)) * 60
+    out = []
+    for g in db.all("SELECT COALESCE(push_id, 0) pid, MAX(id) last_bid FROM broadcasts WHERE sent>0 OR status='running' "
+                    "GROUP BY COALESCE(push_id, 0) ORDER BY last_bid DESC LIMIT ?", (limit,)):
+        pid = g["pid"]
+        bs = db.all("SELECT * FROM broadcasts WHERE COALESCE(push_id, 0)=? AND (sent>0 OR status='running') "
+                    "ORDER BY id", (pid,))
+        ids = [b["id"] for b in bs]
+        q = ",".join("?" * len(ids))
+        sent = db.one(f"SELECT COUNT(*) n, COUNT(replied_ts) rep, COUNT(card_ts) card FROM push_log WHERE held=0 AND "
+                      f"bid IN ({q})", ids)
+        held = db.one(f"SELECT COUNT(*) n, COUNT(replied_ts) rep, COUNT(card_ts) card FROM push_log WHERE held=1 AND "
+                      f"bid IN ({q})", ids)
+        last = bs[-1]
+        end = last["finished_ts"] or now
+        out.append({"push_id": pid or None, "times": [b["started_ts"] for b in bs], "slots": [b["slot"] for b in bs],
+                    "n": sent["n"], "rep": sent["rep"],
+                    "card": sent["card"], "hn": held["n"], "hrep": held["rep"], "hcard": held["card"],
+                    "rep_open": last["status"] == "running" or now < end + win,
+                    "card_open": last["status"] == "running" or now < end + CARD_WINDOW})
+    return out
+
+
+def push_by_folder(db, push_id: int) -> list[tuple]:
+    """Bitta Push raqami — RD bo'yicha (nazorat guruhisiz)."""
     return [(r["folder_id"], r["n"], r["rep"], r["card"]) for r in db.all(
-        "SELECT folder_id, COUNT(*) n, COUNT(replied_ts) rep, COUNT(card_ts) card FROM push_log WHERE bid=? "
-        "GROUP BY folder_id ORDER BY n DESC", (bid,))]
+        "SELECT p.folder_id, COUNT(*) n, COUNT(p.replied_ts) rep, COUNT(p.card_ts) card FROM push_log p "
+        "JOIN broadcasts b ON b.id=p.bid WHERE b.push_id=? AND p.held=0 GROUP BY p.folder_id ORDER BY n DESC",
+        (push_id,))]
 
 
 # ═════════════════════════ 💳 kartalar

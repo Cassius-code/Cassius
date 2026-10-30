@@ -315,21 +315,52 @@ def owner_cabinet(b: dict, s: dt.date, e: dt.date, lang: str, me: dict | None, z
     return "\n".join(p for p in parts if p)
 
 
-def person_view(b: dict, r: dict, s: dt.date, e: dt.date, lang: str, owner: bool, zp: bool = True) -> str:
-    """Xodim kartochkasidagi hisob (ega/admin uchun). Egasining ulushi bu yerda YO'Q."""
+def person_view(b: dict, r: dict, s: dt.date, e: dt.date, lang: str, owner: bool, zp: bool = True,
+                no_pct: bool = False) -> str:
+    """Xodim kabineti (ega/admin uchun): kassa, cheklar soni (Кол-во рд), $, bonus, jarima va zp. Hafta hali
+    🧮 hisoblanmagan bo'lsa ham zp ko'rinadi — «≈ taxminiy» belgisi bilan. Egasining ulushi bu yerda YO'Q."""
+    ru = lang == "ru"
     parts = []
     if r["n"]:
-        lines = [f"<b>💵 {w('kassa', lang)}</b>", kassa_line(r, lang)]
+        lines = [f"<b>💵 {w('kassa', lang)}</b> · <i>{label(s, e)}</i>",
+                 f"{'Касса' if ru else 'Kassa'}: <b>{num(r['raw'])}</b>",
+                 f"{'Кол-во рд' if ru else 'Cheklar (Кол-во рд)'}: <b>{r['n']}</b>",
+                 f"{'Касса ($)' if ru else 'Kassa ($)'}: <b>{money(r['usd'])} $</b>"]
+        if r["noprice"]:
+            lines.append(f"⚠️ {r['noprice']} {w('noprice', lang)}")
         if r["unassigned"]:
             lines.append(f"⚠️ {r['unassigned']} {w('unassigned', lang)}")
         names = b["names"]
         for payee, usd in r["paid_out"].items():
             lines.append(f"🔁 {w('worked', lang)}: {h(names.get(payee, '?'))}")
         parts.append(card(lines))
-    zl = zp_lines(b, r, lang, owner, zp)
+    if no_pct:
+        zl = zp_amount_lines(r, lang)
+    else:
+        zl = zp_lines(b, r, lang, owner, True)
     if zl:
-        parts.append(card([f"<b>💰 {w('zp', lang)}</b> · <i>{label(s, e)}</i>"] + zl))
+        est = "" if zp else (" · <i>≈ примерно — 🧮 неделя ещё не рассчитана</i>" if ru else
+                             " · <i>≈ taxminiy — 🧮 hafta hali hisoblanmagan</i>")
+        parts.append(card([f"<b>💰 {w('zp', lang)}</b> · <i>{label(s, e)}</i>{est}"] + zl))
     return "\n".join(parts) if parts else f"<i>{w('no_data', lang)}</i>"
+
+
+def zp_amount_lines(r: dict, lang: str) -> list[str]:
+    """Foizlarsiz (💵 faqat zp ko'radigan admin uchun): zp summasi, bonus, jarima, avans, jami."""
+    ru = lang == "ru"
+    out = []
+    if r["kind"] in ("worker", "self") and r["zp_on"]:
+        out.append(f"{'Зп' if ru else 'Zp'}: <b>{money(r['zp'])} $</b>")
+    elif r["kind"] == "pool":
+        out.append(f"<i>{'общий аккаунт — зп получают те, кто работал' if ru else 'umumiy akkaunt — zp ishlaganlarga'}</i>")
+    out += adj_lines(r, lang)
+    for o in r["outs"]:
+        out.append(f"− {w('transfer_out', lang)} {money(o['amount'])} $ ({dshort(o['day'])})")
+    for i in r["ins"]:
+        out.append(f"+ {w('transfer_in', lang)} {money(i['amount'])} $ ({dshort(i['day'])})")
+    if r["total"] is not None and r["kind"] in ("worker", "self"):
+        out.append(f"= <b>{money(r['total'])} $</b>")
+    return out
 
 
 # ───────────────────────── xodimga xabar (ruscha): faqat o'z zp si

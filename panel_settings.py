@@ -17,15 +17,46 @@ from .ui import Req, card, grid, h, kb, nav, on_input, onoff, screen, title
 log = logging.getLogger("settings")
 
 STATE_UZ = {"online": "🟢 ulangan", "connecting": "🟡 ulanmoqda…", "starting": "🟡 ishga tushmoqda…",
-            "offline": "🔴 aloqa yo'q", "unauthorized": "🔴 qayta kirish kerak", "no_session": "⚪ ulanmagan",
-            "disabled": "⚪ API_ID / API_HASH yo'q", "paused": "⏸ pauzada"}
+            "offline": "🟡 Telegram serveri javob bermayapti — o'zi ulanadi", "unauthorized": "🔑 seans o'chgan",
+            "banned": "⛔ akkaunt bloklangan", "no_session": "⚪ ulanmagan", "disabled": "⚪ API_ID / API_HASH yo'q",
+            "paused": "⏸ pauzada"}
 STATE_RU = {"online": "🟢 подключён", "connecting": "🟡 подключается…", "starting": "🟡 запускается…",
-            "offline": "🔴 нет связи", "unauthorized": "🔴 нужен вход", "no_session": "⚪ не подключён",
-            "disabled": "⚪ нет API_ID / API_HASH", "paused": "⏸ на паузе"}
+            "offline": "🟡 сервер Telegram не отвечает — подключится сам", "unauthorized": "🔑 сессия завершена",
+            "banned": "⛔ аккаунт заблокирован", "no_session": "⚪ не подключён", "disabled": "⚪ нет API_ID / API_HASH",
+            "paused": "⏸ на паузе"}
+STATE_ICON = {"online": "🟢", "paused": "⏸", "offline": "🟡", "unauthorized": "🔑", "banned": "⛔", "no_session": "⚪"}
 
 
 def st(r: Req, state: str) -> str:
     return (STATE_RU if r.lang == "ru" else STATE_UZ).get(state, state)
+
+
+def reason_lines(ctx, r: Req, acc) -> list[str]:
+    """Nega ulanmagan va nima qilish kerak — aniq (akkaunt kartasida)."""
+    if acc is None:
+        return []
+    out = []
+    if acc.state == "offline":
+        out.append(r.L("Hech narsa qilmang — Telegram javob bergach, o'zi ulanadi.",
+                       "Ничего не делайте — подключится сам, когда Telegram ответит."))
+        if acc.down_since:
+            out.append(r.L(f"⏱ {fmt(acc.down_since, ctx.tz, '%H:%M')} dan beri", f"⏱ с {fmt(acc.down_since, ctx.tz, '%H:%M')}")
+                       + (r.L(f" · keyingi urinish {fmt(acc.retry_at, ctx.tz, '%H:%M:%S')}",
+                              f" · следующая попытка {fmt(acc.retry_at, ctx.tz, '%H:%M:%S')}") if acc.retry_at else ""))
+    elif acc.state == "connecting":
+        out.append(r.L("Ulanmoqda (45 soniyagacha). Bo'lmasa — o'zi qayta uradi.",
+                       "Подключается (до 45 секунд). Не выйдет — попробует снова сам."))
+    elif acc.state == "unauthorized":
+        out.append(r.L("Akkauntdan chiqilgan yoki seans boshqa qurilmada o'chirilgan. «🔑 Qayta kirish» bosing — "
+                       "papkasi va sozlamalari saqlanadi.",
+                       "Из аккаунта вышли или сессию завершили на другом устройстве. Нажмите «🔑 Войти заново» — "
+                       "папка и настройки сохранятся."))
+    elif acc.state == "banned":
+        out.append(r.L("Telegram akkauntni bloklagan. Bot unga urinmaydi — boshqa akkaunt ulang.",
+                       "Telegram заблокировал аккаунт. Бот не пытается — подключите другой аккаунт."))
+    if acc.error and acc.state != "online":
+        out.append(f"<i>{h(acc.error)}</i>")
+    return out
 
 
 @screen("s", "full")
@@ -202,7 +233,7 @@ async def group_sender(ctx, r: Req):
 @screen("sm", "full")
 async def main_account(ctx, r: Req):
     ub = ctx.userbot
-    lines = [f"{r.L('Holati', 'Состояние')} — {st(r, ub.state)}"]
+    lines = [f"{r.L('Holati', 'Состояние')} — {st(r, ub.state)}"] + reason_lines(ctx, r, ub)
     if ub.me_label:
         lines.append(f"👤 {h(ub.me_label)}")
     if ub.last_sync:
@@ -210,7 +241,8 @@ async def main_account(ctx, r: Req):
             "%H:%M", time.localtime(ub.last_sync)))
     lines.append(r.L("Asosiy akkaunt ish chatlarini kuzatadi (faqat kim/qachon). Push yubormaydi.",
                      "Основной аккаунт следит за чатами (только кто/когда). Пуш не шлёт."))
-    rows = [[(r.L("📲 Ulash / almashtirish", "📲 Подключить / сменить"), "sml:main")],
+    rows = [[((r.L("🔑 Qayta kirish", "🔑 Войти заново") if ub.state == "unauthorized" else
+               r.L("📲 Ulash / almashtirish", "📲 Подключить / сменить")), "sml:main")],
             [(r.L("🔄 Yangilash (papka, chat, xabarlar)", "🔄 Обновить (папки, чаты, сообщения)"), "sms")]]
     if ub.session():
         rows.append([(r.L("🚪 Uzish", "🚪 Отключить"), "smo")])
@@ -300,13 +332,21 @@ def login_error(r: Req, exc: Exception, stage: str) -> str:
 
 
 def _back(target: str) -> str:
-    """Bekor qilinsa — qayerga: papkadan boshlangan bo'lsa o'sha papkaga."""
-    return f"uf:{target.split(':', 1)[1]}" if target.startswith("push:") else "s"
+    """Bekor qilinsa — qayerga: papkadan boshlangan bo'lsa o'sha papkaga, qayta kirish — akkaunt kartasiga."""
+    if target.startswith("push:"):
+        return f"uf:{target.split(':', 1)[1]}"
+    if target.startswith("re:"):
+        return f"sa:{target.split(':', 1)[1]}"
+    return "s"
 
 
 def _phone_screen(r: Req, target: str, err: str = ""):
-    what = r.L("asosiy akkaunt", "основной аккаунт") if target == "main" else r.L("yangi Push akkaunt",
-                                                                                   "новый Пуш-аккаунт")
+    if target == "main":
+        what = r.L("asosiy akkaunt", "основной аккаунт")
+    elif target.startswith("re:"):
+        what = r.L("qayta kirish — o'sha akkaunt raqami", "вход заново — номер того же аккаунта")
+    else:
+        what = r.L("yangi Push akkaunt", "новый Пуш-аккаунт")
     return title("📲", r.L("ULASH", "ПОДКЛЮЧЕНИЕ"), what) + "\n\n" + card(
         ([err, ""] if err else []) +
         [r.L("Telefon raqamini yuboring, masalan <code>+998901234567</code>.",
@@ -336,6 +376,8 @@ async def login_start(ctx, r: Req):
     target = r.args[0] if r.args else "main"
     if target == "push" and len(r.args) > 1 and r.args[1].isdigit():
         target = f"push:{r.args[1]}"                   # 📣 Push → papka → akkaunt: ulangach shu papkaga biriktiriladi
+    elif target == "re" and len(r.args) > 1 and r.args[1].isdigit():
+        target = f"re:{r.args[1]}"                     # 🔑 qayta kirish: o'sha akkaunt yozuvi (papkasi saqlanadi)
     if not (ctx.cfg.api_id and ctx.cfg.api_hash):
         return r.L("⚠️ Railway'da API_ID va API_HASH berilmagan", "⚠️ В Railway не заданы API_ID и API_HASH")
     ui.ask(r, "login_phone", _back(target), target=target)
@@ -408,6 +450,9 @@ async def login_cancel(ctx, r: Req):
         r.args = [target.split(":", 1)[1]]
         ui.view(r, f"uf:{r.args[0]}")
         return await folder_card(ctx, r)
+    if target.startswith("re:"):
+        r.args = [target.split(":", 1)[1]]
+        return await accounts(ctx, r)
     return await settings(ctx, r)
 
 
@@ -464,6 +509,14 @@ async def login_done(ctx, r: Req, target: str):
         await ctx.userbot.set_session(session)
         await ui.toast(ctx.bot, r.chat_id, r.L("✅ Asosiy akkaunt ulandi", "✅ Основной аккаунт подключён"))
         return await main_account(ctx, r)
+    if target.startswith("re:"):
+        aid = int(target.split(":", 1)[1])
+        if ctx.db.one("SELECT 1 FROM accounts WHERE id=?", (aid,)) is not None:
+            ctx.pool.relogin(aid, session)
+            await ctx.notifier.resolve(f"unauth-push-{aid}")
+            await ui.toast(ctx.bot, r.chat_id, r.L("✅ Qayta kirildi — papkasi joyida", "✅ Вход выполнен — папка на месте"))
+            r.args = [str(aid)]
+            return await accounts(ctx, r)
     n = ctx.db.scalar("SELECT COUNT(*) FROM accounts") + 1
     aid = ctx.db.run("INSERT INTO accounts(name, session, added_ts) VALUES(?,?,?)",
                      (f"Push {n}", session, int(time.time()))).lastrowid
@@ -501,7 +554,7 @@ async def accounts(ctx, r: Req):
     rows = []
     for a in db.all("SELECT * FROM accounts ORDER BY id"):
         state = ctx.pool.state_of(a["id"]) if ctx.pool else "no_session"
-        icon = {"online": "🟢", "paused": "⏸"}.get(state, "🔴" if state in ("offline", "unauthorized") else "🟡")
+        icon = STATE_ICON.get(state, "🟡")
         if a["spam"] == "limited":
             icon = "🚫"
         rows.append([(f"{icon} {a['name']} {a['label']}"[:50], f"sa:{a['id']}")])
@@ -540,11 +593,19 @@ async def account_card(ctx, r: Req):
         r.args = []
         return await accounts(ctx, r)
     used = [f["name"] for f in db.all("SELECT name FROM folders WHERE push_account_id=?", (aid,))]
-    lines = [f"{r.L('Holati', 'Состояние')} — {st(r, ctx.pool.state_of(aid))}", f"👤 {h(a['label'] or '—')}",
-             f"📁 {h(', '.join(used) or r.L('papka yo‘q', 'нет папок'))}", spam_line(ctx, r, a["spam"], a["spam_ts"])]
-    rows = grid([((r.L("▶️ Davom ettirish", "▶️ Возобновить") if a["paused"] else r.L("⏸ Pauza", "⏸ Пауза")),
-                  f"sa:{aid}:p"), (r.L("✏️ Nomi", "✏️ Название"), f"sa:{aid}:n"),
-                 (r.L("🗑 O'chirish", "🗑 Удалить"), f"sa:{aid}:x")])
+    state = ctx.pool.state_of(aid)
+    acc = ctx.pool.account(aid) if not a["paused"] else None
+    lines = [f"{r.L('Holati', 'Состояние')} — {st(r, state)}"] + reason_lines(ctx, r, acc) + \
+        [f"👤 {h(a['label'] or '—')}", f"📁 {h(', '.join(used) or r.L('papka yo‘q', 'нет папок'))}",
+         spam_line(ctx, r, a["spam"], a["spam_ts"])]
+    rows = []
+    if state in ("unauthorized", "no_session") or (acc is not None and acc.state == "banned"):
+        rows.append([(r.L("🔑 Qayta kirish", "🔑 Войти заново"), f"sml:re:{aid}")])
+    rows += grid([((r.L("▶️ Davom ettirish", "▶️ Возобновить") if a["paused"] else r.L("⏸ Pauza", "⏸ Пауза")),
+                   f"sa:{aid}:p"), (r.L("✏️ Nomi", "✏️ Название"), f"sa:{aid}:n"),
+                  (r.L("🔑 Qayta kirish", "🔑 Войти заново"), f"sml:re:{aid}") if state == "online" else None,
+                  (r.L("🗑 O'chirish", "🗑 Удалить"), f"sa:{aid}:x")])
+    rows = [[b for b in row if b] for row in rows]
     rows.append(nav(r, "sa"))
     return ui.join(title("📲", h(a["name"])), "", card(lines)), kb(*rows)
 
@@ -556,12 +617,12 @@ async def account_rename(ctx, r: Req, aid: int):
         return r.L("⚠️ Nom kerak", "⚠️ Нужно название")
     ctx.db.run("UPDATE accounts SET name=? WHERE id=?", (name, aid))
     r.args = [str(aid)]
-    return await account_card(ctx, r)
+    return await accounts(ctx, r)
 
 
 # ───────────────────────── adminlar
-LEVEL_UZ = {"owner": "👑 ega", "full": "🛠 to'liq", "view": "👁 faqat ko'radi"}
-LEVEL_RU = {"owner": "👑 владелец", "full": "🛠 полный", "view": "👁 только просмотр"}
+LEVEL_UZ = {"owner": "👑 ega", "full": "🛠 to'liq", "view": "👁 faqat ko'radi", "zp": "💵 faqat zp"}
+LEVEL_RU = {"owner": "👑 владелец", "full": "🛠 полный", "view": "👁 только просмотр", "zp": "💵 только зп"}
 
 
 @screen("sd", "full")
@@ -573,10 +634,13 @@ async def admins(ctx, r: Req):
         uid = int(a[1])
         row = db.one("SELECT * FROM admins WHERE user_id=?", (uid,))
         if row:
-            order = ["view", "full", "owner"]
-            P.set_admin(db, uid, order[(order.index(row["level"]) + 1) % 3])
+            order = ["zp", "view", "full", "owner"]
+            cur = row["level"] if row["level"] in order else "view"
+            P.set_admin(db, uid, order[(order.index(cur) + 1) % len(order)])
+        ui.view(r, "sd")
     if a and a[0] == "x" and r.owner:
         P.del_admin(db, int(a[1]))
+        ui.view(r, "sd")
     lines = [f"👑 <code>{u}</code> · Railway" for u in ctx.cfg.owner_ids]
     rows = []
     for ad in P.admins(db):
@@ -596,10 +660,12 @@ async def admins(ctx, r: Req):
                       if recovery.is_set(db) and ts else r.L("yo'q ⚠️", "нет ⚠️")))
     rows.append(nav(r, "s"))
     return ui.join(title("👮", r.L("ADMINLAR", "АДМИНЫ")), "", card(lines), card(
-        [r.L("👑 ega — hammasi (ulushingiz ham) · 🛠 to'liq — boshqaruv, ulushingizni ko'rmaydi · 👁 — faqat ko'radi. "
-             "Bosing — darajani almashtirish.",
-             "👑 владелец — всё (и ваша доля) · 🛠 полный — управление, без вашей доли · 👁 — только просмотр. "
-             "Нажмите — сменить уровень.")])), kb(*rows)
+        [r.L("👑 ega — hammasi (ulushingiz ham) · 🛠 to'liq — boshqaruv, ulushingizni ko'rmaydi · 👁 — faqat ko'radi · "
+             "💵 faqat zp — jami kassa va zp, har xodimning kassasi, $ va zp si (foizlarsiz, PDF siz, o'zgartira olmaydi, "
+             "sizning va Artur ulushi ko'rinmaydi). Bosing — darajani almashtirish.",
+             "👑 владелец — всё (и ваша доля) · 🛠 полный — управление, без вашей доли · 👁 — только просмотр · "
+             "💵 только зп — общая касса и зп, касса, $ и зп каждого (без процентов и PDF, без изменений, без вашей "
+             "доли и доли Артура). Нажмите — сменить уровень.")])), kb(*rows)
 
 
 @screen("sdr", "owner")
@@ -665,23 +731,29 @@ async def admin_add(ctx, r: Req):
 # ───────────────────────── ishga kelish va tanaffus
 @screen("st", "full")
 async def attendance(ctx, r: Req):
+    from . import fines
     db = ctx.db
     if r.args and r.args[0] == "t":
         db.toggle("attendance_enabled")
-    from .attendance import late_fine_text, late_rules
-    spec, free, _count = late_rules(db)
+        ui.view(r, "st")
+    lad = fines.ladder(db, "late")
+    late = db.get_int("late_after_min", 15)
     lines = [f"🙋 {r.L('Nazorat', 'Контроль')} — {onoff(r, db.flag('attendance_enabled'))}",
              f"🕘 {r.L('Ish boshlanishi', 'Начало работы')} — <b>{db.get('work_start')}</b>",
              f"⏰ {r.L('Eslatma', 'Напоминание')} — {r.L('boshlanib', 'через')} <b>{db.get('noshow_minutes')}</b> "
              f"{r.L('daqiqa o‘tsa', 'мин после начала')}",
-             f"💸 {r.L('Kech qolish', 'Опоздание')} — <b>{h(late_fine_text(spec, r.lang, free))}</b>"
+             f"💸 {r.L('Kech qolish', 'Опоздание')} — {r.L(f'{late}+ daq', f'{late}+ мин')} · "
+             f"<b>{fines.ladder_text(lad, r.lang)}</b>"
              + ("" if db.flag("fines_enabled") else r.L(" · ⚪ jarimalar o'chiq", " · ⚪ штрафы выключены")),
-             r.L("Xodim «Проёб»ga «доброе утро» yozadi. Dam olish kunlari — xodim sozlamalarida.",
-                 "Сотрудник пишет «доброе утро» в «Проёб». Выходные — в настройках сотрудника.")]
+             r.L("Ishga keldi = «Проёб»ga birinchi xabari (kechki kassa hisobotidan tashqari) yoki lidga birinchi "
+                 "yozuvi. Kim ishlaydi — 📅 Bugun kim qayerda; dam olish kunlari — xodim sozlamalarida.",
+                 "Пришёл = первое сообщение в «Проёб» (кроме вечернего отчёта кассы) или первое сообщение лиду. Кто "
+                 "работает — 📅 Кто где сегодня; выходные — в настройках сотрудника.")]
     rows = [[((r.L("⛔ O'chirish", "⛔ Выключить") if db.flag("attendance_enabled") else r.L("✅ Yoqish", "✅ Включить")),
               "st:t")],
             grid([(r.L("⏰ Eslatma vaqti", "⏰ Напоминание"), "sti:noshow_minutes"),
-                  (r.L("💸 Kech qolish jarimasi", "💸 Штраф за опоздание"), "cfl")])[0], nav(r, "s")]
+                  (r.L("💸 Kech qolish", "💸 Опоздание"), "cfl")])[0],
+            [(r.L("📅 Bugun kim qayerda", "📅 Кто где сегодня"), "rt")], nav(r, "s")]
     return ui.join(title("🙋", r.L("ISHGA KELISH", "ПРИХОД НА РАБОТУ")), "", card(lines)), kb(*rows)
 
 
@@ -715,18 +787,62 @@ async def breaks(ctx, r: Req):
     db = ctx.db
     if r.args and r.args[0] == "t":
         db.toggle("breaks_enabled")
+        ui.view(r, "sr")
+    extra_b = db.get("break_words").strip()
+    extra_k = db.get("back_words").strip()
     lines = [f"☕ {r.L('Tanaffus nazorati', 'Контроль перерывов')} — {onoff(r, db.flag('breaks_enabled'))}",
              f"⏱ {r.L('Davomiyligi', 'Длительность')} — <b>{db.get('break_minutes')} {r.L('daq', 'мин')}</b>",
              f"🔁 {r.L('Kuniga', 'В день')} — <b>{db.get('breaks_per_day')}</b>",
-             r.L("«атайду» / «перерыв» — boshlash, «тут» — qaytish. Vaqt oshsa — eslatma (jarimasiz). Papkaning hamma "
-                 "xodimi tanaffusda bo'lsa, zaderjka hisoblanmaydi.",
-                 "«атайду» / «перерыв» — начало, «тут» — возврат. Время вышло — напоминание (без штрафа). Если вся "
-                 "папка на перерыве — задержка не считается.")]
+             "",
+             r.L("<b>Boshlash</b> — bot o'zi taniydi: отойду / отойди / атайду / otaydu / ataydim / перерыв / tanaffus / "
+                 "obedga / perekur / namozga … (har xil yozilsa ham). Bot javob beradi: «☕ @xodim — перерыв до 14:30».",
+                 "<b>Начало</b> — бот узнаёт сам: отойду / отойди / атайду / otaydu / ataydim / перерыв / tanaffus / "
+                 "obedga / perekur / namozga … (как бы ни написали). Бот отвечает: «☕ @сотрудник — перерыв до 14:30»."),
+             r.L("<b>Qaytish</b> — «тут» / «keldim» / «qaytdim» — istalgan payt. Tanaffus vaqtida lidga yozsa — tanaffus "
+                 "davom etadi; vaqti tugagach lidga yoki «Проёб»ga yozsa — qaytdi. Vaqt tugab jim bo'lsa — eslatma.",
+                 "<b>Возврат</b> — «тут» / «keldim» / «вернулся» — в любой момент. Пишет лиду во время перерыва — перерыв "
+                 "продолжается; после окончания написал лиду или в «Проёб» — вернулся. Время вышло, а он молчит — "
+                 "напоминание."),
+             r.L("Papkaning bugungi xodimi tanaffusda bo'lsa — zaderjka hisoblanmaydi.",
+                 "Если сегодняшний сотрудник папки на перерыве — задержка не считается."),
+             "",
+             f"➕ {r.L('Qo‘shimcha boshlash so‘zlari', 'Доп. слова начала')}: <b>{h(extra_b) or '—'}</b>",
+             f"➕ {r.L('Qo‘shimcha qaytish so‘zlari', 'Доп. слова возврата')}: <b>{h(extra_k) or '—'}</b>"]
     rows = [[((r.L("⛔ O'chirish", "⛔ Выключить") if db.flag("breaks_enabled") else r.L("✅ Yoqish", "✅ Включить")),
               "sr:t")],
             grid([(r.L("⏱ Daqiqa", "⏱ Минуты"), "sti:break_minutes"), (r.L("🔁 Necha marta", "🔁 Сколько раз"),
-                                                                        "sti:breaks_per_day")])[0], nav(r, "s")]
+                                                                        "sti:breaks_per_day")])[0],
+            [(r.L("➕ Boshlash so'zlari", "➕ Слова начала"), "srw:break_words"),
+             (r.L("➕ Qaytish so'zlari", "➕ Слова возврата"), "srw:back_words")], nav(r, "s")]
     return ui.join(title("☕", r.L("TANAFFUS", "ПЕРЕРЫВЫ")), "", card(lines)), kb(*rows)
+
+
+@screen("srw", "full")
+async def break_words_ask(ctx, r: Req):
+    key = r.args[0] if r.args and r.args[0] in ("break_words", "back_words") else "break_words"
+    ui.ask(r, "break_words", "sr", key=key)
+    what = (r.L("tanaffus boshlanishi", "начала перерыва") if key == "break_words" else
+            r.L("tanaffusdan qaytish", "возврата с перерыва"))
+    return title("➕", r.L("SO'ZLAR", "СЛОВА"), what) + "\n\n" + card(
+        [r.L(f"Hozir: <code>{h(ctx.db.get(key)) or '—'}</code>", f"Сейчас: <code>{h(ctx.db.get(key)) or '—'}</code>"),
+         r.L("Xodimlar yozadigan so'zlarni vergul bilan yuboring, masalan <code>chiqib kelaman, 5 minutga</code>. "
+             "Bot so'z boshi bo'yicha taniydi (kirill/lotin farqi yo'q). <code>-</code> — tozalash.",
+             "Пришлите слова через запятую, например <code>выйду, 5 минут</code>. Бот узнаёт по началу слова "
+             "(кириллица/латиница не важны). <code>-</code> — очистить.")]), ui.cancel_kb(r, "sr")
+
+
+@on_input("break_words")
+async def break_words_set(ctx, r: Req, key: str):
+    text = (r.text or "").strip()
+    if text in ("-", "—"):
+        text = ""
+    words = [w.strip() for w in re.split(r"[,;\n]+", text) if w.strip()]
+    if any(len(w) < 3 for w in words):
+        return r.L("⚠️ Har so'z kamida 3 harf", "⚠️ Каждое слово — минимум 3 буквы")
+    ctx.db.set(key, ", ".join(words)[:300])
+    r.args = []
+    ui.view(r, "sr")
+    return await breaks(ctx, r)
 
 
 # ───────────────────────── kassa ma'lumotini ko'chirish

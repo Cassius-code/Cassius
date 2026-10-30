@@ -18,6 +18,7 @@ log = logging.getLogger("guard")
 OK_WORDS = ("no limits", "free as a bird", "good news", "свобод", "хорошие новости", "ограничений нет")
 BAD_WORDS = ("limited", "restricted", "unfortunately", "ограничен", "к сожалению", "заблокир")
 CHECK_HOUR = 9                 # har kuni shu soatdan keyin (Toshkent) bir marta
+RETRY = 30 * 60                # hammasi tekshirilmasa — shuncha soniyadan keyin qayta
 
 
 def verdict(text: str) -> str:
@@ -121,5 +122,9 @@ async def daily(ctx, now: int) -> None:
     key = t.date().isoformat()
     if t.hour < CHECK_HOUR or db.get("spam_check_last") >= key:
         return
-    db.set("spam_check_last", key)
-    await check_all(ctx, now)
+    if now - db.get_int("spam_check_try") < RETRY:         # akkaunt ulanmagan edi — 30 daqiqadan keyin yana
+        return
+    db.set("spam_check_try", str(now))
+    want = len(targets(ctx)) + sum(1 for a in (ctx.pool.accounts.values() if ctx.pool else ()) if a.state != "online")
+    if await check_all(ctx, now) >= want:                 # hammasi tekshirildi — bugunga yetarli
+        db.set("spam_check_last", key)

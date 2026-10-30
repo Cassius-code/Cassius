@@ -23,15 +23,19 @@ from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
 from . import people as P
+from . import roster as R
 from .db import Database
 from .links import message_link
-from .gtext import esc, fine_line, head, link, small, tag
+from .gtext import esc, head, link, small, tag
 from .timeutil import minutes_up, parse_hhmm, work_seconds, local_date, is_work_time
 
 log = logging.getLogger("rules")
 
 MAX_LINKS = 10                 # bitta «задержка» xabarida eng ko'pi bilan nechta havola
 BATCH_SEC = 40                 # yaqin zaderjkalar shuncha soniya kutib, bitta xabar bo'lib ketadi
+BATCH_LOOK = 10                # 40 s dan keyin: yana bir lid shuncha soniyada limitga yetsa — uni ham kutadi
+BATCH_CAP = 60                 # lekin birinchisidan ko'pi bilan shuncha soniya
+WARN_BEFORE = 5 * 60           # 🟡 doska: limitdan shuncha oldin (20 daq limit — 15 daqiqa kutgan)
 CARD_WINDOW = 24 * 3600        # Push'dan keyin shu vaqt ichida karta yuborilsa — o'sha Push natijasi
 CL_CAP = 12 * 3600             # mijozning bitta javob vaqti o'rtachaga ko'pi bilan shuncha qo'shiladi (tun va h.k.)
 STAVKA_LATE = 60 * 60          # topik ochilganidan shuncha vaqt ichida stavka kech aniqlansa ham boshlanadi
@@ -47,11 +51,10 @@ def parse_cmds(text: str | None) -> set[str]:
         if re.fullmatch(r"[a-z0-9_]{1,32}", w):
             out.add("/" + w)
     return out
-INCIDENT_FRESH = 3600          # «holat» uchun oxirgi shuncha soniyadagi «задержка»lar sanaladi
 
 # qaror kodlari (jurnal va «Lidni tekshirish» ekrani uchun)
 DECISIONS = ("dup", "service", "ours", "excluded", "before", "stavka_skip", "stavka_bet", "bet_text", "stavka_end",
-             "auto_bet", "wait", "wait_more", "reply", "staff", "alert")
+             "auto_bet", "wait", "wait_more", "reply", "staff", "alert", "late_bet")
 
 
 @dataclass
@@ -155,9 +158,10 @@ class Tracker:
         return c["title"] if c else ""
 
     # ------------------------------------------------------------ kim yozdi
-    def person_of(self, chat_id: int, sender_id: int | None):
-        """Xabarni yozgan xodim. O'z akkauntidan yozsa — aniq. Papka akkauntidan (shu papkaning Push akkaunti yoki
-        asosiy akkaunt) yozsa — papkada bitta xodim bo'lsa, o'sha. Aniqlab bo'lmasa — None (taxmin qilinmaydi)."""
+    def person_of(self, chat_id: int, sender_id: int | None, ts: int | None = None):
+        """Xabarni yozgan xodim. O'z akkauntidan yozsa — aniq (Telegram ID yoki @username bo'yicha). Papka
+        akkauntidan (shu papkaning Push akkaunti yoki asosiy akkaunt) yozsa — o'sha kuni shu RD da ishlayotgan xodim
+        (📅 Bugun kim qayerda). Aniqlab bo'lmasa — None (taxmin qilinmaydi)."""
         if not sender_id:
             return None
         p = P.by_tg(self.db, sender_id)
@@ -174,8 +178,15 @@ class Tracker:
             acc_uid = row["user_id"] if row else None
         if not acc_uid or int(acc_uid) != int(sender_id):
             return None
-        ppl = P.folder_people(self.db, fid)
+        ppl = R.workers(self.db, fid, local_date(ts or self.clock(), self.tz))
         return ppl[0] if len(ppl) == 1 else None
+
+    def day_of(self, ts: int | None = None):
+        return local_date(ts or self.clock(), self.tz)
+
+    def workers(self, fid: int | None, ts: int | None = None) -> list:
+        """Shu kuni shu RD da ishlaydigan xodim(lar) — belgilash va jarima shular bo'yicha."""
+        return R.workers(self.db, fid, self.day_of(ts)) if fid else []
 
     def card_cmds(self, fid: int | None = None) -> set[str]:
         """Karta buyruqlari — hamma RD uchun bitta ro'yxat (CRM egasi o'zgartirsa, panelda yangilanadi)."""
@@ -186,7 +197,7 @@ class Tracker:
         if self.on_staff is None or m.ts < self.db.get_int("cards_since") \
                 or local_date(m.ts, self.tz) != local_date(self.clock(), self.tz):
             return
-        p = self.person_of(m.chat_id, m.sender_id)
+        p = self.person_of(m.chat_id, m.sender_id, m.ts)
         if p is not None:
             self._bg(self.on_staff(p, m.ts))
 
@@ -221,7 +232,7 @@ class Tracker:
         await self._staff_seen(m)
         if not card:
             return "command"
-        p = self.person_of(c, m.sender_id)
+        p = self.person_of(c, m.sender_id, m.ts)
         new = self.db.run("INSERT OR IGNORE INTO cards(chat_id, msg_id, topic_id, folder_id, sender_id, person_id, "
                           "cmd, ts) VALUES(?,?,?,?,?,?,?,?)", (c, m.msg_id, t, fid, m.sender_id, p["id"] if p else None,
                                                                m.cmd, m.ts)).rowcount
@@ -284,6 +295,20 @@ class Tracker:
         if th is None or self.db.one("SELECT 1 FROM journal WHERE chat_id=? AND topic_id=? AND msg_id=?",
                                      (c, t, m.msg_id)):
             return "dup"
+        if m.video and m.who in ("client", "staff") and th["stavka"] == "on":
+            # stavka videosi kech topildi (Telegram jonli yetkazmagan) — baribir stavka sanaladi
+            new = self.db.run("INSERT OR IGNORE INTO bets(chat_id, topic_id, msg_id, ts) VALUES(?,?,?,?)",
+                              (c, t, m.msg_id, m.ts)).rowcount
+            if new:
+                bets = (th["bets"] or 0) + 1
+                self._set(c, t, bets=bets, bet_last_ts=max(m.ts, th["bet_last_ts"] or 0))
+                if m.who == "client":
+                    self._count_lead(th, m)
+                need = self.stavka_limits()[0]
+                if bets >= need:
+                    self._finish_stavka(c, t, max(m.ts, th["bet_last_ts"] or 0), "late")
+            self._journal(m, "late_bet")
+            return "late_bet"
         if m.who == "client":
             self._count_lead(th, m)
             self._journal(m, "late_client")
@@ -474,22 +499,22 @@ class Tracker:
             return
         fid = self.chat_folder.get(c)
         waited = self.elapsed(fid, th["wait_since"], ts) if fid else 0
-        p = self.person_of(c, staff_id) if staff_id else None
+        p = self.person_of(c, staff_id, ts) if staff_id else None
         self.db.run("INSERT INTO replies(chat_id, topic_id, folder_id, staff_id, wait_since, reply_ts, work_seconds, "
                     "person_id) VALUES(?,?,?,?,?,?,?,?)", (c, t, fid or 0, staff_id, th["wait_since"], ts, waited,
                                                           p["id"] if p else None))
         self._set(c, t, wait_since=None, wait_msg_id=None, alert_id=None)
         if th["alert_id"]:
-            await self._close_alert(th["alert_id"], ts, waited, staff_id, by_button)
+            await self._close_alert(th["alert_id"], ts, waited, staff_id, by_button, person=p)
 
     async def _close_alert(self, alert_id: int, ts: int, waited: int, staff_id: int | None,
-                           by_button: str | None) -> None:
-        """Havola yopildi (javob yoki «✅ Выполнено»). Jarima bu yerda emas — «holat» bo'yicha (_incidents)."""
+                           by_button: str | None, person=None) -> None:
+        """Havola yopildi (javob yoki «✅ Выполнено»). Jarima bu yerda emas — eslatmadan keyin (_remind_alerts)."""
         a = self.db.one("SELECT * FROM alerts WHERE id=?", (alert_id,))
         if a is None or a["status"] != "open":
             return
         status = "done" if by_button else "answered"
-        who = by_button or self._staff_name(staff_id)
+        who = by_button or (P.mention(person) if person is not None else self._staff_name(staff_id))
         self.db.run("UPDATE alerts SET status=?, closed_ts=?, closed_by=?, waited_min=? WHERE id=?",
                     (status, ts, who, minutes_up(waited), alert_id))
         if a["group_msg_id"]:
@@ -504,14 +529,21 @@ class Tracker:
         h = self.db.one("SELECT name FROM known_humans WHERE user_id=?", (uid,))
         return h["name"] if h and h["name"] else "менеджер"
 
-    def live_counts(self, now: int) -> dict:
-        """Bosh menyu uchun aniq, real vaqtdagi sonlar (zaderjka qoidalari bilan bir xil):
-        waiting — hozir javob kutayotgan lidlar (nazoratdagi papkalar, ⚡/💊 va stavkadagilarsiz);
-        stavka — stavka bosqichidagi yangi lidlar; overdue — papka -> limitdan oshib javobsiz turganlar."""
+    def warn_seconds(self) -> int:
+        """🟡 chegarasi: limitdan 5 daqiqa oldin (20 daq limit — 15 daqiqa kutgan)."""
         limit = max(1, self.db.get_int("limit_minutes", 20)) * 60
+        return max(60, limit - WARN_BEFORE) if limit > WARN_BEFORE else max(60, limit // 2)
+
+    def live_counts(self, now: int) -> dict:
+        """Bosh menyu va 📌 doska uchun aniq, real vaqtdagi sonlar (zaderjka qoidalari bilan bir xil soat: faqat ish
+        vaqti, tanaffus pauzasisiz, ⚡/💊 va stavkadagilarsiz):
+        waiting — hozir javob kutayotgan lidlar; stavka — stavka bosqichidagi yangi lidlar;
+        overdue — papka -> limitdan (20 daq) oshib javobsiz turganlar (🔴); near — papka -> 15–19 daq kutganlar (🟡)."""
+        limit = max(1, self.db.get_int("limit_minutes", 20)) * 60
+        warn = self.warn_seconds()
         skip = skip_list(self.db)
         on = {f["id"] for f in P.folders(self.db) if f["delay_on"]}
-        out = {"waiting": 0, "stavka": 0, "overdue": {}}
+        out = {"waiting": 0, "stavka": 0, "overdue": {}, "near": {}, "wait_by": {}}
         for th in self.db.all("SELECT chat_id, topic_id, wait_since, stavka FROM threads "
                               "WHERE wait_since IS NOT NULL OR stavka='on'"):
             fid = self.chat_folder.get(th["chat_id"])
@@ -520,11 +552,16 @@ class Tracker:
             if th["stavka"] == "on":
                 out["stavka"] += 1
                 continue
-            if fid not in on or label_excluded(self.label(th["chat_id"], th["topic_id"]), skip):
+            if th["wait_since"] is None or fid not in on or label_excluded(self.label(th["chat_id"], th["topic_id"]),
+                                                                           skip):
                 continue
             out["waiting"] += 1
-            if self.elapsed(fid, th["wait_since"], now) >= limit:
+            out["wait_by"][fid] = out["wait_by"].get(fid, 0) + 1     # 👥 jonli xodimlar: RD bo'yicha
+            waited = self.elapsed(fid, th["wait_since"], now)
+            if waited >= limit:
                 out["overdue"][fid] = out["overdue"].get(fid, 0) + 1
+            elif waited >= warn:
+                out["near"][fid] = out["near"].get(fid, 0) + 1
         return out
 
     def overdue_now(self, now: int) -> dict[int, int]:
@@ -593,8 +630,21 @@ class Tracker:
                     whos.append(r["closed_by"])
             lines.append(small("выполнено" + (f" — {esc(', '.join(whos))}" if whos else "")))
         else:
-            lines.append(tag(P.folder_people(self.db, f["id"]) if f else []))
+            people = self.workers(f["id"], rows[0]["created_ts"]) if f else []
+            lines += self.break_lines(people)
+            lines.append(tag(people))
         return "\n".join(x for x in lines if x), closed
+
+    def break_lines(self, people, now: int | None = None) -> list[str]:
+        """«☕ Baxa на перерыве до 14:30» — belgilanganlardan tanaffusdagilari (mayda)."""
+        from .attendance import break_until
+        now = int(self.clock() if now is None else now)
+        out = []
+        for p in people:
+            until = break_until(self.db, p["id"], now)
+            if until:
+                out.append(small(f"☕ {esc(p['name'])} на перерыве до {self.hm(until)}"))
+        return out
 
     async def render_alert_message(self, gid: int, mid: int) -> None:
         text, closed = self.alert_message_text(gid, mid)
@@ -620,8 +670,6 @@ class Tracker:
         if self.db.flag("delay_enabled"):
             out["alerts"] = await self._delays(now)
             out["eod"] = await self.end_of_day(now)
-        out["incidents"] = await self._incidents(now)
-        if self.db.flag("delay_enabled"):
             out["reminded"] = await self._remind_alerts(now)
         return out
 
@@ -683,7 +731,7 @@ class Tracker:
                 [head(f["name"] if f else "", "ставка", f"новый чат с {self.hm(since)}" if since else "")]
                 + [link(message_link(th["chat_id"], th["seen_msg_id"] or th["topic_id"], th["topic_id"]))
                    for th, _due in items]
-                + [tag(P.folder_people(self.db, fid))]) if x)
+                + [tag(self.workers(fid, now))]) if x)
             try:
                 await self.notifier.send_group(text, trash="info")
             except Exception as exc:
@@ -731,8 +779,8 @@ class Tracker:
                     [head(f["name"], "рабочий день закончился", "без ответа")]
                     + [link(message_link(th["chat_id"], th["wait_msg_id"] or th["topic_id"], th["topic_id"]))
                        for th in part]
-                    + [tag(P.folder_people(self.db, fid), "доведите работу до конца, чтобы ни один чат "
-                                                          "не остался без ответа")]) if x)
+                    + [tag(self.workers(fid, end_ts), "доведите работу до конца, чтобы ни один чат "
+                                                        "не остался без ответа")]) if x)
                 try:
                     await self.notifier.send_group(text, trash="info")
                     sent += len(part)
@@ -743,10 +791,14 @@ class Tracker:
         return sent
 
     async def _delays(self, now: int) -> int:
+        """Limitdan oshgan lidlar — papka bo'yicha bitta «задержка». Birinchisidan 40 soniya kutadi (shu orada
+        kechikkanlar birga ketadi); shunda yana bir lid 10 soniyada limitga yetadigan bo'lsa — uni ham kutadi
+        (ko'pi bilan 1 daqiqa)."""
         limit = max(1, self.db.get_int("limit_minutes", 20)) * 60
         folders = {f["id"]: f for f in P.folders(self.db)}
         skip = skip_list(self.db)
         due: dict[int, list] = {}
+        soon: set[int] = set()
         for th in self.db.all("SELECT * FROM threads WHERE wait_since IS NOT NULL AND alert_id IS NULL "
                               "ORDER BY wait_since"):
             fid = self.chat_folder.get(th["chat_id"])
@@ -756,16 +808,22 @@ class Tracker:
             if label_excluded(self.label(th["chat_id"], th["topic_id"]), skip):
                 self._set(th["chat_id"], th["topic_id"], wait_since=None, wait_msg_id=None)
                 continue
-            if self.elapsed(fid, th["wait_since"], now) >= limit:
+            waited = self.elapsed(fid, th["wait_since"], now)
+            if waited >= limit:
                 due.setdefault(fid, []).append(th)
+            elif waited >= limit - BATCH_LOOK:
+                soon.add(fid)
         batch = BATCH_SEC if self.db.flag("delay_batch") else 0
         for fid in [x for x in self._due_since if x not in due]:
             self._due_since.pop(fid, None)                 # kutayotganlar javob oldi — hisob boshidan
         sent = 0
         for fid, items in due.items():
             first = self._due_since.setdefault(fid, now)
-            if batch and now - first < batch and len(items) < MAX_LINKS:
-                continue                                   # yana kechikkanlar bo'lsa — birga ketadi
+            if batch and len(items) < MAX_LINKS:
+                if now - first < batch:
+                    continue                               # yana kechikkanlar bo'lsa — birga ketadi
+                if fid in soon and now - first < BATCH_CAP:
+                    continue                               # yana biri bir necha soniyada kechikadi — uni ham kutamiz
             self._due_since.pop(fid, None)
             for i in range(0, len(items), MAX_LINKS):
                 sent += await self._send_alert(items[i:i + MAX_LINKS], folders[fid], now)
@@ -811,11 +869,14 @@ class Tracker:
                                     rep["staff_id"] if rep else None, None)
         return len(items)
 
-    # ------------------------------------------------------------ ⏰ javobsiz zaderjka: eslatma → jarima
-    def alert_remind_rules(self) -> tuple[bool, int, int, float]:
-        """(yoqiqmi, eslatma — zaderjkadan necha soniya, muhlat — eslatmadan necha soniya, jarima $)."""
+    # ------------------------------------------------------------ ⏰ javobsiz zaderjka: eslatma → 1 ta zaderjka (jarima)
+    def alert_remind_rules(self) -> tuple[bool, int, int]:
+        """(yoqiqmi, eslatma — zaderjkadan necha soniya, muhlat — eslatmadan necha soniya)."""
         return (self.db.flag("remind_on"), max(1, self.db.get_int("remind_min", 15)) * 60,
-                max(1, self.db.get_int("remind_grace_min", 5)) * 60, max(0.0, self.db.get_float("remind_fine_usd")))
+                max(1, self.db.get_int("remind_grace_min", 5)) * 60)
+
+    def episode_sec(self) -> int:
+        return max(0, self.db.get_int("fine_episode", 30)) * 60
 
     def _last_work_end(self, now: int) -> int:
         _ws, we = self.work_window()
@@ -827,7 +888,7 @@ class Tracker:
 
     async def _unanswered(self, gid: int, mid: int) -> list:
         """Shu zaderjka xabaridagi hali javobsiz havolalar. Kun oxirida kutish yopilgan bo'lsa ham, keyin javob
-        berilgani (xodim yozgan) — yopiladi (✅). «Holat» bo'yicha jarima olganlari — qayta jarimaga kirmaydi."""
+        berilgani (xodim yozgan) — yopiladi (✅)."""
         out = []
         for a in self.db.all("SELECT * FROM alerts WHERE group_chat_id=? AND group_msg_id=? AND status='open'",
                              (gid, mid)):
@@ -837,37 +898,56 @@ class Tracker:
                 await self._close_alert(a["id"], th["last_staff_ts"],
                                         self.elapsed(fid, a["wait_since"], th["last_staff_ts"]) if fid else 0, None, None)
                 continue
-            if self.db.one("SELECT 1 FROM incident_alerts ia JOIN incidents i ON i.id=ia.incident_id "
-                           "WHERE ia.alert_id=? AND i.status='fined'", (a["id"],)):
-                continue
             out.append(a)
         return out
 
-    def _remind_text(self, f, rows, people, grace: int, usd: float, state: str = "open") -> str:
+    def _group_anchor(self, gid: int, mid: int) -> int:
+        """Zaderjka qachon chiqqan (shu «задержка» xabari) — «bitta zaderjka» davri shundan hisoblanadi."""
+        return int(self.db.scalar("SELECT MIN(created_ts) FROM alerts WHERE group_chat_id=? AND group_msg_id=?",
+                                  (gid, mid), default=int(self.clock())))
+
+    def _remind_text(self, f, rows, people, grace: int, now: int, anchor: int) -> str:
+        """«RD 1 · всё ещё без ответа / havolalar / ⏰ Ответьте в течение 5 мин — иначе штраф 5 $ / @baxa».
+        Summalar har xil bo'lsa: «иначе штраф: @baxa 5 $, @aziza 10 $». Jarimalar o'chiq — «штраф» so'zi yo'q."""
+        from . import fines
+        from .attendance import break_until
         name = f["name"] if f else ""
-        fine = usd > 0 and self.db.flag("fines_enabled")
-        if state == "ok":
-            return "\n".join([head(name, "напоминание"), "✅ ответили — без штрафа"])
-        if state == "fined":
-            return "\n".join([head(name), fine_line(people, usd, "за задержку")])
         lines = [head(name, "всё ещё без ответа")]
         lines += [link(message_link(a["chat_id"], a["wait_msg_id"] or a["topic_id"], a["topic_id"])) for a in rows]
-        lines.append(f"⏰ <b>Ответьте в течение {grace // 60} мин" + (f" — иначе штраф {usd:g} $ каждому" if fine else "")
-                     + "</b>")
+        day = self.day_of(now)
+        due = []
+        if fines.on(self.db, "delay"):
+            for p in people:
+                if break_until(self.db, p["id"], now) or fines.episode_of(self.db, p["id"], anchor, self.episode_sec()):
+                    continue                               # tanaffusda / o'sha zaderjka davomi — jarima yo'q
+                n, usd = fines.next_amount(self.db, p["id"], "delay", day)
+                due.append((p, n, usd))
+        warn = f"⏰ <b>Ответьте в течение {grace // 60} мин"
+        paid = [(p, usd) for p, _n, usd in due if usd > 0]
+        if paid and len({usd for _p, usd in paid}) == 1:
+            warn += f" — иначе штраф {fines.money(paid[0][1])} $" + (" (каждому)" if len(paid) > 1 else "") + "</b>"
+        elif paid:
+            warn += " — иначе штраф: " + ", ".join(f"{esc(P.mention(p))} {fines.money(usd)} $" for p, usd in paid) + "</b>"
+        elif due:
+            warn += f"</b> — иначе задержка ({fines.ordinal(due[0][1], 'delay')})"
+        else:
+            warn += "</b>"
+        lines.append(warn)
+        lines += self.break_lines(people, now)
         lines.append(tag(people))
-        return "\n".join(lines)
+        return "\n".join(x for x in lines if x)
 
     async def _remind_alerts(self, now: int) -> int:
-        """Zaderjka xabari N daqiqa (yoki ish kuni tugaguncha) javobsiz — o'sha xabarga javob qilib eslatma,
-        xodimlar belgilanadi. Muhlatda javob bo'lmasa — o'sha kuni papkada ishlayotganlarga jarima (xabar qoladi)."""
-        on, after, grace, usd = self.alert_remind_rules()
+        """«задержка» N daqiqa (yoki ish kuni tugaguncha) javobsiz — o'sha xabarga javob qilib eslatma, RD ning bugungi
+        xodimi belgilanadi. Muhlatda ham javob bo'lmasa — 1 ta zaderjka: kunlik zinapoya bo'yicha jarima (💸). Bir vaqtda
+        va keyingi 30 daqiqada kechikkanlar — o'sha 1 ta. Eslatma paytida tanaffusda bo'lgan xodimga — jarima yo'q."""
+        on, after, grace = self.alert_remind_rules()
         if not on:
             return 0
         ws, we = self.work_window()
         work = is_work_time(now, self.tz, ws, we)
         end_ts = self._last_work_end(now)
-        eod = not work and end_ts <= now <= end_ts + 3 * 3600   # ish kuni hozirgina tugadi — darhol eslatma
-        day = local_date(now, self.tz)
+        eod = not work and end_ts <= now <= end_ts + 3 * 3600   # ish kuni hozirgina tugadi — eslatma vaqti kelsa
         changed = 0
         if work or eod:
             for g in self.db.all("SELECT group_chat_id gid, group_msg_id mid, folder_id, MIN(created_ts) created "
@@ -875,17 +955,17 @@ class Tracker:
                                  "GROUP BY group_chat_id, group_msg_id", (now - 86400,)):
                 if self.db.one("SELECT 1 FROM alert_reminders WHERE gid=? AND mid=?", (g["gid"], g["mid"])):
                     continue
-                if not ((work and now >= g["created"] + after) or (eod and g["created"] < end_ts)):
+                if now < g["created"] + after:            # kun oxirida ham odatdagi vaqt (egasi, 2026-10-30)
                     continue
                 rows = await self._unanswered(g["gid"], g["mid"])
                 if not rows:
                     continue
                 f = P.folder(self.db, g["folder_id"])
-                people = self.fine_people(g["folder_id"], day) if f else []
+                people = self.workers(g["folder_id"], now) if f else []
                 rgid = rmid = None
                 try:
-                    rgid, rmid = await self.notifier.send_group(self._remind_text(f, rows, people, grace, usd),
-                                                                reply_to=g["mid"])
+                    rgid, rmid = await self.notifier.send_group(
+                        self._remind_text(f, rows, people, grace, now, g["created"]), reply_to=g["mid"])
                 except Exception as exc:
                     log.warning("Eslatma yuborilmadi: %s", exc)
                 self.db.run("INSERT OR IGNORE INTO alert_reminders(gid, mid, folder_id, reminded_ts, rgid, rmid, "
@@ -899,8 +979,11 @@ class Tracker:
                 self.db.run("UPDATE alert_reminders SET status='ok', ended_ts=? WHERE gid=? AND mid=?",
                             (now, r["gid"], r["mid"]))
                 if r["rmid"]:
+                    from . import fines
+                    ok = "✅ ответили — без штрафа" if fines.on(self.db, "delay") else "✅ ответили"
                     try:
-                        await self.notifier.edit_group(r["rgid"], r["rmid"], self._remind_text(f, [], [], grace, usd, "ok"))
+                        await self.notifier.edit_group(r["rgid"], r["rmid"], "\n".join([head(f["name"] if f else "",
+                                                                                              "напоминание"), ok]))
                     except Exception as exc:
                         log.info("Eslatma tahrirlanmadi: %s", exc)
                     from .tidy import remember
@@ -909,164 +992,53 @@ class Tracker:
                 continue
             if now < r["deadline"]:
                 continue
-            fday = local_date(r["reminded_ts"], self.tz)
-            people = self.fine_people(r["folder_id"], fday) if f else []
-            fined = usd > 0 and self.db.flag("fines_enabled") and bool(people)
-            if fined:
-                from .kassa import add_adj
-                for p in people:
-                    add_adj(self.db, p["id"], "fine", usd, fday.isoformat(), source="remind",
-                            note="не ответили после напоминания")
-            self.db.run("UPDATE alert_reminders SET status=?, ended_ts=? WHERE gid=? AND mid=?",
-                        ("fined" if fined else "missed", now, r["gid"], r["mid"]))
-            if r["rmid"]:
-                text = (self._remind_text(f, rows, people, grace, usd, "fined") if fined else
-                        "\n".join([head(f["name"] if f else "", "не ответили после напоминания"), tag(people)]))
-                try:
-                    await self.notifier.edit_group(r["rgid"], r["rmid"], text)
-                except Exception as exc:
-                    log.info("Eslatma tahrirlanmadi: %s", exc)
-                if not fined:
-                    from .tidy import remember
-                    remember(self.db, r["rgid"], r["rmid"], "info", now)   # jarimasiz — 🧹 keyin o'chadi
+            await self._missed(r, f, now)
             changed += 1
         return changed
 
-    # ------------------------------------------------------------ jarima: «holat» (papkada ko'p lid javobsiz)
-    def fine_amount(self, f) -> float:
-        """Papkaning zaderjka jarimasi: alohida summa (>0), o'chiq (<0) yoki umumiy summa."""
-        own = float(f["fine_usd"] or 0) if f is not None else 0.0
-        if own < 0:
-            return 0.0
-        return own if own > 0 else max(0.0, self.db.get_float("fine_amount"))
-
-    def fine_rules(self) -> tuple[int, int, int]:
-        """(nechta lid birdaniga, kuniga nechta kechirim, javob uchun necha soniya)."""
-        return (max(1, self.db.get_int("fine_min_leads", 3)), max(0, self.db.get_int("fine_forgive", 2)),
-                max(0, self.db.get_int("fine_grace", 3)) * 60)
-
-    async def _incidents(self, now: int) -> int:
-        """Papkada bir vaqtda N+ lid javobsiz → «holat». Kuniga birinchi K tasi — ogohlantirish (jarimasiz).
-        Keyingisi: ogohlantirishdan G daqiqada javob bo'lmasa — bir martalik jarima papkaning har xodimiga.
-
-        Har bir «задержка» havolasi faqat BITTA holatga kiradi; oxirgi 1 soatdagi havolalar sanaladi (kunlab javobsiz
-        qolib ketgan eski havolalar keyingi holatlarni to'sib qo'ymaydi va qayta sanalmaydi)."""
-        n_min, forgive, grace = self.fine_rules()
-        changed = 0
-        for f in P.folders(self.db):
-            active = self.db.one("SELECT * FROM incidents WHERE folder_id=? AND ended_ts IS NULL ORDER BY id DESC "
-                                 "LIMIT 1", (f["id"],))
-            free = [r["id"] for r in self.db.all(
-                "SELECT id FROM alerts WHERE folder_id=? AND status='open' AND created_ts>=? AND id NOT IN "
-                "(SELECT alert_id FROM incident_alerts)", (f["id"], now - INCIDENT_FRESH))]
-            if active is None:
-                episode = max(0, self.db.get_int("fine_episode", 30)) * 60
-                recent = self.db.one("SELECT id FROM incidents WHERE folder_id=? AND started_ts>=? ORDER BY id DESC "
-                                     "LIMIT 1", (f["id"], now - episode)) if episode else None
-                if recent is not None:                    # o'sha «yo'qlik» davomi — yangi holat emas
-                    self.db.many("INSERT OR IGNORE INTO incident_alerts(incident_id, alert_id) VALUES(?,?)",
-                                 [(recent["id"], a) for a in free])
-                elif (len(free) >= n_min and f["delay_on"] and self.fine_amount(f) > 0 and self.db.flag("fines_enabled")
-                        and self.db.flag("delay_enabled")):
-                    await self._start_incident(f, free, now, forgive, grace)
-                    changed += 1
-                continue
-            for aid in free:                              # kutish paytida kechikkanlar ham shu holatga kiradi
-                self.db.run("INSERT OR IGNORE INTO incident_alerts(incident_id, alert_id) VALUES(?,?)",
-                            (active["id"], aid))
-            still = self.db.scalar("SELECT COUNT(*) FROM incident_alerts ia JOIN alerts a ON a.id=ia.alert_id "
-                                   "WHERE ia.incident_id=? AND a.status='open'", (active["id"],))
-            if still == 0:
-                self.db.run("UPDATE incidents SET status='ok', ended_ts=? WHERE id=?", (now, active["id"]))
-                await self._render_incident(active["id"])
-                self._trash_incident(active["id"], now)       # vaqtida javob berildi — 🧹 keyin o'chadi
-                changed += 1
-            elif now >= (active["deadline"] or now):
-                await self._fine_incident(active, f, now)
-                changed += 1
-        return changed
-
-    async def _start_incident(self, f, open_ids: list, now: int, forgive: int, grace: int) -> None:
-        day = local_date(now, self.tz).isoformat()
-        seq = self.db.scalar("SELECT COUNT(*) FROM incidents WHERE folder_id=? AND day=?", (f["id"], day)) + 1
-        status = "warn" if seq <= forgive else "grace"
-        iid = int(self.db.run("INSERT INTO incidents(folder_id, day, seq, started_ts, n_leads, status, deadline, "
-                              "fine_usd, ended_ts) VALUES(?,?,?,?,?,?,?,?,?)",
-                              (f["id"], day, seq, now, len(open_ids), status, now + grace if status == "grace" else None,
-                               self.fine_amount(f), now if status == "warn" else None)).lastrowid)
-        self.db.many("INSERT OR IGNORE INTO incident_alerts(incident_id, alert_id) VALUES(?,?)",
-                     [(iid, a) for a in open_ids])
-        try:
-            # 🧹 ogohlantirish — keyin o'chadi; «⏳ ответьте за N мин» — natijasini kutadi (jarima bo'lsa — qoladi)
-            gid, mid = await self.notifier.send_group(self.incident_text(iid), trash="info" if status == "warn" else None)
-            self.db.run("UPDATE incidents SET group_chat_id=?, group_msg_id=? WHERE id=?", (gid, mid, iid))
-        except Exception as exc:
-            log.warning("Holat xabari yuborilmadi: %s", exc)
-        log.info("Holat: %s #%s (%s lid) — %s", f["name"], seq, len(open_ids), status)
-
-    def _trash_incident(self, iid: int, now: int) -> None:
-        inc = self.db.one("SELECT group_chat_id, group_msg_id FROM incidents WHERE id=?", (iid,))
-        if inc is not None and inc["group_msg_id"]:
-            from .tidy import remember
-            remember(self.db, inc["group_chat_id"], inc["group_msg_id"], "info", now)
-
-    async def _fine_incident(self, inc, f, now: int) -> None:
-        """Jarima yozilsa — «💸 штраф» xabari «Проёб»da QOLADI (🧹 tozalashga kirmaydi)."""
-        amount = float(inc["fine_usd"] or 0)
-        if amount <= 0 or not self.db.flag("fines_enabled"):
-            self.db.run("UPDATE incidents SET status='ok', ended_ts=? WHERE id=?", (now, inc["id"]))
-            await self._render_incident(inc["id"])
-            self._trash_incident(inc["id"], now)
+    async def _missed(self, r, f, now: int) -> None:
+        """Eslatmadan keyin ham javob yo'q: RD ning o'sha kungi xodimiga 1 ta zaderjka (zinapoya bo'yicha jarima)."""
+        from . import fines
+        from .attendance import break_until
+        fday = local_date(r["reminded_ts"], self.tz)
+        people = self.workers(r["folder_id"], r["reminded_ts"]) if f else []
+        anchor = self._group_anchor(r["gid"], r["mid"])
+        lines, money_fine, struck = [], False, False
+        if fines.on(self.db, "delay"):
+            for p in people:
+                if break_until(self.db, p["id"], r["reminded_ts"]):
+                    lines.append(f"☕ {esc(P.mention(p))} на перерыве — без штрафа")
+                    continue
+                ep = fines.episode_of(self.db, p["id"], anchor, self.episode_sec())
+                if ep is not None:
+                    lines.append(f"⏰ {esc(P.mention(p))} — не ответили после напоминания · та же задержка, что в "
+                                 f"{self.hm(ep['ts'])} — без нового штрафа")
+                    continue
+                res = fines.strike(self.db, p["id"], "delay", fday, anchor, r["folder_id"], ref=f"{r['gid']}:{r['mid']}",
+                                   note=f"{f['name'] if f else ''}: задержка без ответа после напоминания")
+                if res is None:
+                    continue
+                struck = True
+                money_fine = money_fine or res["usd"] > 0
+                lines.append(fines.delay_line(p, res))
+        self.db.run("UPDATE alert_reminders SET status=?, ended_ts=? WHERE gid=? AND mid=?",
+                    ("fined" if struck else "missed", now, r["gid"], r["mid"]))
+        if not r["rmid"]:
             return
-        self.db.run("UPDATE incidents SET status='fined', ended_ts=? WHERE id=?", (now, inc["id"]))
-        day = local_date(now, self.tz)
-        from .kassa import add_adj
-        for p in self.fine_people(f["id"], day):
-            add_adj(self.db, p["id"], "fine", amount, day.isoformat(), source="delay", ref_id=inc["id"],
-                    note=f"{f['name']}: {plural_leads(inc['n_leads'])} без ответа")
-        await self._render_incident(inc["id"])
+        name = f["name"] if f else ""
+        text = "\n".join([head(name)] + lines) if lines else \
+            "\n".join([head(name, "не ответили после напоминания"), tag(people)])
+        try:
+            await self.notifier.edit_group(r["rgid"], r["rmid"], text)
+        except Exception as exc:
+            log.info("Eslatma tahrirlanmadi: %s", exc)
+        if not money_fine:
+            from .tidy import remember
+            remember(self.db, r["rgid"], r["rmid"], "info", now)   # jarimasiz — 🧹 keyin o'chadi
 
     def fine_people(self, fid: int, day) -> list:
-        """Jarima kimga: papkaning shu kuni ishda bo'lgan xodimlari («доброе утро» yoki lidga yozgan). Hech kim
-        kelmagan bo'lsa (yoki ishga kelish nazorati o'chiq) — dam olmayotgan hamma xodim."""
-        ppl = [p for p in P.folder_people(self.db, fid) if p["active"] and not P.is_day_off(p, day.weekday())]
-        if not self.db.flag("attendance_enabled"):
-            return ppl
-        came = {r["person_id"] for r in self.db.all("SELECT person_id FROM attendance WHERE day=? AND arrived_ts "
-                                                     "IS NOT NULL", (day.isoformat(),))}
-        here = [p for p in ppl if p["id"] in came]
-        return here or ppl
-
-    def incident_text(self, iid: int) -> str:
-        """«Проёб» uchun (ruscha)."""
-        inc = self.db.one("SELECT * FROM incidents WHERE id=?", (iid,))
-        f = P.folder(self.db, inc["folder_id"])
-        name = f["name"] if f else ""
-        people = P.folder_people(self.db, inc["folder_id"]) if f else []
-        _n, forgive, grace = self.fine_rules()
-        leads = plural_leads(inc["n_leads"])
-        amount = f"{inc['fine_usd']:g} $"
-        top = head(name, f"{leads} без ответа")
-        if inc["status"] == "warn":                       # imkoniyat sanalmaydi — oddiy, aniq ogohlantirish
-            fine = (f"\n<i>Дальше за такое — штраф {amount} каждому</i>" if inc["fine_usd"]
-                    and self.db.flag("fines_enabled") else "")
-            return "\n".join([top, f"⚠️ <b>Ответьте лидам — без задержек!</b>{fine}", tag(people)])
-        if inc["status"] == "grace":
-            return "\n".join([top, f"⏳ Ответьте за {grace // 60} мин — иначе штраф {amount} каждому", tag(people)])
-        if inc["status"] == "fined":
-            fined = [p for p in (P.person(self.db, r["person_id"]) for r in self.db.all(
-                "SELECT DISTINCT person_id FROM adj WHERE source='delay' AND ref_id=? AND cancelled=0", (iid,))) if p]
-            return "\n".join([head(name), fine_line(fined or people, inc["fine_usd"], f"за {leads} без ответа")])
-        return "\n".join([top, "✅ ответили вовремя — без штрафа"])
-
-    async def _render_incident(self, iid: int) -> None:
-        inc = self.db.one("SELECT * FROM incidents WHERE id=?", (iid,))
-        if inc is None or not inc["group_msg_id"]:
-            return
-        try:
-            await self.notifier.edit_group(inc["group_chat_id"], inc["group_msg_id"], self.incident_text(iid))
-        except Exception as exc:
-            log.info("Holat xabari tahrirlanmadi: %s", exc)
+        """Shu kuni RD da ishlagan xodim(lar) — 📅 Bugun kim qayerda bo'yicha (ball va hisobotlar uchun)."""
+        return R.workers(self.db, fid, day)
 
 
 def plural_leads(n: int) -> str:

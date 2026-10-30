@@ -33,6 +33,7 @@ def week_bounds(day: dt.date, tz) -> tuple[dt.date, dt.date, int, int]:
 
 
 def _on_duty(tracker, folder_id: int, day: dt.date) -> list[int]:
+    """O'sha kuni o'sha RD da ishlagan xodim(lar) — 📅 Bugun kim qayerda bo'yicha."""
     return [p["id"] for p in tracker.fine_people(folder_id, day)]
 
 
@@ -66,9 +67,9 @@ def compute(ctx, s: dt.date, e: dt.date) -> list[dict]:
     delays = delays_by_person(db, tr, s_ts, e_ts)
     late = {r["person_id"]: int(r["m"] or 0) for r in db.all(
         "SELECT person_id, SUM(late_min) m FROM attendance WHERE day BETWEEN ? AND ? GROUP BY person_id", (s_day, e_day))}
-    reminds = {r["person_id"]: r["n"] for r in db.all(
-        "SELECT person_id, COUNT(*) n FROM adj WHERE source='remind' AND cancelled=0 AND day BETWEEN ? AND ? "
-        "GROUP BY person_id", (s_day, e_day))}
+    reminds = {r["person_id"]: r["n"] for r in db.all(       # eslatmadan keyin ham javobsiz — 1 ta zaderjka (💸)
+        "SELECT s.person_id, COUNT(*) n FROM strikes s LEFT JOIN adj a ON a.id=s.adj_id WHERE s.kind='delay' "
+        "AND (s.adj_id IS NULL OR a.cancelled=0) AND s.day BETWEEN ? AND ? GROUP BY s.person_id", (s_day, e_day))}
     staff = {p["id"]: p for p in db.all("SELECT DISTINCT p.* FROM people p JOIN folder_people fp ON fp.person_id=p.id "
                                          "WHERE p.active=1")}
     for pid in set(reply) | set(carded):

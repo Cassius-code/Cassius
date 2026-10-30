@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from . import kassa as K
 from . import people as P
+from . import roster as R
 from .kassa_view import h, money, num
 from .timeutil import at, local_date, minutes_up
 
@@ -37,11 +38,19 @@ def staff_stats(db, s_ts: int, e_ts: int, tz: ZoneInfo) -> list[dict]:
     s_day = dt.datetime.fromtimestamp(s_ts, tz).date().isoformat()
     e_day = dt.datetime.fromtimestamp(e_ts - 1, tz).date().isoformat()
     blank = {"n": 0, "avg": 0, "max": 0, "delays": 0, "fine": 0.0, "late": 0, "late_min": 0}
-    for a in db.all("SELECT fp.person_id, COUNT(*) n FROM alerts a JOIN folder_people fp ON fp.folder_id=a.folder_id "
-                    "WHERE a.created_ts>=? AND a.created_ts<? AND a.status<>'void' GROUP BY fp.person_id",
+    on_duty: dict[tuple, list] = {}                       # (papka, kun) -> o'sha kuni ishlagan xodimlar (📅)
+    counts: dict[int, int] = {}
+    for a in db.all("SELECT folder_id, created_ts FROM alerts WHERE created_ts>=? AND created_ts<? AND status<>'void'",
                     (s_ts, e_ts)):
-        out.setdefault(a["person_id"], dict(blank))["delays"] = a["n"]
-        names.setdefault(a["person_id"], (P.person(db, a["person_id"]) or {"name": "?"})["name"])
+        day = dt.datetime.fromtimestamp(a["created_ts"], tz).date()
+        key = (a["folder_id"], day)
+        if key not in on_duty:
+            on_duty[key] = [p["id"] for p in R.workers(db, a["folder_id"], day)]
+        for pid in on_duty[key]:
+            counts[pid] = counts.get(pid, 0) + 1
+    for pid, n in counts.items():
+        out.setdefault(pid, dict(blank))["delays"] = n
+        names.setdefault(pid, (P.person(db, pid) or {"name": "?"})["name"])
     for a in db.all("SELECT person_id, SUM(usd) s FROM adj WHERE source IN ('delay', 'strict_slow', 'strict_away', "
                     "'remind') "
                     "AND cancelled=0 AND day BETWEEN ? AND ? GROUP BY person_id", (s_day, e_day)):
@@ -100,12 +109,6 @@ def summary(ctx, s: dt.date, e: dt.date, lang: str, owner: bool, full: bool = Tr
     lines += [f"   {h(n)} · {c}" for n, c in leads]
     lines.append(f"🚨 {L('Zaderjkalar', 'Задержки')} — <b>{sum(c for _, c in dl)}</b>"
                  + (f" ({', '.join(f'{h(n)} {c}' for n, c in dl)})" if dl else ""))
-    inc = {r["status"]: r["n"] for r in db.all("SELECT status, COUNT(*) n FROM incidents WHERE started_ts>=? AND "
-                                                "started_ts<? GROUP BY status", (s_ts, e_ts))}
-    if inc:
-        lines.append(f"⚠️ {L('Ko‘p lid javobsiz', 'Много лидов без ответа')} — <b>{sum(inc.values())}</b> "
-                     f"({L('kechirildi', 'прощено')} {inc.get('warn', 0)} · {L('vaqtida javob', 'успели')} "
-                     f"{inc.get('ok', 0)} · {L('jarima', 'штраф')} {inc.get('fined', 0)})")
     lines.append(f"📣 {L('Push', 'Пуш')} — <b>{pushed}</b>")
     parts.append("<blockquote>" + "\n".join(lines) + "</blockquote>")
     st = staff_stats(db, s_ts, e_ts, tz)

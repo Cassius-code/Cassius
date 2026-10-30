@@ -48,6 +48,17 @@ def _unix(d) -> int | None:
         return None
 
 
+def username_of(user) -> str:
+    """Telegram @username (Fragment'dan olingan «kolleksiya» nomlari ham — ular usernames ro'yxatida)."""
+    u = getattr(user, "username", None)
+    if u:
+        return str(u)
+    for x in getattr(user, "usernames", None) or []:
+        if getattr(x, "active", True) and getattr(x, "username", None):
+            return str(x.username)
+    return ""
+
+
 def folder_key(name: str) -> str:
     """Papka nomini solishtirish: katta-kichik harf, bo'sh joy va emoji farq qilmaydi («Rd3.1» = «RD 3.1 🔥»)."""
     import re
@@ -66,6 +77,7 @@ class Userbot(TgAccount, PushSender):
         self.tg_folders: list[str] = []          # asosiy akkauntdagi Telegram papkalari (nomlari)
         self._push_ids: set[int] = set()
         self._bots: set[int] = set()
+        self._humans: dict[int, tuple] = {}        # odam -> (@username, ism): xodimga bog'lash bir marta
         self.deep_running = False                  # Push bazasini to'liq tekshirish ketyapti
         self._deep_task = None
         self.tick = 1                              # kuzatuv uchun tez-tez uyg'onadi
@@ -78,6 +90,7 @@ class Userbot(TgAccount, PushSender):
         self._sync_task = None                     # papka/topik sinxroni fonda (kuzatuvni ushlab turmaydi)
         self.watch_found = 0                       # kuzatuv topgan (jonli kelmay qolgan) xabarlar
         self.flood_threshold = 10                  # Telegram 10 s dan ko'p kuttirsa — so'rov kutmasdan xato qaytaradi
+        self._resolve_pause = 0.0                  # @username so'rovlari shu vaqtgacha to'xtatilgan (FloodWait)
         self.reload_ids()
 
     def title(self) -> str:
@@ -357,12 +370,23 @@ class Userbot(TgAccount, PushSender):
             self.db.run("INSERT OR IGNORE INTO known_bots(user_id) VALUES(?)", (int(sid),))
             return True
         if hasattr(sender, "first_name"):
-            uname = getattr(sender, "username", None)
-            name = f"@{uname}" if uname else " ".join(x for x in (sender.first_name or "", getattr(sender, "last_name", "")
-                                                                   or "") if x)
-            self.db.run("INSERT INTO known_humans(user_id, name) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET "
-                        "name=excluded.name", (int(sid), name[:60]))
+            self.note_human(int(sid), sender)
         return False
+
+    def note_human(self, sid: int, sender) -> None:
+        """Odam yozdi: ismi eslab qolinadi va @username xodimniki bo'lsa — Telegram ID si xodimga bog'lanadi
+        (keyin shu xodim topikda ham, «Проёб»da ham, papka akkauntisiz ham tanildi). Har odam — bir marta."""
+        uname = username_of(sender)
+        name = f"@{uname}" if uname else " ".join(x for x in (getattr(sender, "first_name", "") or "",
+                                                              getattr(sender, "last_name", "") or "") if x)
+        key = (uname or "", name)
+        if self._humans.get(sid) == key:
+            return
+        self._humans[sid] = key
+        self.db.run("INSERT INTO known_humans(user_id, name) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET "
+                    "name=excluded.name", (sid, name[:60]))
+        if uname:
+            P.identify(self.db, sid, uname)
 
     def _bot_ui(self, m, chat_id: int, topic: int) -> bool:
         """Vositachi botning menyusi/javobi (status paneli, «Установлен: …») — mijoz xabari emas."""
@@ -705,18 +729,53 @@ class Userbot(TgAccount, PushSender):
         return added, removed
 
     async def resolve_people(self) -> int:
-        """@username → Telegram ID (xodimni guruhda tanish uchun)."""
+        """@username → Telegram ID (xodimni tanish uchun). Avval «Проёб» va RD guruhlari a'zolaridan (Telegram
+        cheklamaydi), qolganlari — @username bo'yicha so'rov bilan (Telegram «kuting» desa — keyingi sinxronda)."""
         if self.client is None:
             return 0
+        want = {p["username"]: p for p in self.db.all("SELECT * FROM people WHERE username<>'' AND tg_id IS NULL "
+                                                       "AND active=1")}
+        if not want:
+            return 0
         done = 0
-        for p in self.db.all("SELECT * FROM people WHERE username<>'' AND tg_id IS NULL AND active=1"):
+        chats = []
+        gid = (self.db.get("proyob_group_id") or "").strip()
+        if gid.lstrip("-").isdigit():
+            chats.append(int(gid))
+        chats += [c for c in self.tracker.chat_folder if c not in chats]
+        for cid in chats[:40]:
+            if not want:
+                break
             try:
-                ent = await self.client.get_entity(p["username"])
-                self.db.run("UPDATE people SET tg_id=? WHERE id=?", (int(ent.id), p["id"]))
-                done += 1
+                async for u in self.client.iter_participants(cid, limit=500):
+                    un = username_of(u).lower()
+                    p = want.pop(un, None)
+                    if p is not None and not getattr(u, "bot", False):
+                        P.identify(self.db, int(u.id), un)
+                        done += 1
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
-                log.info("@%s aniqlanmadi: %s", p["username"], type(exc).__name__)
-            await asyncio.sleep(1)
+                log.info("A'zolar olinmadi %s: %s", cid, type(exc).__name__)
+            await asyncio.sleep(0.5)
+        if time.time() < self._resolve_pause:
+            return done
+        for un, p in list(want.items()):
+            try:
+                ent = await self.client.get_entity(un)
+                if not getattr(ent, "bot", False):
+                    P.identify(self.db, int(ent.id), un)
+                    done += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                wait = getattr(exc, "seconds", None)
+                if wait:                                   # Telegram cheklovi — qolganlari keyinroq
+                    self._resolve_pause = time.time() + int(wait)
+                    log.info("@username so'rovi: Telegram %s s kutishni so'radi", wait)
+                    break
+                log.info("@%s aniqlanmadi: %s", un, type(exc).__name__)
+            await asyncio.sleep(2)
         return done
 
     async def search_dialogs(self, query: str, limit: int = 15) -> list[tuple[int, str, str]]:

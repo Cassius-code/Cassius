@@ -53,8 +53,12 @@ def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", messag
 
 
 # ───────────────────────── bosh menyu
-@screen("m", "view")
+@screen("m", "zp")
 async def main_menu(ctx, r: Req):
+    if not r.can("view"):               # 💵 faqat zp ko'radigan admin — uning menyusi shu
+        from .panel_zp import zp_home
+        r.args = []
+        return await zp_home(ctx, r)
     ui.view(r, "m")                     # qayerdan ochilsa ham (til almashtirish, /start …) — jonli yangilanadi
     db, now = ctx.db, int(ctx.clock())
     t = datetime.fromtimestamp(now, ctx.tz)
@@ -80,17 +84,20 @@ async def main_menu(ctx, r: Req):
         b = K.calc(db, K.week_start(t.date()), t.date())
         cash = sum(x["usd"] for x in b["rows"].values() if x["kind"] != "partner")
         lines.append(f"💰 Cash — <b>{money(cash)} $</b> <i>({r.L('dushanbadan', 'с понедельника')})</i>")
-    # papkalar bo'yicha hozirgi zaderjkalar: 🟢 yo'q · 🟡 bor · 🔴 ko'p (jarima chegarasi)
-    over = lc["overdue"]
-    red = max(1, ctx.tracker.fine_rules()[0]) if ctx.tracker else 3
+    # har RD hozir: 🟢 15+ daqiqa kutayotgan yo'q · 🟡 15–19 daqiqa kutayotgan bor · 🔴 20+ (zaderjka)
+    over, near = lc["overdue"], lc.get("near", {})
+    warn = ctx.tracker.warn_seconds() // 60 if ctx.tracker else 15
     live = [f"<b>{r.L('Hozir zaderjka', 'Задержки сейчас')}</b>"]
     if not db.flag("delay_enabled"):
         live.append(r.L("⚪ nazorat o'chiq", "⚪ контроль выключен"))
     for f in P.folders(db):
         if not f["delay_on"] or not db.flag("delay_enabled"):
             continue
-        n = over.get(f["id"], 0)
-        live.append(f"{'🟢' if n == 0 else ('🔴' if n >= red else '🟡')} {h(f['name'])} — <b>{n}</b>")
+        red, soon = over.get(f["id"], 0), near.get(f["id"], 0)
+        bits = ([r.L(f"<b>{red}</b> ta zaderjka", f"<b>{red}</b> задерж.")] if red else []) + \
+               ([r.L(f"{soon} ta {warn}+ daq", f"{soon} — {warn}+ мин")] if soon else [])
+        mark = "🔴" if red else ("🟡" if soon else "🟢")
+        live.append(f"{mark} {h(f['name'])}" + (f" — {' · '.join(bits)}" if bits else ""))
     ub = ctx.userbot
     ub_ok = ub is not None and ub.state == "online"
     accs = db.all("SELECT id FROM accounts WHERE paused=0")
@@ -112,14 +119,20 @@ async def main_menu(ctx, r: Req):
     if not r.can("full"):
         buttons = [b for b in buttons if b[1] in ("c", "p", "r")]
     rows = grid(buttons)
+    from . import roster as R
+    empty = len(R.empty_rds(db, t.date())) if db.flag("delay_enabled") else 0
+    rows.append([(r.L("👥 Hozir ishda", "👥 Сейчас на работе"), "lv")])
+    rows.append([(r.L("📅 Bugun kim qayerda", "📅 Кто где сегодня") + (f" ❗{empty}" if empty else ""), "rt")])
     rows.append([(r.L("🌐 Русский язык", "🌐 O'zbek tili"), r.L("lang:ru", "lang:uz"))])
     return ui.join(head, "", card(lines), card(live) if len(live) > 1 else "", card([sysline, pushline])), kb(*rows)
 
 
 # ───────────────────────── jonli panel: bosh menyu va Push o'z joyida yangilanib turadi
-LIVE_VIEWS = ("m", "u")
+LIVE_VIEWS = ("m", "u", "lv")
+FAST_VIEWS = {"lv": 3}                  # 👥 Hozir ishda — har 3 soniyada (egasi: 2–3 soniya)
+_LIVE_LAST: dict[int, float] = {}
 _LIVE_PAUSE: dict[int, float] = {}
-LIVE_EVERY = 5                          # soniya: shunchada bir tekshiriladi, son o'zgarsa — o'sha xabar tahrirlanadi
+LIVE_EVERY = 5                          # soniya (bosh menyu, Push): shunchada bir tekshiriladi, son o'zgarsa — o'sha xabar tahrirlanadi
                                         # (tez-tez tahrir — Telegram botni sekinlashtiradi, tugmalar kech javob beradi)
 QUIET_AFTER_TAP = 6                     # tugma bosilgandan keyin shuncha soniya panelga jonli yangilanish tegmaydi
 
@@ -138,6 +151,9 @@ async def live_refresh(ctx) -> int:
             continue
         if _t.monotonic() - ui.TOUCH.get(chat, 0) < QUIET_AFTER_TAP or ui.lock(chat).locked():
             continue                                       # foydalanuvchi hozir panel bilan ishlayapti
+        if _t.monotonic() - _LIVE_LAST.get(chat, 0) < FAST_VIEWS.get(base, LIVE_EVERY) - 0.5:
+            continue
+        _LIVE_LAST[chat] = _t.monotonic()
         async with ui.lock(chat):
             mid = ui.panel_id(chat)
             if ui.VIEW.get(chat) != view or not mid:
@@ -170,8 +186,10 @@ async def live_refresh(ctx) -> int:
 
 async def live_loop(ctx) -> None:
     import asyncio
+    from .alive import beat
     while True:
-        await asyncio.sleep(LIVE_EVERY)
+        beat("panel")                                      # 🫀 tiriklik
+        await asyncio.sleep(1)                             # har ekran o'z vaqtida (FAST_VIEWS / LIVE_EVERY)
         try:
             await live_refresh(ctx)
         except asyncio.CancelledError:
@@ -247,8 +265,8 @@ async def set_commands(ctx, uid: int | None = None) -> None:
 
 # ───────────────────────── yo'naltirish
 def build_router(ctx) -> Router:
-    from . import (panel_control, panel_insights, panel_kassa, panel_people, panel_push, panel_reports,  # noqa: F401
-                   panel_settings, private)
+    from . import (panel_control, panel_insights, panel_kassa, panel_live, panel_people, panel_push,  # noqa: F401
+                   panel_reports, panel_roster, panel_settings, panel_zp, private)
     from .db import EFFECTS
     r = Router(name="panel")
     ui.STORE = ctx.db
@@ -257,19 +275,22 @@ def build_router(ctx) -> Router:
     except Exception:
         log.info("Effect middleware o'rnatilmadi")
 
-    async def render(req: Req, res, edit_id=None, fresh=False, safe: bool = False):
+    async def render(req: Req, res, edit_id=None, fresh=False, effects: int = 0):
         if res is None:
             return
         if isinstance(res, str):
             await ui.toast(ctx.bot, req.chat_id, res)
             return
         text, markup = res
+        data, safe = ui.history_entry(req, effects)
+        if safe:
+            req.view = data                                 # amal bajarilgan bo'lsa — amalsiz manzil (jonli ham)
         async with ui.lock(req.chat_id):
             await ui.show(ctx.bot, req.chat_id, text, markup, edit_id=edit_id, fresh=fresh,
                           view=None if req.uid in ui.WAIT else req.view)
         if edit_id:
             ctx.notifier.forget(req.chat_id, edit_id)       # savol xabari panelga aylandi
-        ui.remember(req.uid, req.view or "?", text, markup, safe, ask=req.uid in ui.WAIT)
+        ui.remember(req.uid, data, text, markup, safe, ask=req.uid in ui.WAIT)
 
     async def run_screen(req: Req, data: str, edit_id: int) -> None:
         prefix = data.split(":")[0]
@@ -296,8 +317,7 @@ def build_router(ctx) -> Router:
             res = req.L("⚠️ Xatolik, qayta urinib ko'ring", "⚠️ Ошибка, попробуйте ещё раз")
         finally:
             EFFECTS.set(None)
-        safe = eff[0] == 0 or req.calls >= 2 or req.view_set
-        await render(req, res, edit_id=edit_id, safe=safe)
+        await render(req, res, edit_id=edit_id, effects=eff[0])
 
     @r.callback_query(F.message.chat.type == "private")
     async def on_cb(cb: CallbackQuery) -> None:
@@ -325,12 +345,11 @@ def build_router(ctx) -> Router:
                 ui.VIEW[chat] = before                     # ekran o'zgarmadi (faqat bildirishnoma) — qaytadi
 
     async def _on_cb(req: Req, uid: int, data: str, cb: CallbackQuery) -> None:
-        if data == "bk" or data.startswith("bk:"):         # «‹ Orqaga» — oldingi ekran
+        if data == "bk" or data.startswith("bk:"):         # «‹ Orqaga» — oldingi ekran, HAMISHA yangidan
             ui.WAIT.pop(uid, None)
             prev = ui.previous(uid)
-            if prev is not None and not prev["safe"]:
-                await ui.show(ctx.bot, req.chat_id, prev["text"], prev["markup"], edit_id=cb.message.message_id)
-                return
+            while prev is not None and not prev["safe"]:     # qayta ochib bo'lmaydigani — o'tkazib yuboriladi
+                prev = ui.previous(uid)
             data = prev["data"] if prev is not None else (data[3:] or "m")
             req = make_req(ctx, uid, cb.message.chat.id, data, message=cb.message)
         await run_screen(req, data, cb.message.message_id)
@@ -347,12 +366,15 @@ def build_router(ctx) -> Router:
             await message.delete()
         except Exception:
             pass
-        await render(req, await main_menu(ctx, req), fresh=True, safe=True)
+        await render(req, await main_menu(ctx, req), fresh=True)
 
     @r.message(F.chat.type == "private", Command("hisobot", "otchet", "report"))
     async def on_report(message: Message) -> None:
         req = make_req(ctx, message.from_user.id, message.chat.id, data="r:td")
         if not req.level:
+            return
+        if not req.can("view"):                             # 💵 faqat zp — hisobotlar yo'q, o'z menyusi
+            await render(req, await main_menu(ctx, req), fresh=True)
             return
         ui.WAIT.pop(req.uid, None)
         try:
@@ -360,7 +382,7 @@ def build_router(ctx) -> Router:
         except Exception:
             pass
         from .panel_reports import reports_menu
-        await render(req, await reports_menu(ctx, req), fresh=True, safe=True)
+        await render(req, await reports_menu(ctx, req), fresh=True)
 
     @r.message(F.chat.type == "private", Command("ega", "owner"))
     async def on_recover(message: Message) -> None:
@@ -418,10 +440,10 @@ def build_router(ctx) -> Router:
                     await message.delete()
                 except Exception:
                     pass
-                await render(req, res)
+                await render(req, res, effects=1)
                 return
         if message.forward_origin is not None and state is None:
-            await render(req, forward_info(req, message))
+            await render(req, forward_info(req, message), effects=1)
             return
         if state is None:
             try:
@@ -432,7 +454,7 @@ def build_router(ctx) -> Router:
                 await ui.toast(ctx.bot, req.chat_id, req.L(          # kirish kodi — lekin kirish boshlanmagan
                     "⚠️ Kod kutilmayotgan edi. Akkaunt ulash: ⚙️ Sozlamalar → 🔑 Asosiy akkaunt → 📲 Ulash",
                     "⚠️ Код не ожидался. Подключение: ⚙️ Настройки → 🔑 Основной аккаунт → 📲 Подключить"), 8)
-            await render(req, await main_menu(ctx, req), fresh=True, safe=True)
+            await render(req, await main_menu(ctx, req), fresh=True)
             return
         entry = ui.INPUTS.get(state["act"])
         if entry is None:
@@ -459,7 +481,7 @@ def build_router(ctx) -> Router:
             return
         if ui.WAIT.get(uid) is state:
             ui.WAIT.pop(uid, None)
-        await render(req, res, safe=req.calls >= 1 or req.view_set)
+        await render(req, res, effects=0 if (req.calls >= 1 or req.view_set) else 1)
 
     return r
 

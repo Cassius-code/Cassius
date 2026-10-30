@@ -7,7 +7,7 @@ import asyncio
 import logging
 from datetime import datetime
 
-from . import people as P
+from . import roster as R
 from .gtext import esc, mentions, small
 
 log = logging.getLogger("push_group")
@@ -102,7 +102,7 @@ class GroupPanel:
             for x in snap["rows"]:
                 if not x["sent"]:
                     continue
-                for p in P.folder_people(self.db, x["fid"]):
+                for p in R.workers(self.db, x["fid"], datetime.fromtimestamp(self.pu.clock(), self.pu.tz).date()):
                     if p["id"] not in seen:
                         seen.add(p["id"])
                         people.append(p)

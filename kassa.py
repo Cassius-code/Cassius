@@ -198,6 +198,15 @@ def is_report_like(text: str) -> bool:
     return bool(t.strip()) and re.fullmatch(r"[\d\s,.;+=:/\-–—]+", t) is not None and not is_phone(text)
 
 
+def looks_like_report(db: Database, text: str) -> bool:
+    """«Проёб»dagi xabar kassa hisobotimi (ishga kelish sifatida sanalmaydi — kechki hisobot)."""
+    try:
+        _tag, body, _name = split_tag(db, text or "")
+        return is_report_like(body) and any(line_amounts(ln) for ln in body.splitlines())
+    except Exception:
+        return False
+
+
 def line_amounts(line: str) -> list[int]:
     if TOTAL_RE.search(line):
         return []
@@ -566,6 +575,31 @@ def report_needs(db: Database, rid: int):
         return ("price", row["amount"])
     if is_pool(db, r["person_id"]) and db.one("SELECT 1 FROM checks WHERE report_id=? AND pay IS NULL", (rid,)):
         return ("op", None)
+    return None
+
+
+def date_issue(db: Database, rid: int, today: dt.date) -> dict | None:
+    """⚠️ Sana xato bo'lishi mumkin (faqat «Проёб»dagi hisobot, bir marta so'raladi):
+    * odd — bitta-ikkita chek qolganlaridan boshqa sanada (2+ kun farq): «1950 — 25.10, qolganlari 29.10»;
+    * old — hamma chek bugun/kechadan eski sanada.
+    -> {"kind", "main" (iso), "odd": [checks]} yoki None. Hisobot mantiqiga boshqa tegilmaydi."""
+    r = report(db, rid)
+    if r is None or r["date_ok"] or not r["chat_id"] or r["chat_id"] > 0:
+        return None
+    rows = db.all("SELECT id, rd, amount FROM checks WHERE report_id=? AND rd IS NOT NULL AND skip=0 ORDER BY id", (rid,))
+    if not rows:
+        return None
+    from collections import Counter
+    cnt = Counter(x["rd"] for x in rows)
+    main, n_main = sorted(cnt.items(), key=lambda kv: (-kv[1], kv[0] != max(cnt)))[0]
+    main_d = dt.date.fromisoformat(main)
+    if len(cnt) >= 2 and n_main >= 2:
+        odd = [x for x in rows if x["rd"] != main and cnt[x["rd"]] <= max(1, len(rows) // 3)
+               and abs((dt.date.fromisoformat(x["rd"]) - main_d).days) >= 2]
+        if odd:
+            return {"kind": "odd", "main": main, "odd": odd}
+    if all(dt.date.fromisoformat(x["rd"]) < today - dt.timedelta(days=1) for x in rows):
+        return {"kind": "old", "main": main, "odd": rows}
     return None
 
 
