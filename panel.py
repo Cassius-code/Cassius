@@ -63,7 +63,7 @@ async def main_menu(ctx, r: Req):
     db, now = ctx.db, int(ctx.clock())
     t = datetime.fromtimestamp(now, ctx.tz)
     months = MONTHS_RU if r.lang == "ru" else MONTHS_UZ
-    when = f"{t.day} {months[t.month - 1]} · {t:%H:%M}"
+    when = f"{t.day} {months[t.month - 1]} · {t:%H:%M:%S}"   # soniyagacha — jonli (har 3 soniyada yangilanadi)
     alive = db.flag("bot_enabled")
     from .timeutil import day_start
     d0 = day_start(now, ctx.tz)
@@ -72,10 +72,11 @@ async def main_menu(ctx, r: Req):
     delays = db.scalar("SELECT COUNT(*) FROM alerts WHERE created_ts>=? AND status<>'void'", (d0,))
     staff = ctx.att.staff()
     day = t.date().isoformat()
-    came = db.scalar("SELECT COUNT(*) FROM attendance WHERE day=? AND arrived_ts IS NOT NULL", (day,))
+    came = sum(1 for p in staff if db.one("SELECT 1 FROM attendance WHERE day=? AND person_id=? AND arrived_ts IS NOT "
+                                          "NULL", (day, p["id"])))   # bugun ishlaydiganlardan kelganlari
     lines = [f"<b>{r.L('Bugun', 'Сегодня')}</b>",
              f"⏱ {r.L('Javob kutyapti', 'Ждут ответа')} — <b>{waiting}</b>",
-             f"🚨 {r.L('Zaderjkalar', 'Задержки')} — <b>{delays}</b>",
+             f"🚨 {r.L('Bugungi zaderjkalar', 'Задержек за сегодня')} — <b>{delays}</b>",
              f"🎬 {r.L('Stavkada', 'В ставке')} — <b>{stavka}</b>",
              f"🙋 {r.L('Ishda', 'На работе')} — <b>{came} / {len(staff)}</b>"]
     if r.owner:                                        # 💰 shu hafta (dushanbadan) ishlangan jami kassa, $
@@ -84,20 +85,13 @@ async def main_menu(ctx, r: Req):
         b = K.calc(db, K.week_start(t.date()), t.date())
         cash = sum(x["usd"] for x in b["rows"].values() if x["kind"] != "partner")
         lines.append(f"💰 Cash — <b>{money(cash)} $</b> <i>({r.L('dushanbadan', 'с понедельника')})</i>")
-    # har RD hozir: 🟢 15+ daqiqa kutayotgan yo'q · 🟡 15–19 daqiqa kutayotgan bor · 🔴 20+ (zaderjka)
-    over, near = lc["overdue"], lc.get("near", {})
-    warn = ctx.tracker.warn_seconds() // 60 if ctx.tracker else 15
+    # har RD hozir — aniq va qisqa: 🔴 zaderjka · 🟡 tez orada zaderjka (15+ daq) · ☕ xodim tanaffusda · 🟢 joyida;
+    # «kutyapti N» — shu RD da javob kutayotgan lidlar (hammasi qo'shilsa — tepadagi «Javob kutyapti»)
     live = [f"<b>{r.L('Hozir zaderjka', 'Задержки сейчас')}</b>"]
     if not db.flag("delay_enabled"):
         live.append(r.L("⚪ nazorat o'chiq", "⚪ контроль выключен"))
-    for f in P.folders(db):
-        if not f["delay_on"] or not db.flag("delay_enabled"):
-            continue
-        red, soon = over.get(f["id"], 0), near.get(f["id"], 0)
-        bits = ([r.L(f"<b>{red}</b> ta zaderjka", f"<b>{red}</b> задерж.")] if red else []) + \
-               ([r.L(f"{soon} ta {warn}+ daq", f"{soon} — {warn}+ мин")] if soon else [])
-        mark = "🔴" if red else ("🟡" if soon else "🟢")
-        live.append(f"{mark} {h(f['name'])}" + (f" — {' · '.join(bits)}" if bits else ""))
+    elif ctx.tracker:
+        live += [ctx.tracker.rd_line(f, lc, r.lang, strong=True) for f in P.folders(db) if f["delay_on"]]
     ub = ctx.userbot
     ub_ok = ub is not None and ub.state == "online"
     accs = db.all("SELECT id FROM accounts WHERE paused=0")
@@ -125,12 +119,14 @@ async def main_menu(ctx, r: Req):
     rows.append([(r.L("📅 Bugun kim qayerda", "📅 Кто где сегодня") + (f" ❗{empty}" if empty else ""), "rt")])
     lang_btn = (r.L("🌐 Русский язык", "🌐 O'zbek tili"), r.L("lang:ru", "lang:uz"))
     rows.append([lang_btn, (r.L("🔒 Qulflash", "🔒 Заблокировать"), "lk")] if r.owner else [lang_btn])
-    return ui.join(head, "", card(lines), card(live) if len(live) > 1 else "", card([sysline, pushline])), kb(*rows)
+    # bitta ramka: telefonda bir nechta ramka tez-tez yangilanganda biri «yo'qolib-chiqib» turardi (egasi, 2026-10-30)
+    body = lines + ([""] + live if len(live) > 1 else []) + ["", sysline] + ([pushline] if pushline else [])
+    return ui.join(head, "", card(body)), kb(*rows)
 
 
 # ───────────────────────── jonli panel: bosh menyu va Push o'z joyida yangilanib turadi
 LIVE_VIEWS = ("m", "u", "lv")
-FAST_VIEWS = {"lv": 3}                  # 👥 Hozir ishda — har 3 soniyada (egasi: 2–3 soniya)
+FAST_VIEWS = {"lv": 3, "m": 3}          # 👥 Hozir ishda va bosh menyu — har 3 soniyada (egasi: aniq, soniyagacha)
 _LIVE_LAST: dict[int, float] = {}
 _LIVE_PAUSE: dict[int, float] = {}
 LIVE_EVERY = 5                          # soniya (bosh menyu, Push): shunchada bir tekshiriladi, son o'zgarsa — o'sha xabar tahrirlanadi

@@ -224,9 +224,10 @@ class Attendance:
         if self.db.flag("breaks_enabled") and not report:
             extra_break, extra_back = self.words()
             kind = detect_break(text, extra_break, extra_back)
-        if self.db.flag("attendance_enabled") and not report:
-            res = self.arrive(person, ts, via="greet" if greet else "msg")
-            if res:
+        if not report:
+            on = self.db.flag("attendance_enabled")    # o'chiq bo'lsa ham kim ishdaligi jim belgilanadi (xabarsiz)
+            res = self.arrive(person, ts, via="greet" if greet else "msg", silent=not on)
+            if res and on:
                 ev["arrive"] = res
         if kind == "start":
             ev["break"] = self._break(person, "start", ts, break_minutes(text))
@@ -244,9 +245,10 @@ class Attendance:
         day = local_date(ts, self.tz)
         return at(day, self.work_start(), self.tz) - 2 * 3600 <= ts < at(day, self.work_end(), self.tz)
 
-    def arrive(self, person, ts: int, via: str = "greet") -> str | None:
+    def arrive(self, person, ts: int, via: str = "greet", silent: bool = False) -> str | None:
         """Ishga keldi: «Проёб»ga birinchi xabari (via='greet'/'msg') yoki lidga birinchi yozuvi (via='work') — qaysi
-        biri oldin bo'lsa. Kech qolish shu vaqtdan; late_after_min dan kam bo'lsa — kech emas."""
+        biri oldin bo'lsa. Kech qolish shu vaqtdan; late_after_min dan kam bo'lsa — kech emas.
+        silent=True — «ishga keldi» nazorati o'chiq: faqat kim ishdaligi belgilanadi (kech qolish ham, jarima ham yo'q)."""
         if not self._window(ts):
             return None
         day = local_date(ts, self.tz)
@@ -258,8 +260,8 @@ class Attendance:
             return "greeted" if via == "greet" and row["greet_ts"] is None else "already"
         start = at(day, self.work_start(), self.tz)
         late = minutes_up(ts - start) if ts > start + 59 else 0
-        if late < late_after(self.db) or not person["attend"] or not R.works(self.db, person, day):
-            late = 0                                        # 15 daqiqadan kam yoki bugun ishlamaydi — kech emas
+        if silent or late < late_after(self.db) or not person["attend"] or not R.works(self.db, person, day):
+            late = 0                                        # 15 daqiqadan kam, bugun ishlamaydi yoki nazorat o'chiq
         self.db.run("INSERT INTO attendance(day, person_id, arrived_ts, late_min, greet_ts) VALUES(?,?,?,?,?) "
                     "ON CONFLICT(day, person_id) DO UPDATE SET arrived_ts=excluded.arrived_ts, late_min=excluded.late_min, "
                     "greet_ts=COALESCE(attendance.greet_ts, excluded.greet_ts)",
@@ -308,8 +310,9 @@ class Attendance:
             self._work_ts[person["id"]] = ts
         if self.db.flag("breaks_enabled"):
             self.back_if_over(person, ts)
-        if not self.db.flag("attendance_enabled") or not person["attend"]:
-            return None
+        # «ishga keldi» nazorati o'chiq (yoki shu xodimga o'chiq) — kim ishdaligi baribir jim belgilanadi: panelda
+        # «🟢 на работе», lekin kech qolish xabari, eslatma va jarima yo'q
+        silent = not self.db.flag("attendance_enabled") or not person["attend"]
         day = local_date(ts, self.tz)
         if not self._window(ts):
             return None                                    # tungi yozishmalar — yangi kunga kelish emas
@@ -320,7 +323,7 @@ class Attendance:
             return None
         if not R.works(self.db, person, day):
             return None
-        res = self.arrive(person, ts, via="work")
+        res = self.arrive(person, ts, via="work", silent=silent)
         if res == "late":
             row = self.db.one("SELECT late_min FROM attendance WHERE day=? AND person_id=?",
                               (day.isoformat(), person["id"]))

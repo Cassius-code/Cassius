@@ -1,8 +1,10 @@
 """📌 «Проёб»da qadalgan «Задержки сейчас» — har RD rangli holat (egasi bilan kelishilgan, 2026-10-30):
 
     🟢 — 15+ daqiqa kutayotgan lid yo'q (kamroq kutayotganlar bo'lishi mumkin);
-    🟡 — 15–19 daqiqa kutayotgan lid bor (limitdan 5 daqiqa oldin);
-    🔴 — 20+ daqiqa (zaderjka).
+    🟡 — «скоро задержка»: 15–19 daqiqa kutayotgan lid bor (limitdan 5 daqiqa oldin);
+    🔴 — 20+ daqiqa (zaderjka);
+    ☕ — RD ning bugungi hamma xodimi tanaffusda (soat to'xtagan), «перерыв до 21:05».
+Har qatorda «ждут N» — shu RD da javob kutayotgan lidlar (bosh menyudagi «Ждут ответа» bilan bir xil hisob).
 
 Soat — zaderjkadagi bilan bir xil: faqat ish vaqti, tanaffus pauzasisiz, ⚡/💊 va stavkadagilarsiz. Doska o'z fon
 vazifasida ishlaydi (boshqa xabarlarni kutib qolmaydi): har 3 soniyada hisoblanadi, o'zgargan bo'lsa ~10 soniyada
@@ -24,51 +26,33 @@ MIN_EDIT = 10                # ikki tahrir orasida kamida (guruhga ko'p yozish c
 _state = {"edit": 0.0, "pause": 0.0}
 
 
-def _plural(n: int, one: str, few: str, many: str) -> str:
-    if n % 10 == 1 and n % 100 != 11:
-        return one
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return few
-    return many
-
-
-def rows(ctx, now: int) -> list[tuple]:
+def rows(ctx, now: int, lc: dict | None = None) -> list[tuple]:
     """[(papka, 🔴 soni, 🟡 soni)] — nazoratdagi papkalar."""
-    lc = ctx.tracker.live_counts(now)
+    lc = lc or ctx.tracker.live_counts(now)
     over, near = lc["overdue"], lc.get("near", {})
     return [(f, over.get(f["id"], 0), near.get(f["id"], 0)) for f in P.folders(ctx.db) if f["delay_on"]]
 
 
-def icon(red: int, near: int) -> str:
-    return "🔴" if red else ("🟡" if near else "🟢")
-
-
 def text(ctx, now: int) -> str:
-    """Birinchi qator — guruh tepasidagi qadalgan satrda ko'rinadi (bosmasdan ham)."""
+    """Birinchi qator — guruh tepasidagi qadalgan satrda ko'rinadi (bosmasdan ham). RD qatorlari — bosh menyudagidek
+    (Tracker.rd_line): 🔴 задержка · 🟡 скоро задержка · ☕ перерыв · 🟢, har birida «ждут N»."""
     db, tr = ctx.db, ctx.tracker
     if not db.flag("delay_enabled"):
         return "<b>🚨 Задержки сейчас</b>\n⚪ контроль выключен"
-    warn = tr.warn_seconds() // 60
-    data = rows(ctx, now)
+    lc = tr.live_counts(now)
+    data = rows(ctx, now, lc)
     total = sum(r for _f, r, _n in data)
     soon = sum(n for _f, _r, n in data)
     if total:
         worst = sorted((x for x in data if x[1]), key=lambda x: -x[1])
         first = f"<b>🚨 Задержки сейчас: {total}</b> · " + " · ".join(f"{esc(f['name'])} — {r}" for f, r, _n in worst)
     elif soon:
-        first = f"<b>🟡 Задержек нет</b> · ждут {warn}+ мин: {soon}"
+        first = f"<b>🟡 Задержек нет</b> · скоро задержка: {soon}"
     else:
         first = "<b>🟢 Задержек нет</b>"
-    lines = [first, ""]
-    for f, red, near in data:
-        bits = []
-        if red:
-            bits.append(f"{red} {_plural(red, 'задержка', 'задержки', 'задержек')}")
-        if near:
-            bits.append(f"{near} {'ждёт' if near == 1 else 'ждут'} {warn}+ мин")
-        lines.append(f"{icon(red, near)} {esc(f['name'])}" + (f" — {' · '.join(bits)}" if bits else ""))
+    lines = [first, ""] + [tr.rd_line(f, lc, "ru") for f, _r, _n in data]
     from .timeutil import fmt
-    lines += ["", small(f"🟢 нет ждущих {warn}+ мин · 🟡 ждут {warn}+ мин · 🔴 задержка · {fmt(now, ctx.tz, '%H:%M')}")]
+    lines += ["", small(f"🟡 скоро задержка · 🔴 задержка · ☕ перерыв · {fmt(now, ctx.tz, '%H:%M')}")]
     return "\n".join(lines)
 
 

@@ -562,7 +562,41 @@ class Tracker:
                 out["overdue"][fid] = out["overdue"].get(fid, 0) + 1
             elif waited >= warn:
                 out["near"][fid] = out["near"].get(fid, 0) + 1
+        out["paused"] = self.paused_until(now)
         return out
+
+    def paused_until(self, now: int) -> dict[int, int]:
+        """☕ RD -> tanaffus qachongacha (RD ning bugungi hamma xodimi tanaffusda — zaderjka soati to'xtagan). Birinchi
+        qaytgan xodim bilan RD yana ishlaydi — shuning uchun eng erta tugash vaqti."""
+        from .attendance import break_until
+        out = {}
+        for row in self.db.all("SELECT DISTINCT folder_id FROM pauses WHERE end_ts IS NULL"):
+            ends = [break_until(self.db, p["id"], now) for p in self.workers(row["folder_id"], now)]
+            ends = [e for e in ends if e]
+            if ends:
+                out[row["folder_id"]] = min(ends)
+        return out
+
+    def rd_line(self, f, lc: dict, lang: str = "ru", strong: bool = False) -> str:
+        """Bitta RD hozir — qisqa va aniq (bosh menyu va 📌 doska bir xil):
+        🔴 RD 7 — задержка: 2 · ждут 5 / 🟡 RD 9 — скоро задержка: 1 · ждут 3 / ☕ RD 3 — перерыв до 21:05 · ждут 11 /
+        🟢 RD — ждут 4. «скоро задержка» — 15+ daqiqa kutgan (limitdan 5 daqiqa oldin)."""
+        fid = f["id"]
+        red, soon = lc["overdue"].get(fid, 0), lc["near"].get(fid, 0)
+        wait, until = lc["wait_by"].get(fid, 0), lc.get("paused", {}).get(fid)
+        ru = lang == "ru"
+        b = (lambda x: f"<b>{x}</b>") if strong else (lambda x: str(x))
+        bits = []
+        if until:
+            bits.append(f"перерыв до {self.hm(until)}" if ru else f"tanaffus {self.hm(until)} gacha")
+        if red:
+            bits.append(f"задержка: {b(red)}" if ru else f"zaderjka: {b(red)}")
+        elif soon:
+            bits.append(f"скоро задержка: {b(soon)}" if ru else f"zaderjkaga yaqin: {b(soon)}")
+        if wait:
+            bits.append(f"ждут {wait}" if ru else f"kutyapti {wait}")
+        icon = "☕" if until else ("🔴" if red else ("🟡" if soon else "🟢"))
+        return f"{icon} {esc(f['name'])}" + (f" — {' · '.join(bits)}" if bits else "")
 
     def overdue_now(self, now: int) -> dict[int, int]:
         return self.live_counts(now)["overdue"]

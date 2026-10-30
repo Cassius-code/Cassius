@@ -60,14 +60,18 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   tanlaysiz: 🚨 Nazorat → 🧹 Tozalash (0 — o'chmaydi). Jarima yozilgan xabar («💸 штраф», jarimali
   kechikish) o'chmaydi. Buyruqqa javoblar va doska ham o'chmaydi; hisob botda qoladi. Botga guruhda «Xabarlarni
   o'chirish» huquqi kerak.
-- **📌 Doska.** «Проёб» tepasida qadalgan «Задержки сейчас», har RD alohida: 🟢 — 15 daqiqadan ko'p kutayotgan lid
-  yo'q, 🟡 — 15–19 daqiqa kutayotgani bor, 🔴 — 20+ daqiqa (zaderjka). Pul yo'q. Taxminan har 10 soniyada o'z joyida
+- **📌 Doska.** «Проёб» tepasida qadalgan «Задержки сейчас», har RD bitta qisqa qator (bosh menyudagi bilan bir xil):
+  «🔴 RD 7 — задержка: 2 · ждут 5» · «🟡 RD 9 — скоро задержка: 1 · ждут 3» (15+ daqiqa kutgan, zaderjkaga 5
+  daqiqa qoldi) · «☕ RD 3 — перерыв до 21:05 · ждут 4» (xodim tanaffusda, soat to'xtagan) · «🟢 RD 1» — hammasi
+  joyida. «ждут N» — shu RD da javob kutayotgan lidlar. Pul yo'q. Taxminan har 10 soniyada o'z joyida
   yangilanadi (boshqa xabarlar uni to'xtatmaydi); Telegram «kuting» desa — kutib davom etadi; doska o'chirilsa —
   qayta yozib, qadaydi. 🚨 Nazorat → 📌 Doska (yoqish / o'chirish). Botga guruhda «Xabarlarni qadash» huquqi kerak.
 - **🙋 Ishga kelish.** «Проёб»ga istalgan xabari (kechki kassa hisobotidan tashqari) YOKI lidga birinchi yozuvi —
   ishga keldi (qaysi biri oldin bo'lsa). 15+ daqiqa kech kelsa «Проёб»ga:
   «🕘 @xodim, вы опоздали на 25 мин …» (tagida mayda: «начало в 10:25 · по графику 10:00»).
   Ish boshlanib 15 daqiqada hali ko'rinmaganlarga eslatma boradi; dam olayotganlar belgilanmaydi.
+  «Ishga kelish» nazorati o'chiq bo'lsa ham bot kim ishdaligini jim belgilaydi — bosh menyuda «🙋 Ishda» va
+  «👥 Hozir ishda» to'g'ri ko'rsatadi; lekin kech qolish xabari, eslatma va jarima bo'lmaydi.
 - **☕ Tanaffus.** «атайду», «отойду 30», «перерыв», «obedga», «perekur» va h.k. (o'z so'zlaringizni ham qo'shasiz:
   ⚙️ → ☕ Tanaffus → ➕ Boshlash so'zlari / ➕ Qaytish so'zlari) — bot javob beradi: «☕ @xodim — перерыв до 14:30». Zaderjka xabarida:
   «☕ Baxa на перерыве до 14:30». Tanaffus vaqtida lidga yozsa — tanaffus davom etadi; vaqt tugagach lidga yoki
@@ -95,8 +99,10 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     Ism notanish bo'lsa — «➕ Yangi xodim: Baxa» tugmasi chiqadi (shunday tanishtirasiz). Jarima ham:
     `@ivan штраф 5`. Guruhda ham xuddi shunday.
   - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
-    da hozir nechta zaderjka (🟢 yo'q · 🟡 bor · 🔴 ko'p). Menyu o‘z joyida yangilanadi (5 soniyada bir; tugma
-    bosilgan paytda tegmaydi).
+    bitta qisqa qator (📌 doskadagi bilan bir xil: 🔴 задержка · 🟡 скоро задержка · ☕ перерыв · 🟢, «ждут N»).
+    Hammasi bitta ramkada. Menyu o‘z joyida, soniyasi bilan har 3 soniyada yangilanadi (tugma bosilgan paytda
+    tegmaydi). «🙋 Ishda — 3 / 4» — bugun ishlaydigan 4 xodimdan 3 tasi kelgan; «🚨 Bugungi zaderjkalar» — bugun
+    nechta lid zaderjkaga tushgan (👥 Hozir ishda va 📊 hisobotlarda ham shu hisob).
     Kassa bo'limida — cheklar yig'indisi, har birining $ i va jami, 🏆 top 3.
   - **Kassa menyusi — 6 tugma** (ishlatilish tartibida): ❓ Savollar · ✅ Kunni yopish · 📊 Hisobot ·
     🧮 Haftalik zp · 👥 Xodimlar · ⚙️ Sozlamalar. Hech qaysi funksiya o'chmagan — joyi o'zgargan:

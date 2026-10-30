@@ -45,8 +45,9 @@ def person_line(ctx, r: Req, p, rds: list, lc: dict, now: int, d0: int) -> str:
     last = max(int(own or 0), ctx.att._work_ts.get(p["id"], 0))
     seen = ago(r, now - last) if last >= d0 else "—"
     q = ",".join("?" * len(rds))
-    delays = db.scalar(f"SELECT COUNT(DISTINCT group_msg_id) FROM alerts WHERE created_ts>=? AND status<>'void' "
-                       f"AND group_msg_id IS NOT NULL AND folder_id IN ({q})", [d0] + [f["id"] for f in rds])
+    # har lid — bitta zaderjka (bosh menyudagi «Bugungi zaderjkalar» va 📊 hisobotlar bilan bir xil son)
+    delays = db.scalar(f"SELECT COUNT(*) FROM alerts WHERE created_ts>=? AND status<>'void' AND folder_id IN ({q})",
+                       [d0] + [f["id"] for f in rds])
     return f"{icon} <b>{h(P.mention(p))}</b> · {names}\n   {state} · {waits} · ✍️ {seen} · 🚨 {delays}"
 
 
