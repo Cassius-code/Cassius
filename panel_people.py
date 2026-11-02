@@ -415,6 +415,12 @@ def adj_ask(ctx, r: Req, kind: str):
                  f"📅 За какой день: <b>{day:%d.%m}</b>{when} — если за другой, выберите ниже."),
              r.L("Summani $ da yuboring, xohlasangiz izoh bilan: <code>5 kech qoldi</code>.",
                  "Пришлите сумму в $, можно с пояснением: <code>5 опоздал</code>.")]
+    sub = K.stand_in(ctx.db, pid, day) if kind != "adv" else None
+    if sub:                                             # shu kuni uning o'rniga boshqasi ishlagan — o'shanga o'tadi
+        sn = h(P.person(ctx.db, sub)["name"])
+        lines.append(r.L(f"↪ Bu kuni {h(p['name'])} o'rniga <b>{sn}</b> ishlagan («🔁 Kim ishladi») — {sn}ga "
+                         f"hisoblanadi.", f"↪ В этот день вместо {h(p['name'])} работал(а) <b>{sn}</b> («🔁 Кто "
+                         f"работал») — пойдёт {sn}."))
     return title({"fine": "⚠️", "bonus": "🎁", "adv": "💸"}[kind], f"{word} · {h(p['name'])}") + "\n\n" + \
         card(lines), kb(*grid(btn, 4), [(r.L("✖️ Bekor qilish", "✖️ Отмена"), ui.back_data(f"po:{pid}:{key}"))])
 
@@ -460,8 +466,10 @@ async def adj_list(ctx, r: Req):
     rows = []
     for a in reversed(items[-20:]):
         mark = "✖️" if a["cancelled"] else "✅"
-        rows.append([(f"{mark} {a['day'][8:10]}.{a['day'][5:7]} · {word.get(a['kind'], '?')} {money(a['usd'])} $ · "
-                      f"{(a['note'] or a['source'])[:18]}", f"pa:{pid}:{a['id']}")])
+        sub = K.stand_in(db, pid, a["day"]) if a["kind"] in ("fine", "bonus") and a["source"] in K.MOVABLE else None
+        to = f" → {P.person(db, sub)['name']}" if sub else ""      # o'rniga ishlaganga o'tgan
+        rows.append([(f"{mark} {a['day'][8:10]}.{a['day'][5:7]} · {word.get(a['kind'], '?')} {money(a['usd'])} $"
+                      f"{to} · {(a['note'] or a['source'])[:18]}", f"pa:{pid}:{a['id']}")])
     rows.append(nav(r, f"po:{pid}"))
     note = r.L("Bosing — bekor qilish / qaytarish. Joriy davr: ", "Нажмите — отменить / вернуть. Текущий период: ") + \
         plabel(s, e)

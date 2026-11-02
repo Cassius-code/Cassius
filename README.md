@@ -115,6 +115,13 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     50%), qolgani Arturga; «siz %» (masalan 14%) faqat xodimning o'zi ishlagan qismidan olinadi. Masalan: Bayzed
     621 $, siz ishlagan 372 $ → 372 × 50% + (621 − 372) × 14% = 186 + 34.86 = 220.86 $. «Akkauntlar bo'yicha»da
     shunday ko'rinadi: «sizga 220.86 $ (siz ishlagan 372 $ → 186 + ulush 34.86)».
+  - **Kimdir o'rniga ishlasa — bonus/jarima ishlaganga.** Biror kuni xodimning akkauntida butun kun boshqa odam
+    ishlagan bo'lsa (🔁 Kim ishladi) va xodimning o'zi o'sha kuni hech qayerda ishlamagan bo'lsa — o'sha kunga
+    unga yozilgan bonus va jarima (qo'lda, guruhdan, zaderjka) o'rniga ishlagan odamga hisoblanadi. Uning kartasida:
+    «+ bonus 5 $ (28.10 · Adam akkauntida)»; xodimnikida: «↪ bonus 5 $ (28.10) → Cassius o'rniga ishlagan» (hisobga
+    kirmaydi). Kech qolish jarimasi va avans — shaxsiy, o'tmaydi. Bir kunda ikkalasi ham ishlagan bo'lsa — kimniki
+    ekanini bot bilmaydi, yozilgan odamda qoladi. Kassa hisobotiga javob qilib yozilgan bonus — o'sha hisobotni kim
+    ishlagan bo'lsa, o'shanga.
   - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
     bitta qisqa qator (📌 doskadagi bilan bir xil: 🔴 задержка · 🟡 скоро задержка · ☕ перерыв · 🟢, «ждут N»).
     Hammasi bitta ramkada. Menyu o‘z joyida yangilanadi: 5 soniyada bir tekshiriladi, faqat raqam o'zgarsa

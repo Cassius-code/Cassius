@@ -43,6 +43,8 @@ W = {
                    "🤝 Партнёр"),
     "no_partner_s": ("Artur hisobga kirmagan", "Артур не учтён"),
     "own_work": ("siz ishlagan", "вы работали"),
+    "acct_of": ("akkauntida", "на аккаунте"), "stood_in": ("o'rniga ishlagan — unga o'tdi",
+                                                         "работал(а) вместо — перешло ему"),
 }
 
 
@@ -88,12 +90,18 @@ def card(lines: list[str], expandable: bool = False) -> str:
 
 # ───────────────────────── zp tafsiloti (bitta odam)
 def adj_lines(r: dict, lang: str) -> list[str]:
+    """Jarima/bonus/avans. O'rniga ishlagan kunniki: «+ bonus 5 $ (01.11 · Adam akkauntida)»; o'rniga boshqasi
+    ishlagan kunniki — hisobga kirmaydi, faqat ko'rinadi: «↪ bonus 5 $ (01.11) → Cassius o'rniga ishlagan»."""
     out = []
     for key, sign in (("fines", "−"), ("bonuses", "+"), ("advs", "−")):
         word = {"fines": "fine", "bonuses": "bonus", "advs": "adv"}[key]
         for x in r[key]:
             note = f" · {h(x['note'])}" if x["note"] else ""
-            out.append(f"{sign} {w(word, lang)} {money(x['usd'])} $ ({dshort(x['day'])}{note})")
+            via = f" · {h(x['via_name'])} {w('acct_of', lang)}" if x.get("via_name") else ""
+            out.append(f"{sign} {w(word, lang)} {money(x['usd'])} $ ({dshort(x['day'])}{via}{note})")
+    for x in r.get("moved", []):
+        out.append(f"<i>↪ {w(x['kind'], lang)} {money(x['usd'])} $ ({dshort(x['day'])}) → {h(x['to_name'])} "
+                   f"{w('stood_in', lang)}</i>")
     return out
 
 
@@ -392,9 +400,11 @@ def worker_message(r: dict, s: dt.date, e: dt.date, extra: str = "") -> str:
     if r["zp_on"] and r["kind"] in ("worker", "self"):
         lines.append(f"Зп: {money(r['zp'])} $")
     for x in r["fines"]:
-        lines.append(f"Штраф: −{money(x['usd'])} $ ({dshort(x['day'])}{' · ' + x['note'] if x['note'] else ''})")
+        via = f" · на аккаунте {x['via_name']}" if x.get("via_name") else ""
+        lines.append(f"Штраф: −{money(x['usd'])} $ ({dshort(x['day'])}{via}{' · ' + x['note'] if x['note'] else ''})")
     for x in r["bonuses"]:
-        lines.append(f"Бонус: +{money(x['usd'])} $ ({dshort(x['day'])})")
+        via = f" · на аккаунте {x['via_name']}" if x.get("via_name") else ""
+        lines.append(f"Бонус: +{money(x['usd'])} $ ({dshort(x['day'])}{via})")
     for x in r["advs"]:
         lines.append(f"Аванс: −{money(x['usd'])} $ ({dshort(x['day'])})")
     if r["zp_on"]:

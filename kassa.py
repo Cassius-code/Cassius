@@ -20,6 +20,9 @@ from . import people as P
 from .db import Database
 
 PAYABLE = ("worker", "self")
+# Kimdir o'rniga butun kun boshqasi ishlasa («🔁 Kim ishladi»), o'sha kunga yozilgan jarima/bonus — ishlagan odamga
+# (egasi, 2026-11-02). Kech qolish jarimasi va avans — shaxsiy, o'tmaydi.
+MOVABLE = ("manual", "group", "delay", "remind")
 SEED_PRICES = [
     (400, 700, 4), (750, 1150, 5), (1400, 1400, 7), (1650, 2250, 7),
     (2300, 2800, 10), (3300, 3700, 13), (4000, 4000, 17), (6000, 6000, 25),
@@ -636,6 +639,31 @@ def supersede(db: Database, rid: int) -> list[dict]:
     return out
 
 
+def stand_in(db: Database, pid: int, day: str) -> int | None:
+    """Shu kuni pid o'rniga kim ishlagan: pid akkauntidagi hamma cheklar bitta boshqa odamniki («🔁 Kim ishladi») va
+    pid o'zi o'sha kuni hech qayerda ishlamagan bo'lsa — o'sha odam (jarima/bonus unga o'tadi; calc bilan bir xil)."""
+    ws = {x["w"] for x in db.all("SELECT DISTINCT COALESCE(ch.pay, r.person_id) w FROM checks ch JOIN reports r "
+                                 "ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd=? "
+                                 "AND r.person_id=?", (iso(day), pid)) if x["w"] is not None}
+    if len(ws) != 1 or pid in ws:
+        return None
+    if db.one("SELECT 1 FROM checks ch JOIN reports r ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 "
+              "AND ch.rd=? AND ch.pay=?", (iso(day), pid)):
+        return None                                        # o'zi boshqa akkauntda ishlagan
+    w = P.person(db, next(iter(ws)))
+    return w["id"] if w is not None and w["kassa_kind"] in PAYABLE else None
+
+
+def report_worker(db: Database, rid: int) -> int | None:
+    """Hisobot kimning ishi: cheklarining hammasi bitta odamniki («Kim ishladi» yoki akkaunt egasi) bo'lsa — o'sha."""
+    ws = {x["w"] for x in db.all("SELECT DISTINCT COALESCE(ch.pay, r.person_id) w FROM checks ch JOIN reports r "
+                                 "ON r.id=ch.report_id WHERE ch.report_id=? AND ch.skip=0", (rid,))}
+    if len(ws) != 1 or None in ws:
+        return None
+    w = P.person(db, next(iter(ws)))
+    return w["id"] if w is not None and w["kassa_kind"] in PAYABLE else None
+
+
 def set_pay_report(db: Database, rid: int, pid) -> None:
     db.run("UPDATE checks SET pay=? WHERE report_id=? AND pay IS NULL", (pid, rid))
 
@@ -1077,6 +1105,7 @@ def _row(p) -> dict:
             "earn": OrderedDict(),           # {(acct, pct): usd}
             "zp": 0.0,
             "fines": [], "bonuses": [], "advs": [], "fine": 0.0, "bonus": 0.0, "adv": 0.0,
+            "moved": [],                     # o'rniga ishlaganga o'tgan jarima/bonuslar (hisobga kirmaydi, faqat ko'rinadi)
             "outs": [], "ins": [], "tr_out": 0.0, "tr_in": 0.0,
             "sin": [], "sout": [], "sin_sum": 0.0, "sout_sum": 0.0,
             "total": None, "share_part": 0.0, "pf": 0.0, "pb": 0.0}
@@ -1117,6 +1146,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     base_zp: dict = {}               # (pid, day) -> zp (o'tkazma va zp-ulush uchun)
     acct_usd_day: dict = {}          # (acct, day) -> usd
     zp_ad: dict = {}                 # (acct, day) -> {"all", "on", "self", "off", "self_usd"} — shu akkaunt cheklaridan zp
+    day_payees: dict = {}            # (acct, day) -> shu akkauntda shu kuni kimlar ishlagan (zp oluvchilar)
+    worked: set = set()              # (pid, day) — shu kuni biror akkauntda ishlagan
     RAW = N = 0
     for c in checks:
         if c["skip"] or c["acct"] not in rows:
@@ -1141,6 +1172,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         if payee is None or payee not in rows:
             a["unassigned"] += 1
             continue
+        day_payees.setdefault((c["acct"], d), set()).add(payee)
+        worked.add((payee, d))
         pr = rows[payee]
         pp = pct(payee, d)
         key = (c["acct"], pp)
@@ -1169,13 +1202,23 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     # jarima / bonus / avans
     for a in db.all("SELECT * FROM adj WHERE cancelled=0 AND pending=0 AND day BETWEEN ? AND ? ORDER BY day, id",
                     (s, e)):
-        r = rows.get(a["person_id"])
+        pid = a["person_id"]
+        key = {"fine": "fines", "bonus": "bonuses", "adv": "advs"}.get(a["kind"])
+        item = {"usd": float(a["usd"]), "day": a["day"], "source": a["source"], "note": a["note"], "id": a["id"]}
+        ws = day_payees.get((pid, a["day"]))
+        if a["kind"] in ("fine", "bonus") and a["source"] in MOVABLE and ws and len(ws) == 1 \
+                and (pid, a["day"]) not in worked:             # o'zi shu kuni ishlamagan, akkauntida bittasi ishlagan
+            to = next(iter(ws))
+            if to in rows and rows[to]["kind"] in PAYABLE:
+                if pid in rows:
+                    rows[pid]["moved"].append({**item, "kind": a["kind"], "to": to, "to_name": ps[to]["name"]})
+                item.update(via=pid, via_name=ps[pid]["name"] if pid in ps else "?")
+                pid = to
+        r = rows.get(pid)
         if r is None:
             continue
-        key = {"fine": "fines", "bonus": "bonuses", "adv": "advs"}.get(a["kind"])
         if key:
-            r[key].append({"usd": float(a["usd"]), "day": a["day"], "source": a["source"], "note": a["note"],
-                           "id": a["id"]})
+            r[key].append(item)
     for r in rows.values():
         r["fine"] = r2(sum(x["usd"] for x in r["fines"]))
         r["bonus"] = r2(sum(x["usd"] for x in r["bonuses"]))

@@ -79,9 +79,15 @@ async def on_group_text(ctx, message, text: str, staff: bool, uid: int | None, n
     if staff and K.has_kind(text):
         rt = getattr(message, "reply_to_message", None)
         ru = getattr(rt, "from_user", None) if rt is not None else None
-        if ru is not None and not ru.is_bot:                # xodim xabariga javob: «штраф 5» — o'sha xodimga
-            p = P.identify(db, ru.id, ru.username)
-            if p is not None and not any(it["person_id"] for it in K.parse_adjustments(db, text)):
+        rep = report_of(ctx, message, rt)
+        if not any(it["person_id"] for it in K.parse_adjustments(db, text)):
+            p = None
+            if rep is not None:                             # kassa hisobotiga javob — o'sha ishni kim qilgan bo'lsa
+                w = K.report_worker(db, rep["id"])
+                p = P.person(db, w) if w else None
+            if p is None and ru is not None and not ru.is_bot:   # xodim xabariga javob: «штраф 5» — o'sha xodimga
+                p = P.identify(db, ru.id, ru.username)
+            if p is not None:
                 text = (f"@{p['username']} " if p["username"] else f"{p['name']} ") + text
         if not K.adj_command(db, text):
             return False                                    # e'lon yoki qoida (masalan bonus haqida) — buyruq emas
@@ -105,16 +111,28 @@ async def on_group_text(ctx, message, text: str, staff: bool, uid: int | None, n
     return True
 
 
+def _real_reply(message, rt) -> bool:
+    """Mavzuli guruhda mavzuning boshlang'ich xabari javob hisoblanmaydi."""
+    if rt is None or getattr(rt, "forum_topic_created", None) is not None:
+        return False
+    return not (getattr(message, "is_topic_message", False)
+                and rt.message_id == getattr(message, "message_thread_id", None))
+
+
+def report_of(ctx, message, rt):
+    """Javob berilgan xabar kassa hisoboti bo'lsa — o'sha hisobot (reports qatori)."""
+    if not _real_reply(message, rt):
+        return None
+    return ctx.db.one("SELECT id FROM reports WHERE chat_id=? AND msg_id=? ORDER BY id DESC LIMIT 1",
+                      (rt.chat.id, rt.message_id))
+
+
 def reply_day(ctx, message, rt) -> dt.date | None:
     """Eski xabarga javob bilan yozilgan jarima/bonus («бонус 5» — kechagi hisobotga) — o'sha kunga (egasi,
-    2026-11-02). Kassa hisobotiga javob — hisobotdagi kun (rd); boshqa xabarga — u yozilgan kun. Mavzuli guruhda
-    mavzuning boshlang'ich xabari javob hisoblanmaydi."""
-    if rt is None or getattr(rt, "forum_topic_created", None) is not None:
+    2026-11-02). Kassa hisobotiga javob — hisobotdagi kun (rd); boshqa xabarga — u yozilgan kun."""
+    if not _real_reply(message, rt):
         return None
-    if getattr(message, "is_topic_message", False) and rt.message_id == getattr(message, "message_thread_id", None):
-        return None
-    rep = ctx.db.one("SELECT id FROM reports WHERE chat_id=? AND msg_id=? ORDER BY id DESC LIMIT 1",
-                     (rt.chat.id, rt.message_id))
+    rep = report_of(ctx, message, rt)
     days = K.report_days(ctx.db, rep["id"]) if rep is not None else []
     if days:
         return dt.date.fromisoformat(days[-1])
@@ -159,8 +177,15 @@ def adj_saved(ctx, chat_id: int, msg_id: int, extra: str = ""):
     db = ctx.db
     rows = db.all("SELECT * FROM adj WHERE chat_id=? AND msg_id=? AND pending=0", (chat_id, msg_id))
     word = {"fine": L(ctx, "jarima", "штраф"), "bonus": L(ctx, "bonus", "бонус"), "adv": L(ctx, "avans", "аванс")}
-    lines = [f"✍ {h(P.person(db, a['person_id'])['name'])}: {word.get(a['kind'], '?')} {money(a['usd'])} $"
-             for a in rows if a["person_id"]]
+    lines = []
+    for a in rows:
+        if not a["person_id"]:
+            continue
+        sub = K.stand_in(db, a["person_id"], a["day"]) if a["kind"] in ("fine", "bonus") else None
+        to = (" → " + h(P.person(db, sub)["name"]) + " " + L(ctx, "(o'rniga ishlagan)", "(работал вместо)")) \
+            if sub else ""
+        lines.append(f"✍ {h(P.person(db, a['person_id'])['name'])}: {word.get(a['kind'], '?')} "
+                     f"{money(a['usd'])} ${to}")
     if extra:
         lines.append(extra)
     t = local_date(ctx.clock(), ctx.tz)
