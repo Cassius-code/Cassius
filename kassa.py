@@ -1200,11 +1200,19 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             r["zp"] = r2(sum(u * p / 100 for (_acct, p), u in r["earn"].items()))
 
     # jarima / bonus / avans
+    rd_of: dict = {}                 # odam (akkaunt) -> papkalari (RD): «RD 7, RD 9» — hisobda qaysi papkadan ekani
+    for x in db.all("SELECT fp.person_id pid, f.name FROM folder_people fp JOIN folders f ON f.id=fp.folder_id "
+                    "ORDER BY lower(f.name)"):
+        rd_of[x["pid"]] = f"{rd_of[x['pid']]}, {x['name']}" if x["pid"] in rd_of else x["name"]
+    strike_rd = {x["adj_id"]: x["name"] for x in db.all(
+        "SELECT s.adj_id, f.name FROM strikes s JOIN folders f ON f.id=s.folder_id WHERE s.adj_id IS NOT NULL "
+        "AND s.day BETWEEN ? AND ?", (s, e))}       # zaderjka jarimasi qaysi RD da bo'lgan
     for a in db.all("SELECT * FROM adj WHERE cancelled=0 AND pending=0 AND day BETWEEN ? AND ? ORDER BY day, id",
                     (s, e)):
         pid = a["person_id"]
         key = {"fine": "fines", "bonus": "bonuses", "adv": "advs"}.get(a["kind"])
-        item = {"usd": float(a["usd"]), "day": a["day"], "source": a["source"], "note": a["note"], "id": a["id"]}
+        item = {"usd": float(a["usd"]), "day": a["day"], "source": a["source"], "note": a["note"], "id": a["id"],
+                "rd": strike_rd.get(a["id"], "")}
         ws = day_payees.get((pid, a["day"]))
         if a["kind"] in ("fine", "bonus") and a["source"] in MOVABLE and ws and len(ws) == 1 \
                 and (pid, a["day"]) not in worked:             # o'zi shu kuni ishlamagan, akkauntida bittasi ishlagan
@@ -1212,7 +1220,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             if to in rows and rows[to]["kind"] in PAYABLE:
                 if pid in rows:
                     rows[pid]["moved"].append({**item, "kind": a["kind"], "to": to, "to_name": ps[to]["name"]})
-                item.update(via=pid, via_name=ps[pid]["name"] if pid in ps else "?")
+                item.update(via=pid, via_name=ps[pid]["name"] if pid in ps else "?", via_rd=rd_of.get(pid, ""))
                 pid = to
         r = rows.get(pid)
         if r is None:
@@ -1220,6 +1228,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         if key:
             r[key].append(item)
     for r in rows.values():
+        r["zp_parts"] = [{"acct": acct, "name": ps[acct]["name"], "rd": rd_of.get(acct, ""), "zp": r2(u * p / 100)}
+                         for (acct, p), u in r["earn"].items()]     # zp qaysi RD/akkauntdan (xodimga xabar uchun)
         r["fine"] = r2(sum(x["usd"] for x in r["fines"]))
         r["bonus"] = r2(sum(x["usd"] for x in r["bonuses"]))
         r["adv"] = r2(sum(x["usd"] for x in r["advs"]))
@@ -1353,7 +1363,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
              "partner_share": share_part, "pf": pf, "pb": pb, "wf": wf, "wb": wb, "zps_paid": r2(zps + wb - wf)}
     order = [p["id"] for p in P.people(db, active_only=False) if p["kassa_kind"]]
     return {"rows": rows, "order": order, "K": K, "raw": RAW, "n": N, "owner": owner, "names":
-            {pid: p["name"] for pid, p in ps.items()}}
+            {pid: p["name"] for pid, p in ps.items()}, "rds": rd_of}
 
 
 def partner_pct_of(db: Database, partner, day) -> float:

@@ -115,6 +115,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     50%), qolgani Arturga; «siz %» (masalan 14%) faqat xodimning o'zi ishlagan qismidan olinadi. Masalan: Bayzed
     621 $, siz ishlagan 372 $ → 372 × 50% + (621 − 372) × 14% = 186 + 34.86 = 220.86 $. «Akkauntlar bo'yicha»da
     shunday ko'rinadi: «sizga 220.86 $ (siz ishlagan 372 $ → 186 + ulush 34.86)».
+  - **Xodim zp si (kartada, hisobotda, PDF da, xodimga xabarda)** — qisqa va tartibli:
+    `RD 3: 119 $ × 41% = 48.79 $` (boshqa akkauntda ishlagan bo'lsa — `RD 1 · Bayzed akk: 372 $ × 50% = 186 $`,
+    keyin `Zp jami`); `+ Bonuslar: 116 $` va `− Jarimalar: 15 $` — jami bilan, ostida kunma-kun
+    (`29.10 — zaderjka 10 $ · RD 3`, `28.10 — kech qolish 15 $`, `28.10 — 5 $ · Adam akk · RD 3`); oxirida hisob:
+    `= 48.79 + 116 − 15 − 20 = 129.79 $`. Guruh buyrug'i matni va avtomatik uzun izohlar ko'rsatilmaydi.
   - **Kimdir o'rniga ishlasa — bonus/jarima ishlaganga.** Biror kuni xodimning akkauntida butun kun boshqa odam
     ishlagan bo'lsa (🔁 Kim ishladi) va xodimning o'zi o'sha kuni hech qayerda ishlamagan bo'lsa — o'sha kunga
     unga yozilgan bonus va jarima (qo'lda, guruhdan, zaderjka) o'rniga ishlagan odamga hisoblanadi. Uning kartasida:

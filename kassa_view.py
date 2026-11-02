@@ -45,6 +45,10 @@ W = {
     "own_work": ("siz ishlagan", "вы работали"),
     "acct_of": ("akkauntida", "на аккаунте"), "stood_in": ("o'rniga ishlagan — unga o'tdi",
                                                          "работал(а) вместо — перешло ему"),
+    "acct_s": ("akk", "акк."), "delay_w": ("zaderjka", "задержка"), "late_w": ("kech qolish", "опоздание"),
+    "advs_pl": ("avans", "аванс"), "zp_total": ("Zp jami", "Зп всего"),
+    "moved_to": ("o'rniga ishlagan {}ga o'tdi — bu yerda hisobga kirmaydi:",
+                 "перешло {} (работал(а) вместо) — здесь не считается:"),
 }
 
 
@@ -89,20 +93,86 @@ def card(lines: list[str], expandable: bool = False) -> str:
 
 
 # ───────────────────────── zp tafsiloti (bitta odam)
+def adj_item(x: dict, kind: str, lang: str, html: bool = True, word: bool = False) -> str:
+    """Bitta jarima/bonus/avans — qisqa (egasi, 2026-11-02: ortiqcha gap kerak emas): «29.10 — zaderjka 10 $ · RD 3»,
+    «28.10 — 5 $ · Adam akk · RD 3» (o'rniga ishlagan), «31.10 — 7 $ · yaxshi ishladi» (qo'lda yozilgan izoh).
+    Guruh buyrug'i matni («@adam бонус 5») va avtomatik izohlar ko'rsatilmaydi."""
+    esc = h if html else str
+    src = x["source"]
+    what = ""
+    if kind == "fine" and src in ("delay", "remind"):
+        what = w("delay_w", lang)
+    elif kind == "fine" and src == "late":
+        what = w("late_w", lang)
+    elif word:
+        what = w(kind, lang)
+    bits = [f"{dshort(x['day'])} — {what + ' ' if what else ''}{money(x['usd'])} $"]
+    if x.get("via_name"):
+        bits.append(f"{esc(x['via_name'])} {w('acct_s', lang)}" + (f" · {esc(x['via_rd'])}" if x.get("via_rd") else ""))
+    elif x.get("rd"):
+        bits.append(esc(x["rd"]))
+    if src in ("manual", "import") and x["note"]:
+        bits.append(esc(x["note"][:30]))
+    return " · ".join(bits)
+
+
+ADJ_GROUPS = (("bonuses", "+", "bonuses_pl", "bonus"), ("fines", "−", "fines_pl", "fine"), ("advs", "−", "advs_pl", "adv"))
+
+
 def adj_lines(r: dict, lang: str) -> list[str]:
-    """Jarima/bonus/avans. O'rniga ishlagan kunniki: «+ bonus 5 $ (01.11 · Adam akkauntida)»; o'rniga boshqasi
-    ishlagan kunniki — hisobga kirmaydi, faqat ko'rinadi: «↪ bonus 5 $ (01.11) → Cassius o'rniga ishlagan»."""
+    """Bonuslar / jarimalar / avans — har biri jami bilan, ostida kunma-kun (qisqa). O'rniga ishlagan kun uchun
+    boshqaga o'tganlari — oxirida, hisobga kirmaydi."""
     out = []
-    for key, sign in (("fines", "−"), ("bonuses", "+"), ("advs", "−")):
-        word = {"fines": "fine", "bonuses": "bonus", "advs": "adv"}[key]
-        for x in r[key]:
-            note = f" · {h(x['note'])}" if x["note"] else ""
-            via = f" · {h(x['via_name'])} {w('acct_of', lang)}" if x.get("via_name") else ""
-            out.append(f"{sign} {w(word, lang)} {money(x['usd'])} $ ({dshort(x['day'])}{via}{note})")
-    for x in r.get("moved", []):
-        out.append(f"<i>↪ {w(x['kind'], lang)} {money(x['usd'])} $ ({dshort(x['day'])}) → {h(x['to_name'])} "
-                   f"{w('stood_in', lang)}</i>")
+    for key, sign, title_w, kind in ADJ_GROUPS:
+        items = r[key]
+        if not items:
+            continue
+        tot = r2(sum(x["usd"] for x in items))
+        out.append(f"{sign} {w(title_w, lang).capitalize()}: <b>{money(tot)} $</b>")
+        out += [f"   {adj_item(x, kind, lang)}" for x in items]
+    moved = r.get("moved", [])
+    if moved:
+        to = ", ".join(sorted({h(x["to_name"]) for x in moved}))
+        out.append(f"<i>↪ {w('moved_to', lang).format(to)}</i>")
+        out += [f"   <i>{adj_item(dict(x, via_name=None), x['kind'], lang, word=True)}</i>" for x in moved]
     return out
+
+
+def total_formula(r: dict, lang: str) -> str:
+    """«= 48.79 + 116 − 15 − 20 = 129.79 $» — zp, bonus, jarima, avans (va o'tkazma/ulush) qanchadan qancha."""
+    parts = [money(r["zp"])]
+    for v, sign in ((r["bonus"], "+"), (r["fine"], "−"), (r["adv"], "−"), (r["tr_in"], "+"), (r["tr_out"], "−"),
+                    (r["sin_sum"], "+"), (r["sout_sum"], "−")):
+        if v:
+            parts.append(f"{sign} {money(v)}")
+    head = f"{' '.join(parts)} = " if len(parts) > 1 else ""
+    return f"= {head}<b>{money(r['total'])} $</b>"
+
+
+def zp_part_lines(r: dict, lang: str, html: bool = True) -> list[str]:
+    """Bir nechta RD/akkauntdan zp bo'lsa — har biri alohida (foizsiz, kassa $ siz): «  RD 1 · Bayzed akk — 186 $»."""
+    parts = r.get("zp_parts") or []
+    if len(parts) < 2:
+        return []
+    esc = h if html else str
+    me, out = r["p"]["id"], []
+    for x in sorted(parts, key=lambda x: x["acct"] != me):
+        if x["acct"] == me:
+            where = esc(x["rd"]) if x["rd"] else w("own", lang)
+        else:
+            nm = f"{esc(x['name'])} {w('acct_s', lang)}"
+            where = f"{esc(x['rd'])} · {nm}" if x["rd"] else nm
+        out.append(f"  {where} — {money(x['zp'])} $")
+    return out
+
+
+def acct_label(b: dict, acct: int, me: int, lang: str) -> str:
+    """Zp qaysi akkaunt/papkadan: o'zinikida — «RD 3»; boshqanikida — «RD 1 · Bayzed akk»."""
+    rd = b.get("rds", {}).get(acct, "")
+    if acct == me:
+        return h(rd) if rd else w("own", lang)
+    nm = f"{h(b['names'].get(acct, '?'))} {w('acct_s', lang)}"
+    return f"{h(rd)} · {nm}" if rd else nm
 
 
 def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[str]:
@@ -127,14 +197,13 @@ def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[
             out.append(f"+ {w('fines_pl', lang)} {money(r['pf'])} $")
         if r["pb"]:
             out.append(f"− {w('bonuses_pl', lang)} {money(r['pb'])} $")
-    elif r["zp_on"]:
-        own = [(acct, p, u) for (acct, p), u in r["earn"].items() if acct == r["p"]["id"]]
-        other = [(acct, p, u) for (acct, p), u in r["earn"].items() if acct != r["p"]["id"]]
-        for _a, p, u in own:
-            out.append(f"{money(u)} $ × {pct(p)} = {money(u * p / 100)} $")
-        for acct, p, u in other:
-            out.append(f"+ {h(names.get(acct, '?'))} {w('from_acct', lang)}: {money(u)} $ × {pct(p)} = "
-                       f"{money(u * p / 100)} $")
+    elif r["zp_on"]:                                   # har RD (akkaunt) bo'yicha, o'zinikidan boshlab
+        me = r["p"]["id"]
+        earn = sorted(r["earn"].items(), key=lambda kv: kv[0][0] != me)
+        for (acct, p), u in earn:
+            out.append(f"{acct_label(b, acct, me, lang)}: {money(u)} $ × {pct(p)} = {money(u * p / 100)} $")
+        if len(earn) > 1:
+            out.append(f"<b>{w('zp_total', lang)}: {money(r['zp'])} $</b>")
     else:
         out.append(f"<i>{w('zp_off', lang)}</i>")
     out += adj_lines(r, lang)
@@ -151,7 +220,7 @@ def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[
     for i in r["sout"]:
         out.append(f"− {w('share_out', lang)} {h(names.get(i['other'], '?'))} {pct(i['pct'])} = {money(i['amount'])} $")
     if r["total"] is not None:
-        out.append(f"= <b>{money(r['total'])} $</b>")
+        out.append(total_formula(r, lang) if r["kind"] != "partner" else f"= <b>{money(r['total'])} $</b>")
     return out
 
 
@@ -208,7 +277,8 @@ def overall(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, cmp: dict |
         tag = f" <i>({w('pool', lang)})</i>" if r["kind"] == "pool" else ""
         up = arrow(cmp["cur"].get(r["p"]["id"], 0.0), cmp["prev"].get(r["p"]["id"])) if cmp else ""
         usd = f" · {money(r['usd'])} $" if owner else ""     # $ — faqat egaga
-        kl.append(f"{h(r['p']['name'])}{tag} · {kassa_line(r, lang)}{usd}{up}")
+        rd = b.get("rds", {}).get(r["p"]["id"])
+        kl.append(f"{h(r['p']['name'])}{tag}{' · ' + h(rd) if rd else ''} · {kassa_line(r, lang)}{usd}{up}")
         if r["unassigned"]:
             kl.append(f"   ⚠️ {r['unassigned']} {w('unassigned', lang)}")
         if r["noprice"]:
@@ -295,7 +365,8 @@ def owner_card(b: dict, lang: str) -> str:
                          f"{w('share_s', lang)} {money(a['mine'] - a['own'])})</i>")
             parts.append(mine)
             tag = f" ({w('you', lang).lower()})" if a["self"] else ""
-            lines.append(f"{nm}{tag} · {money(a['usd'])} $ → " + " · ".join(parts))
+            rd = b.get("rds", {}).get(a["pid"])
+            lines.append(f"{nm}{tag}{' · ' + h(rd) if rd else ''} · {money(a['usd'])} $ → " + " · ".join(parts))
     return card(lines, expandable=len(lines) > 14)
 
 
@@ -390,23 +461,24 @@ def zp_amount_lines(r: dict, lang: str) -> list[str]:
     for i in r["ins"]:
         out.append(f"+ {w('transfer_in', lang)} {money(i['amount'])} $ ({dshort(i['day'])})")
     if r["total"] is not None and r["kind"] in ("worker", "self"):
-        out.append(f"= <b>{money(r['total'])} $</b>")
+        out.append(total_formula(r, lang))
     return out
 
 
 # ───────────────────────── xodimga xabar (ruscha): faqat o'z zp si
 def worker_message(r: dict, s: dt.date, e: dt.date, extra: str = "") -> str:
+    """Xodimga (ruscha, oddiy matn): zp, bonuslar va jarimalar jami bilan, kunma-kun qisqa, oxirida hisob:
+    «Итого: 48.79 + 116 − 15 − 20 = 129.79 $». Kassa $ va boshqalarning raqamlari yo'q."""
     lines = [f"💰 Зарплата · {label(s, e)}", ""]
     if r["zp_on"] and r["kind"] in ("worker", "self"):
         lines.append(f"Зп: {money(r['zp'])} $")
-    for x in r["fines"]:
-        via = f" · на аккаунте {x['via_name']}" if x.get("via_name") else ""
-        lines.append(f"Штраф: −{money(x['usd'])} $ ({dshort(x['day'])}{via}{' · ' + x['note'] if x['note'] else ''})")
-    for x in r["bonuses"]:
-        via = f" · на аккаунте {x['via_name']}" if x.get("via_name") else ""
-        lines.append(f"Бонус: +{money(x['usd'])} $ ({dshort(x['day'])}{via})")
-    for x in r["advs"]:
-        lines.append(f"Аванс: −{money(x['usd'])} $ ({dshort(x['day'])})")
+        lines += zp_part_lines(r, "ru", html=False)
+    for key, sign, title_w, kind in ADJ_GROUPS:
+        items = r[key]
+        if not items:
+            continue
+        lines.append(f"{w(title_w, 'ru').capitalize()}: {sign}{money(r2(sum(x['usd'] for x in items)))} $")
+        lines += [f"  {adj_item(x, kind, 'ru', html=False)}" for x in items]
     if r["zp_on"]:
         for o in r["outs"]:
             lines.append(f"Перенос: −{money(o['amount'])} $ ({dshort(o['day'])})")
@@ -417,7 +489,7 @@ def worker_message(r: dict, s: dt.date, e: dt.date, extra: str = "") -> str:
         for i in r["sout"]:
             lines.append(f"Доля: −{money(i['amount'])} $")
         if r["total"] is not None:
-            lines += ["", f"Итого: {money(r['total'])} $"]
+            lines += ["", "Итого: " + total_formula(r, "ru")[2:].replace("<b>", "").replace("</b>", "")]
     if len(lines) == 2:
         lines.append("Начислений нет.")
     if extra:

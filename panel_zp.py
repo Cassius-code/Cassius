@@ -7,7 +7,7 @@ import datetime as dt
 from . import kassa as K
 from . import people as P
 from . import ui
-from .kassa_view import adj_lines, label, money, num
+from .kassa_view import adj_lines, label, money, num, total_formula, zp_part_lines
 from .timeutil import local_date
 from .ui import Req, card, grid, h, kb, screen, title
 
@@ -107,9 +107,10 @@ async def zp_person(ctx, r: Req):
         zl = []
         if x["kind"] == "worker" and x["zp_on"]:
             zl.append(r.L(f"Zp: <b>{money(x['zp'])} $</b>", f"Зп: <b>{money(x['zp'])} $</b>"))
+            zl += zp_part_lines(x, r.lang)                 # bir nechta RD dan bo'lsa — har biri
         zl += adj_lines(x, r.lang)
         if x["total"] is not None and x["kind"] == "worker":
-            zl.append(f"= <b>{money(x['total'])} $</b>")
+            zl.append(total_formula(x, r.lang))
         if zl:
             est = "" if ready else r.L(" · <i>≈ taxminiy</i>", " · <i>≈ примерно</i>")
             parts.append(card([f"<b>💰 {r.L('Zp', 'Зп')}</b>{est}"] + zl))

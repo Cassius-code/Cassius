@@ -47,6 +47,7 @@ def _styles():
             "sub": ParagraphStyle("sub", fontName="DJ", fontSize=9, leading=12, textColor=colors.HexColor("#6B7280")),
             "b": ParagraphStyle("b", fontName="DJB", fontSize=11, leading=15, textColor=ink, spaceBefore=8),
             "p": ParagraphStyle("p", fontName="DJ", fontSize=9.5, leading=13, textColor=ink),
+            "pi": ParagraphStyle("pi", fontName="DJ", fontSize=9.5, leading=13, textColor=ink, leftIndent=14),
             "c": ParagraphStyle("c", fontName="DJ", fontSize=8, leading=10, textColor=ink),
             "cb": ParagraphStyle("cb", fontName="DJB", fontSize=8, leading=10, textColor=colors.white)}
 
@@ -113,8 +114,8 @@ def overall_pdf(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, zp: boo
         if not zp and len(lines) <= 1:
             continue
         story.append(_p(r["p"]["name"], st["b"]))
-        for line in lines[1:] if not zp else lines:
-            story.append(_p(_plain(line), st["p"]))
+        for line in lines[1:] if not zp else lines:            # kunma-kun qatorlari — ichkariroq
+            story.append(_p(_plain(line), st["pi"] if line.startswith(" ") else st["p"]))
     if owner and zp:
         story += [Spacer(1, 6)]
         for line in _plain(V.owner_card(b, lang)).split("\n"):
@@ -155,7 +156,7 @@ def person_pdf(b: dict, r: dict, s: dt.date, e: dt.date, lang: str, owner: bool,
                                                                       " (примерно — неделя ещё не рассчитана)")),
                                st["b"])]
     for line in V.zp_lines(b, r, lang, owner, True):
-        story.append(_p(_plain(line), st["p"]))
+        story.append(_p(_plain(line), st["pi"] if line.startswith(" ") else st["p"]))
     if r["n"]:
         story += [Spacer(1, 10), _p(L("Kunlar bo'yicha cheklar", "Чеки по дням"), st["b"])]
         data = [[_p(x, st["cb"]) for x in (L("Kun", "День"), L("Cheklar", "Чеки"), L("Kassa", "Касса"), "$")]]
