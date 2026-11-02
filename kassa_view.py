@@ -42,6 +42,7 @@ W = {
                    "Отметить: 👥 Сотрудники → Артур (если нет — ➕ Новый сотрудник) → ⚙️ Настройки → 🏷 Тип → "
                    "🤝 Партнёр"),
     "no_partner_s": ("Artur hisobga kirmagan", "Артур не учтён"),
+    "own_work": ("siz ishlagan", "вы работали"),
 }
 
 
@@ -241,6 +242,8 @@ def overall(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, cmp: dict |
 
 
 def owner_card(b: dict, lang: str) -> str:
+    """💼 Siz (egasi, 2026-11-02): kassa − Artur (ulushi + jarimalar − bonuslar) − xodimlar zp si (zp + bonuslar −
+    jarimalar) = daromadingiz. Akkauntlar bo'yicha — har akkauntdan kimga qancha; siz o'zingiz ishlagan qism alohida."""
     o = b["owner"]
     names = b["names"]
     ptag = f" {pct(o['partner_pct'])}" if o["partner_pct"] is not None else ""
@@ -249,14 +252,16 @@ def owner_card(b: dict, lang: str) -> str:
     if o["partner_id"] is None:                     # hamkor yo'q: «Artur 50%: 0 $» deb chalg'itmaymiz
         lines.append(f"⚠️ {w('no_partner', lang)}")
     else:
-        lines.append(f"{w('partner', lang)}{ptag}: {money(o['partner_share'])} $"
+        lines.append(f"− {w('partner', lang)}{ptag}: {money(o['partner_share'])}"
                      + (f" + {w('fines_pl', lang)} {money(o['pf'])}" if o["pf"] else "")
                      + (f" − {w('bonuses_pl', lang)} {money(o['pb'])}" if o["pb"] else "")
-                     + f" = <b>{money(o['partner_total'])} $</b>")
+                     + f" = <b>{money(o['partner_share'] + o['pf'] - o['pb'])} $</b>")
         if o["partner_paid"]:
-            lines.append(f"   ({w('pshares', lang)}: {money(o['partner_paid'])} $)")
-        lines.append(f"{w('half' if o['partner_pct'] is not None else 'after_artur', lang)}: {money(o['half'])} $")
-    lines.append(f"− {w('zps', lang)}: {money(o['zps'])} $")
+            lines.append(f"− {w('pshares', lang)}: {money(o['partner_paid'])} $")
+    lines.append(f"− {w('zps', lang)}: {money(o['zps'])}"
+                 + (f" + {w('bonuses_pl', lang)} {money(o['wb'])}" if o["wb"] else "")
+                 + (f" − {w('fines_pl', lang)} {money(o['wf'])}" if o["wf"] else "")
+                 + f" = <b>{money(o['zps_paid'])} $</b>")
     if o["owner_paid"]:
         lines.append(f"− {w('shares', lang)}: {money(o['owner_paid'])} $")
     if o["out_self"]:
@@ -276,23 +281,30 @@ def owner_card(b: dict, lang: str) -> str:
                 parts.append(f"{w('zp', lang).lower()} {money(a['zp'])}")
             if a["share"]:
                 parts.append(f"{w('share_s', lang)} {money(a['share'])}")
-            parts.append(f"{w('to_you', lang)} <b>{money(a['mine'])} $</b>")
+            mine = f"{w('to_you', lang)} <b>{money(a['mine'])} $</b>"
+            if a["own"] and not a["self"]:          # shu akkauntda o'zingiz ham ishlagansiz — qanday chiqqani
+                mine += (f" <i>({w('own_work', lang)} {money(a['own_usd'])} $ → {money(a['own'])} + "
+                         f"{w('share_s', lang)} {money(a['mine'] - a['own'])})</i>")
+            parts.append(mine)
             tag = f" ({w('you', lang).lower()})" if a["self"] else ""
             lines.append(f"{nm}{tag} · {money(a['usd'])} $ → " + " · ".join(parts))
     return card(lines, expandable=len(lines) > 14)
 
 
 def balance_lines(b: dict, lang: str) -> list[str]:
-    """🧮 Kassa = Artur + xodimlar + ulushlar + sizga — pul to'liq taqsimlanganini tekshirish (faqat egaga)."""
+    """🧮 Kassa = Artur (jarima/bonus bilan) + xodimlar (zp, bonus, jarima bilan) + ulushlar + sizga — pul to'liq
+    taqsimlanganini tekshirish (faqat egaga)."""
     o = b["owner"]
     mine = r2(o["income"] + o["out_self"] - o["in_self"])
-    art = r2(o["partner_share"] + o["partner_paid"])
-    tot = r2(art + o["zps"] + o["owner_paid"] + mine)
+    has_p = o["partner_id"] is not None
+    art = r2(o["partner_share"] + o["pf"] - o["pb"]) if has_p else 0.0
+    shares = r2(o["owner_paid"] + o["partner_paid"])
+    tot = r2(art + o["zps_paid"] + shares + mine)
     ru = lang == "ru"
-    parts = ([f"{w('partner', lang)} {money(art)}"] if o["partner_id"] is not None else []) + \
-        [f"{'зп' if ru else 'xodimlar'} {money(o['zps'])}"]
-    if o["owner_paid"]:
-        parts.append(f"{w('share_s', lang)} {money(o['owner_paid'])}")
+    parts = ([f"{w('partner', lang)} {money(art)}"] if has_p else []) + \
+        [f"{'зп' if ru else 'xodimlar'} {money(o['zps_paid'])}"]
+    if shares:
+        parts.append(f"{w('share_s', lang)} {money(shares)}")
     parts.append(f"{w('to_you', lang)} {money(mine)}")
     issues = [f"⚠️ {w('no_partner_s', lang)}"] if o["partner_id"] is None else []
     noprice = sum(r["noprice"] for r in b["rows"].values())

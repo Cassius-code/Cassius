@@ -110,6 +110,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     Artur — o'z ulushi (50%, yoki 🧮 Haftalik zp dagi «qolgani») + jarimalar − bonuslar (bonusni Artur to'laydi,
     jarimalar unga). Belgilanmagan bo'lsa,
     «💼 Siz» kartasida «⚠️ Artur (hamkor) botda belgilanmagan» chiqadi va 🧮 Tekshiruv ⚠️ bo'ladi.
+  - **💼 Siz kartasi:** Kassa − Artur (ulushi + jarimalar − bonuslar) − Xodimlar zp si (zp + bonuslar − jarimalar)
+    = Daromadingiz. Xodim akkauntida o'zingiz ham ishlagan bo'lsangiz — o'sha qismdan sizga o'z foizingiz (masalan
+    50%), qolgani Arturga; «siz %» (masalan 14%) faqat xodimning o'zi ishlagan qismidan olinadi. Masalan: Bayzed
+    621 $, siz ishlagan 372 $ → 372 × 50% + (621 − 372) × 14% = 186 + 34.86 = 220.86 $. «Akkauntlar bo'yicha»da
+    shunday ko'rinadi: «sizga 220.86 $ (siz ishlagan 372 $ → 186 + ulush 34.86)».
   - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
     bitta qisqa qator (📌 doskadagi bilan bir xil: 🔴 задержка · 🟡 скоро задержка · ☕ перерыв · 🟢, «ждут N»).
     Hammasi bitta ramkada. Menyu o‘z joyida yangilanadi: 5 soniyada bir tekshiriladi, faqat raqam o'zgarsa
@@ -136,7 +141,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   - **✅ Kunni yopish.** Hamma hisobot tushgach bosasiz. Ro'yxatda faqat cheki bor kunlar: «⏳ 29.10 — 5 chek ·
     10 550». Yopilgan kunni faqat siz o'zgartira olasiz. Yopilgan kunga yangi hisobot kelsa, sizga xabar keladi.
   - **📜 Tarix** (⚙️ Sozlamalar). Kim, qachon, nimani o'zgartirgani (eski → yangi).
-  - **🧮 Tekshiruv.** Hisobotda: Kassa = Artur + xodimlar + ulushlar + sizga ✅.
+  - **🧮 Tekshiruv.** Hisobotda: Kassa = Artur (jarima/bonus bilan) + xodimlar (zp + bonus − jarima) + ulushlar +
+    sizga ✅.
   - Zp hisoblash usuli: **tugma bilan** (odatiy) / **avtomatik** / **o'chiq** (o'zingiz hisoblaysiz).
   - Har hisobotdan keyin sizga xodimning shu kungi xulosasi keladi (eski kassa botidagidek):
     `Adam` / `Дата: 19.10` / `Касса: 17,100` / `Кол-во рд: 8` / `Касса ($): 64$`. Shu kunga yana hisobot kelsa —

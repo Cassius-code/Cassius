@@ -866,6 +866,15 @@ def week_rules(db: Database, week: dt.date) -> dict:
         "SELECT DISTINCT ch.pay pay FROM checks ch JOIN reports r ON r.id=ch.report_id WHERE r.status='done' "
         "AND ch.skip=0 AND ch.rd BETWEEN ? AND ? AND ch.pay IS NOT NULL", (w0, w1))}
     items, subs, missing, over = [], [], [], []
+    selfs = [pid for pid, p in ps.items() if p["kassa_kind"] == "self"]
+    self_usd: dict = {}                      # akkaunt -> shu haftada siz o'zingiz ishlagan cheklar ($)
+    if selfs:
+        q = ",".join("?" * len(selfs))
+        for row in db.all(f"SELECT r.person_id acct, COALESCE(SUM(ch.usd),0) usd FROM checks ch JOIN reports r "
+                          f"ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? "
+                          f"AND ch.pay IN ({q}) GROUP BY r.person_id", [w0, w1] + selfs):
+            self_usd[row["acct"]] = float(row["usd"])
+    self_pct = percent_on(db, selfs[0], week) if selfs else None
     kassa_sh: dict = {}                      # (acct, payer) -> % kassadan (siz yoki Artur to'laydi)
     sh_rows = shares(db, week=week)
     for sh in sh_rows:
@@ -884,7 +893,8 @@ def week_rules(db: Database, week: dt.date) -> dict:
         it = {"pid": p["id"], "name": p["name"], "kind": kind, "n": a["n"], "usd": r2(a["usd"]), "raw": int(a["raw"]),
               "wpct": wp,
               "opct": op, "kshare": kassa_sh.get((p["id"], "partner"), 0.0),
-              "kshare_owner": kassa_sh.get((p["id"], "owner"), 0.0), "zp_on": bool(p["zp_on"])}
+              "kshare_owner": kassa_sh.get((p["id"], "owner"), 0.0), "zp_on": bool(p["zp_on"]),
+              "self_usd": r2(self_usd.get(p["id"], 0.0)) if kind != "self" else 0.0, "self_pct": self_pct}
         items.append(it)
         if kind == "worker" and p["zp_on"] and not wp:
             missing.append((p["id"], "acct"))
@@ -1076,7 +1086,9 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     """Davr bo'yicha hamma narsa. -> {'rows': {pid: row}, 'order': [...], 'K', 'raw', 'n', 'owner': {...}}
 
     Har akkaunt kassasi (kun bo'yicha) shunday bo'linadi:
-    * haftalik foizlar kiritilgan (owner_pct bor): ishlagan xodim % + siz % → qolgani Arturga;
+    * haftalik foizlar kiritilgan (owner_pct bor): ishlagan xodim % + siz % → qolgani Arturga. Akkauntda siz o'zingiz
+      ishlagan cheklar ($) — sizga o'z % ingiz, qolgani Arturga; ulardan «siz %» olinmaydi (egasi, 2026-11-02:
+      Bayzed 621 $, siz ishlagan 372 $: 372 × 50% + (621 − 372) × 14% = 186 + 34.86);
     * eski usul (owner_pct yo'q): Artur — o'z foizi (50%), qolgani sizga (xodimlar zp si sizdan).
     Ulushlar: kassadan yoki zp dan; kim to'laydi — siz (owner), Artur (partner) yoki zp dan ushlanadi (deduct).
     """
@@ -1104,7 +1116,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
                     "ORDER BY ch.rd, ch.id", (s, e))
     base_zp: dict = {}               # (pid, day) -> zp (o'tkazma va zp-ulush uchun)
     acct_usd_day: dict = {}          # (acct, day) -> usd
-    zp_ad: dict = {}                 # (acct, day) -> {"all", "on", "self", "off"} — shu akkaunt cheklaridan zp
+    zp_ad: dict = {}                 # (acct, day) -> {"all", "on", "self", "off", "self_usd"} — shu akkaunt cheklaridan zp
     RAW = N = 0
     for c in checks:
         if c["skip"] or c["acct"] not in rows:
@@ -1135,10 +1147,11 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         pr["earn"][key] = pr["earn"].get(key, 0.0) + usd
         z = usd * pp / 100
         base_zp[(payee, d)] = base_zp.get((payee, d), 0.0) + z
-        bucket = zp_ad.setdefault((c["acct"], d), {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0})
+        bucket = zp_ad.setdefault((c["acct"], d), {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0, "self_usd": 0.0})
         bucket["all"] += z
         if pr["kind"] == "self":
             bucket["self"] += z
+            bucket["self_usd"] += usd                  # siz o'zingiz ishlagan cheklar ($)
         elif pr["zp_on"]:
             bucket["on"] += z
         else:
@@ -1201,7 +1214,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     acct_split: dict = {}            # acct -> {"usd","artur","zp","share","pshare","mine"}
     artur_day: dict = {}
     modes = set()
-    zero = {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0}
+    zero = {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0, "self_usd": 0.0}
     for (acct, d) in set(acct_usd_day) | set(share_ad):
         u = acct_usd_day.get((acct, d), 0.0)
         z = zp_ad.get((acct, d), zero)
@@ -1213,15 +1226,17 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             art = u * pct(partner["id"], d) / 100
             if u:
                 modes.add("legacy")
-        else:
-            art = u - z["all"] - u * op / 100
+        else:                                          # «siz %» — faqat boshqalar ishlagan qismidan
+            art = u - z["all"] - (u - z["self_usd"]) * op / 100
             if u:
                 modes.add("split")
         art_net = art - sh["partner"]
         mine = u - art - z["on"] - sh["owner"]
         x = acct_split.setdefault(acct, {"usd": 0.0, "artur": 0.0, "zp": 0.0, "share": 0.0, "pshare": 0.0,
-                                         "mine": 0.0})
+                                         "mine": 0.0, "own": 0.0, "own_usd": 0.0})
         x["usd"] += u
+        x["own"] += z["self"]                          # shundan — o'zingiz ishlaganingiz uchun (o'z % ingiz)
+        x["own_usd"] += z["self_usd"]
         x["artur"] += art_net
         x["zp"] += z["on"]
         x["share"] += sh["owner"]
@@ -1268,7 +1283,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         per_acct.append({"pid": pid, "usd": r2(x["usd"]), "artur": r2(x["artur"]), "half": r2(x["usd"] - x["artur"]
                                                                                               - x["pshare"]),
                          "zp": r2(x["zp"]), "share": r2(x["share"]), "pshare": r2(x["pshare"]), "mine": r2(x["mine"]),
-                         "self": rows[pid]["kind"] == "self"})
+                         "own": r2(x["own"]), "own_usd": r2(x["own_usd"]), "self": rows[pid]["kind"] == "self"})
     unknown = [r["p"]["name"] for r in rows.values() if r["kind"] == "worker" and not r["zp_on"] and r["earn"]]
     zps = r2(sum(r["zp"] for r in rows.values() if r["kind"] == "worker" and r["zp_on"]))
     owner_paid = r2(sum(x["share"] for x in acct_split.values()))
@@ -1277,7 +1292,14 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     out_self = me["tr_out"] if me else 0.0
     in_self = me["tr_in"] if me else 0.0
     mine = r2(sum(x["mine"] for x in acct_split.values()))
-    income = r2(mine - out_self + in_self)
+    # jarima/bonus (egasi, 2026-11-02): xodimga bonus — qo'shiladi, jarima — ayriladi; jarima Arturga qo'shiladi,
+    # bonusni Artur to'laydi. Sizning o'z jarimangiz/bonusingiz ham Artur bilan; Artur yo'q bo'lsa — hammasi sizda.
+    wf = r2(sum(r["fine"] for r in rows.values() if r["kind"] == "worker"))
+    wb = r2(sum(r["bonus"] for r in rows.values() if r["kind"] == "worker"))
+    if partner is not None:
+        income = r2(mine - out_self + in_self - (me["fine"] if me else 0.0) + (me["bonus"] if me else 0.0))
+    else:
+        income = r2(mine - out_self + in_self - wb + wf)
     mode = "split" if modes == {"split"} else ("legacy" if modes <= {"legacy"} else "mixed")
     owner = {"K": K, "partner_pct": partner_pct_of(db, partner, e) if mode == "legacy" else None, "mode": mode,
              "half": r2(K - share_part - partner_paid), "zps": zps, "owner_paid": owner_paid,
@@ -1285,7 +1307,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
              "mine": mine, "self_zp": me["zp"] if me else 0.0, "per_acct": per_acct, "unknown_zp": unknown,
              "partner_id": partner["id"] if partner else None,
              "partner_total": rows[partner["id"]]["total"] if partner else 0.0,
-             "partner_share": share_part, "pf": pf, "pb": pb}
+             "partner_share": share_part, "pf": pf, "pb": pb, "wf": wf, "wb": wb, "zps_paid": r2(zps + wb - wf)}
     order = [p["id"] for p in P.people(db, active_only=False) if p["kassa_kind"]]
     return {"rows": rows, "order": order, "K": K, "raw": RAW, "n": N, "owner": owner, "names":
             {pid: p["name"] for pid, p in ps.items()}}
