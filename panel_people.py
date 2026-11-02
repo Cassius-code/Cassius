@@ -260,9 +260,10 @@ async def person_card(ctx, r: Req):
     if r.owner and not zst["ready"] and zst["weeks"] and p["kassa_kind"] in ("worker", "partner", "self"):
         rows += grid([(f"🧮 {plabel(x, x + dt.timedelta(days=6))}", f"kz:{x.isoformat()}") for x in zst["weeks"]], 2)
     if r.can("full"):
-        if p["kassa_kind"] != "pool":
-            rows += [[(r.L("⚠️ Jarima", "⚠️ Штраф"), f"paf:{pid}"), (r.L("🎁 Bonus", "🎁 Бонус"), f"pab:{pid}"),
-                      (r.L("💸 Avans", "💸 Аванс"), f"paa:{pid}") if r.owner else None]]
+        if p["kassa_kind"] != "pool":                     # ochiq turgan davr bilan — kun shu davrdan tanlanadi
+            rows += [[(r.L("⚠️ Jarima", "⚠️ Штраф"), f"paf:{pid}:{key}"),
+                      (r.L("🎁 Bonus", "🎁 Бонус"), f"pab:{pid}:{key}"),
+                      (r.L("💸 Avans", "💸 Аванс"), f"paa:{pid}:{key}") if r.owner else None]]
         rows += grid([(r.L("📋 Jarima/bonuslar", "📋 Штрафы/бонусы"), f"pa:{pid}"), (r.L("📅 Davr", "📅 Период"),
                                                                                       f"pp:{pid}")])
         if p["kassa_kind"] in ("worker", "self", "pool") and (p["kassa_kind"] != "self" or r.owner):
@@ -276,11 +277,44 @@ async def person_card(ctx, r: Req):
         if p["kassa_kind"] == "worker":
             rows += grid([(r.L("📤 Xodimga yuborish", "📤 Отправить ему"), f"psd:{pid}:{key}")]
                          + ([(r.L("✅ Oylik berildi", "✅ Зп выдана"), f"ppd:{pid}:{key}")] if r.owner else []))
+        if r.owner and p["kassa_kind"] == "worker":      # egasi o'zini xodimlar orasida belgilaydi (2026-11-02)
+            rows.append([(r.L("👑 Bu menman", "👑 Это я"), f"pme:{pid}")])
         rows.append([(r.L("⚙️ Sozlamalar", "⚙️ Настройки"), f"ps:{pid}")])
     else:
         rows.append([(r.L("📅 Davr", "📅 Период"), f"pp:{pid}")])
     rows.append(nav(r, "p"))
     return ui.join(*parts), kb(*rows)
+
+
+@screen("pme", "owner")
+async def person_is_me(ctx, r: Req):
+    """👑 Bu menman: shu xodim — ega (siz). Uning kassasidan foizingiz va boshqa xodimlardan ulushingiz «👑 Siz»
+    kartasida birga hisoblanadi; uning zp si «Xodimlar zp si»ga qo'shilmaydi. Oldin boshqasi «siz» bo'lsa — xodim."""
+    db = ctx.db
+    pid = int(r.args[0])
+    p = must(P.person(db, pid))
+    old = db.one("SELECT id, name FROM people WHERE kassa_kind='self' AND id<>?", (pid,))
+    if len(r.args) > 1 and r.args[1] == "y":
+        if old is not None:
+            P.update_person(db, old["id"], kassa_kind="worker")
+        P.update_person(db, pid, kassa_kind="self")
+        r.args = [str(pid)]
+        return await person_card(ctx, r)
+    nm = h(p["name"])
+    lines = [r.L(f"Bot <b>{nm}</b> ni siz deb biladi:", f"Бот будет знать, что <b>{nm}</b> — это вы:"),
+             r.L(f"• {nm} kassasidan foizingiz va boshqa xodimlardan ulushingiz «👑 Siz» kartasida birga "
+                 f"hisoblanadi;", f"• ваш процент с кассы {nm} и ваша доля с других сотрудников считаются вместе "
+                 f"в карточке «👑 Вы»;"),
+             r.L(f"• {nm} zp si «Xodimlar zp si»ga qo'shilmaydi (o'zingizga o'zingiz to'lamaysiz);",
+                 f"• зп {nm} не входит в «Зарплаты сотрудников» (себе вы не платите);"),
+             r.L("• «Проёб»ga ismsiz yozgan hisobotingiz — sizniki bo'ladi.",
+                 "• ваш отчёт в «Проёб» без имени — будет вашим.")]
+    if old is not None:
+        lines.append(r.L(f"Oldin «{h(old['name'])}» siz deb belgilangan edi — u oddiy xodim bo'ladi.",
+                         f"Раньше вами был отмечен «{h(old['name'])}» — он станет обычным сотрудником."))
+    lines.append(r.L("Qaytarish: ⚙️ Sozlamalar → 🏷 Turi.", "Вернуть: ⚙️ Настройки → 🏷 Тип."))
+    return ui.join(title("👑", nm, r.L("bu menman", "это я")), "", card(lines)), \
+        kb([(r.L("✅ Ha, bu menman", "✅ Да, это я"), f"pme:{pid}:y")], nav(r, f"po:{pid}"))
 
 
 
@@ -360,33 +394,49 @@ async def adj_adv_ask(ctx, r: Req):
 
 
 def adj_ask(ctx, r: Req, kind: str):
+    """Summa so'raladi; kun — tugma bilan (egasi, 2026-11-02: «qaysi kun uchun» so'rasin). Kabinetda o'tgan davr
+    ochiq bo'lsa — o'sha davr kunlari (oxirgi 7 tasi), joriy davrda — oxirgi 7 kun; oldindan — davrning oxirgi kuni."""
     pid = int(r.args[0])
     p = must(P.person(ctx.db, pid))
-    ui.ask(r, "adj_add", f"po:{pid}", pid=pid, kind=kind)
+    t = today(ctx)
+    s, e, key = period_of(ctx, r, pid, r.args[1] if len(r.args) > 1 else None)
+    last = min(e, t)
+    days = [d for d in (last - dt.timedelta(days=i) for i in range(6, -1, -1)) if d >= s or e >= t] or [t]
+    day = dt.date.fromisoformat(r.args[2]) if len(r.args) > 2 else days[-1]
+    ui.ask(r, "adj_add", f"po:{pid}:{key}", pid=pid, kind=kind, day=day.isoformat(), key=key)
     word = {"fine": r.L("JARIMA", "ШТРАФ"), "bonus": r.L("BONUS", "БОНУС"), "adv": r.L("AVANS", "АВАНС")}[kind]
-    return title({"fine": "⚠️", "bonus": "🎁", "adv": "💸"}[kind], f"{word} · {h(p['name'])}") + "\n\n" + card(
-        [r.L("Summani $ da yuboring, xohlasangiz izoh bilan: <code>5 kech qoldi</code>. Bugungi kunga yoziladi.",
-             "Пришлите сумму в $, можно с пояснением: <code>5 опоздал</code>. Запишется на сегодня.")]), \
-        ui.cancel_kb(r, f"po:{pid}")
+    cmd = {"fine": "paf", "bonus": "pab", "adv": "paa"}[kind]
+    wd = DAYS_RU if r.lang == "ru" else DAYS_UZ
+    btn = [((("● " if d == day else "") + f"{wd[d.weekday()]} {d:%d.%m}"), f"{cmd}:{pid}:{key}:{d.isoformat()}")
+           for d in days]
+    when = r.L(" (bugun)", " (сегодня)") if day == t else (r.L(" (kecha)", " (вчера)") if day == t - dt.timedelta(days=1)
+                                                          else "")
+    lines = [r.L(f"📅 Qaysi kun uchun: <b>{day:%d.%m}</b>{when} — boshqa kun bo'lsa, pastdan tanlang.",
+                 f"📅 За какой день: <b>{day:%d.%m}</b>{when} — если за другой, выберите ниже."),
+             r.L("Summani $ da yuboring, xohlasangiz izoh bilan: <code>5 kech qoldi</code>.",
+                 "Пришлите сумму в $, можно с пояснением: <code>5 опоздал</code>.")]
+    return title({"fine": "⚠️", "bonus": "🎁", "adv": "💸"}[kind], f"{word} · {h(p['name'])}") + "\n\n" + \
+        card(lines), kb(*grid(btn, 4), [(r.L("✖️ Bekor qilish", "✖️ Отмена"), ui.back_data(f"po:{pid}:{key}"))])
 
 
 @on_input("adj_add")
-async def adj_add(ctx, r: Req, pid: int, kind: str):
+async def adj_add(ctx, r: Req, pid: int, kind: str, day: str | None = None, key: str = "o"):
     import re
     from .panel_kassa import locked
+    day = day or today(ctx).isoformat()                 # eski so'rov (yangilanishdan oldin) — bugun
     if kind == "adv" and not r.owner:
         ui.WAIT.pop(r.uid, None)
         return r.L("⛔ Avansni faqat ega yozadi", "⛔ Аванс записывает только владелец")
-    msg = locked(ctx, r, today(ctx).isoformat())
+    msg = locked(ctx, r, day)
     if msg:
         ui.WAIT.pop(r.uid, None)
         return msg
     m = re.match(r"\s*(\d+(?:[.,]\d+)?)\s*\$?\s*(.*)$", r.text, re.S)
     if not m or float(m.group(1).replace(",", ".")) <= 0:
         return r.L("⚠️ Summa kerak, masalan 5", "⚠️ Нужна сумма, например 5")
-    K.add_adj(ctx.db, pid, kind, float(m.group(1).replace(",", ".")), today(ctx).isoformat(), source="manual",
+    K.add_adj(ctx.db, pid, kind, float(m.group(1).replace(",", ".")), day, source="manual",
               note=m.group(2).strip()[:120])
-    r.args = [str(pid)]
+    r.args = [str(pid), key]
     return await person_card(ctx, r)
 
 

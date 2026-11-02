@@ -87,7 +87,7 @@ async def on_group_text(ctx, message, text: str, staff: bool, uid: int | None, n
             return False                                    # e'lon yoki qoida (masalan bonus haqida) — buyruq emas
         if edited:
             K.drop_adj_msg(db, message.chat.id, message.message_id)
-        await record_adjustments(ctx, text, day, message.chat.id, message.message_id)
+        await record_adjustments(ctx, text, reply_day(ctx, message, rt) or day, message.chat.id, message.message_id)
         return True
     is_owner = uid is not None and P.admin_level(db, ctx.cfg.owner_ids, uid) == "owner"
     fu = getattr(message, "from_user", None)
@@ -105,10 +105,26 @@ async def on_group_text(ctx, message, text: str, staff: bool, uid: int | None, n
     return True
 
 
+def reply_day(ctx, message, rt) -> dt.date | None:
+    """Eski xabarga javob bilan yozilgan jarima/bonus («бонус 5» — kechagi hisobotga) — o'sha kunga (egasi,
+    2026-11-02). Kassa hisobotiga javob — hisobotdagi kun (rd); boshqa xabarga — u yozilgan kun. Mavzuli guruhda
+    mavzuning boshlang'ich xabari javob hisoblanmaydi."""
+    if rt is None or getattr(rt, "forum_topic_created", None) is not None:
+        return None
+    if getattr(message, "is_topic_message", False) and rt.message_id == getattr(message, "message_thread_id", None):
+        return None
+    rep = ctx.db.one("SELECT id FROM reports WHERE chat_id=? AND msg_id=? ORDER BY id DESC LIMIT 1",
+                     (rt.chat.id, rt.message_id))
+    days = K.report_days(ctx.db, rep["id"]) if rep is not None else []
+    if days:
+        return dt.date.fromisoformat(days[-1])
+    d = getattr(rt, "date", None)
+    return local_date(d.timestamp(), ctx.tz) if d is not None else None
+
+
 # ───────────────────────── botning o'ziga yozilgan hisobot / jarima (ega yoki admin)
 async def private_entry(ctx, r, message):
     """Shaxsiy chatda: «Baxa\nrd 19.10\n1950 2600» yoki «@ivan штраф 5». -> panel (matn, tugmalar) yoki None."""
-    from . import ui
     db = ctx.db
     text = r.text
     day = local_date(ctx.clock(), ctx.tz)
@@ -118,13 +134,9 @@ async def private_entry(ctx, r, message):
             return None
         await record_adjustments(ctx, text, day, r.chat_id, message.message_id)
         rows = db.all("SELECT * FROM adj WHERE chat_id=? AND msg_id=? AND pending=0", (r.chat_id, message.message_id))
-        word = {"fine": L(ctx, "jarima", "штраф"), "bonus": L(ctx, "bonus", "бонус"), "adv": L(ctx, "avans", "аванс")}
-        lines = [f"✍ {h(P.person(db, a['person_id'])['name'])}: {word.get(a['kind'], '?')} {money(a['usd'])} $"
-                 for a in rows if a["person_id"]]
-        if len(rows) < len(items):
-            lines.append(L(ctx, "❓ Qolganlari bo'yicha savol pastda.", "❓ По остальным — вопрос ниже."))
-        return ui.join(f"<b>✍ {L(ctx, 'YOZILDI', 'ЗАПИСАНО')}</b> · {day:%d.%m}", "", ui.card(lines)), \
-            kb([(L(ctx, "⌂ Menyu", "⌂ Меню"), "m")])
+        return adj_saved(ctx, r.chat_id, message.message_id,
+                         L(ctx, "❓ Qolganlari bo'yicha savol pastda.", "❓ По остальным — вопрос ниже.")
+                         if len(rows) < len(items) else "")
     o = getattr(message, "forward_origin", None)
     if o is not None:                                       # xodimning hisoboti forward qilindi — o'shaniki
         u = getattr(o, "sender_user", None)
@@ -138,6 +150,28 @@ async def private_entry(ctx, r, message):
     if rid is None:
         return None
     return report_panel(ctx, r, rid) or await report_done_panel(ctx, r, rid)
+
+
+def adj_saved(ctx, chat_id: int, msg_id: int, extra: str = ""):
+    """✍ Botga yozilgan jarima/bonus: nima va qaysi kunga yozildi. Boshqa kun uchun bo'lsa — kunni bosadi (oxirgi
+    7 kun), shu xabardan yozilganlarning hammasi o'sha kunga o'tadi (panel_kassa: «kam»)."""
+    from . import ui
+    db = ctx.db
+    rows = db.all("SELECT * FROM adj WHERE chat_id=? AND msg_id=? AND pending=0", (chat_id, msg_id))
+    word = {"fine": L(ctx, "jarima", "штраф"), "bonus": L(ctx, "bonus", "бонус"), "adv": L(ctx, "avans", "аванс")}
+    lines = [f"✍ {h(P.person(db, a['person_id'])['name'])}: {word.get(a['kind'], '?')} {money(a['usd'])} $"
+             for a in rows if a["person_id"]]
+    if extra:
+        lines.append(extra)
+    t = local_date(ctx.clock(), ctx.tz)
+    day = dt.date.fromisoformat(rows[0]["day"]) if rows else t
+    btn, note = [], ""
+    if any(a["person_id"] for a in rows):
+        btn = [((("● " if d == day else "") + f"{d:%d.%m}"), f"kam:{msg_id}:{d.isoformat()}")
+               for d in (t - dt.timedelta(days=i) for i in range(7))]
+        note = "<i>" + L(ctx, "Boshqa kun uchun bo'lsa — kunni bosing.", "Если за другой день — нажмите дату.") + "</i>"
+    return ui.join(f"<b>✍ {L(ctx, 'YOZILDI', 'ЗАПИСАНО')}</b> · {day:%d.%m}", "", ui.card(lines), note), \
+        kb(*ui.grid(btn, 4), [(L(ctx, "⌂ Menyu", "⌂ Меню"), "m")])
 
 
 def report_panel(ctx, r, rid: int):

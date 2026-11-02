@@ -63,7 +63,8 @@ async def main_menu(ctx, r: Req):
     db, now = ctx.db, int(ctx.clock())
     t = datetime.fromtimestamp(now, ctx.tz)
     months = MONTHS_RU if r.lang == "ru" else MONTHS_UZ
-    when = f"{t.day} {months[t.month - 1]} · {t:%H:%M:%S}"   # soniyagacha — jonli (har 3 soniyada yangilanadi)
+    # soatda soniya yo'q: aks holda menyu har safar tahrirlanadi — Telegram tugmalarni sekinlatadi (egasi, 2026-11-02)
+    when = f"{t.day} {months[t.month - 1]} · {t:%H:%M}"
     alive = db.flag("bot_enabled")
     from .timeutil import day_start
     d0 = day_start(now, ctx.tz)
@@ -126,7 +127,7 @@ async def main_menu(ctx, r: Req):
 
 # ───────────────────────── jonli panel: bosh menyu va Push o'z joyida yangilanib turadi
 LIVE_VIEWS = ("m", "u", "lv")
-FAST_VIEWS = {"lv": 3, "m": 3}          # 👥 Hozir ishda va bosh menyu — har 3 soniyada (egasi: aniq, soniyagacha)
+FAST_VIEWS = {"lv": 3}                  # 👥 Hozir ishda — har 3 soniyada tekshiriladi (o'zgargan bo'lsagina tahrir)
 _LIVE_LAST: dict[int, float] = {}
 _LIVE_PAUSE: dict[int, float] = {}
 LIVE_EVERY = 5                          # soniya (bosh menyu, Push): shunchada bir tekshiriladi, son o'zgarsa — o'sha xabar tahrirlanadi
@@ -487,8 +488,11 @@ def build_router(ctx) -> Router:
             ui.WAIT.pop(uid, None)
             return
         fn, need = entry
-        if not req.can(need):
+        if not req.can(need):                              # huquqi shu orada o'zgargan — jim yo'qolmasin (2026-11-02)
             ui.WAIT.pop(uid, None)
+            await ui.toast(ctx.bot, req.chat_id, req.L(
+                "⛔ Huquqingiz o'zgargan — bu yozilmadi. Kerak bo'lsa, qaytadan kiriting.",
+                "⛔ Ваши права изменились — не записано. Если нужно, введите заново."), 8)
             return
         try:
             res = await fn(ctx, req, **state["data"])

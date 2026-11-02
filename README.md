@@ -49,7 +49,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     daqiqadan boshlab (35 daq → 10 $); birinchisidan kam (masalan, 20 daq) — 0 $, faqat xabar. 15 daqiqadan kam —
     xabar ham yo'q. Jadvalni shunday yozasiz: `30-10`, `40-15`, `60-25`, `2ч-50` (har biri yangi qatorda), `0` — o'chirish.
     «🕘 @xodim, вы опоздали на 40 мин — вам штраф 15 $ (2-е опоздание за неделю)» (haftadagi nechanchisi — dushanbadan).
-  - ✍️ **Qo'lda** — «Проёб»da `@xodim штраф 5` (yoki xodim xabariga javob qilib `штраф 5`).
+  - ✍️ **Qo'lda** — «Проёб»da `@xodim штраф 5` (yoki xodim xabariga javob qilib `штраф 5`). Eski xabarga javob
+    bo'lsa — o'sha kunga yoziladi: kechagi hisobotga `бонус 5` — hisobotdagi kunga (bugunga emas).
   Bitta RD — bitta xodim (📅 Bugun kim qayerda). Tanaffusdagi xodimga jarima yo'q.
   Jarimalar o'chiq bo'lsa — «штраф» so'zi hech qayerda chiqmaydi va hech narsa sanalmaydi.
   Guruhdagi e'lon yoki qoida (masalan «bugun 10 000 kassa qilganga 20 $ бонус») jarima/bonus deb o'qilmaydi —
@@ -82,7 +83,7 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Qaytgach 8 daqiqa beriladi (⚙️ → ☕ Tanaffus → ⚡): tanaffusda kutib qolgan chatlar shunda ham javobsiz bo'lsa —
   «⚡ @xodim, ускорьтесь — 2 чата ждут ответа» (jarimasiz). Tanaffusdan oldin chiqqan «задержка»ning eslatmasi ham
   shu vaqtgacha suriladi, keyin odatdagidek: 5 daqiqada javob bo'lmasa — jarima.
-- **👥 Hozir ishda** (bosh menyu). Har 3 soniyada o'zi yangilanadi. Har xodim: 🟢 ishda · ☕ tanaffus (qachongacha) ·
+- **👥 Hozir ishda** (bosh menyu). Har 3 soniyada tekshiriladi, nimadir o'zgarsa — o'z joyida yangilanadi. Har xodim: 🟢 ishda · ☕ tanaffus (qachongacha) ·
   ⚪ hali kelmagan · 🛌 dam olishda; ⏱ uning RD sida javob kutayotgan lidlar (🔴 — zaderjka); ✍️ lidga oxirgi
   yozgani; 🚨 bugungi «задержка»lar.
 - **📅 Bugun kim qayerda** (bosh menyu yoki 👥 Xodimlar). Har RD da bugun bitta xodim. «🛌 Kim ishlamaydi» (shu kunga) va
@@ -97,11 +98,23 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     (ism yozilgan bo'lsa — o'sha ism bilan qo'shadi, bo'lmasa — ismni so'raydi).
     Telefon raqami (`+998 90 123 45 67`, `998901234567`, `90 123 45 67`) hisobot hisoblanmaydi.
     Ism notanish bo'lsa — «➕ Yangi xodim: Baxa» tugmasi chiqadi (shunday tanishtirasiz). Jarima ham:
-    `@ivan штраф 5`. Guruhda ham xuddi shunday.
+    `@ivan штраф 5`. Guruhda ham xuddi shunday. Botga yozilgani bugunga yoziladi; boshqa kun uchun bo'lsa —
+    «✍ YOZILDI» ostidagi kunni bosasiz (oxirgi 7 kun).
+  - **Xodim kartasidan ⚠️ Jarima / 🎁 Bonus / 💸 Avans** — bot «qaysi kun uchun?» deb kunni tugmalar bilan
+    ko'rsatadi: kartada o'tgan hafta ochiq bo'lsa — o'sha hafta kunlari (oldindan — haftaning oxirgi kuni),
+    joriy davrda — oxirgi 7 kun (oldindan — bugun).
+  - **👑 Bu menman** — xodim kartasida (faqat egaga). Bosilsa, bot shu xodimni siz deb biladi: uning kassasidan
+    foizingiz va boshqa xodimlardan ulushingiz «👑 Siz» kartasida birga; uning zp si «Xodimlar zp si»ga
+    qo'shilmaydi; «Проёб»ga ismsiz yozgan hisobotingiz — sizniki. Qaytarish: ⚙️ Sozlamalar → 🏷 Turi.
+  - **🤝 Artur (hamkor)** — botda «🤝 Hamkor» turida bo'lishi kerak (👥 Xodimlar → Artur → ⚙️ → 🏷 Turi). Shunda:
+    Artur — o'z ulushi (50%, yoki 🧮 Haftalik zp dagi «qolgani») + jarimalar − bonuslar (bonusni Artur to'laydi,
+    jarimalar unga). Belgilanmagan bo'lsa,
+    «💼 Siz» kartasida «⚠️ Artur (hamkor) botda belgilanmagan» chiqadi va 🧮 Tekshiruv ⚠️ bo'ladi.
   - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
     bitta qisqa qator (📌 doskadagi bilan bir xil: 🔴 задержка · 🟡 скоро задержка · ☕ перерыв · 🟢, «ждут N»).
-    Hammasi bitta ramkada. Menyu o‘z joyida, soniyasi bilan har 3 soniyada yangilanadi (tugma bosilgan paytda
-    tegmaydi). «🙋 Ishda — 3 / 4» — bugun ishlaydigan 4 xodimdan 3 tasi kelgan; «🚨 Bugungi zaderjkalar» — bugun
+    Hammasi bitta ramkada. Menyu o‘z joyida yangilanadi: 5 soniyada bir tekshiriladi, faqat raqam o'zgarsa
+    tahrirlanadi (tugma bosilgan paytda tegmaydi). Soatda soniya yo'q: har soniya tahrirlansa, Telegram tugmalarni
+    sekinlatadi. «🙋 Ishda — 3 / 4» — bugun ishlaydigan 4 xodimdan 3 tasi kelgan; «🚨 Bugungi zaderjkalar» — bugun
     nechta lid zaderjkaga tushgan (👥 Hozir ishda va 📊 hisobotlarda ham shu hisob).
     Kassa bo'limida — cheklar yig'indisi, har birining $ i va jami, 🏆 top 3.
   - **Kassa menyusi — 6 tugma** (ishlatilish tartibida): ❓ Savollar · ✅ Kunni yopish · 📊 Hisobot ·

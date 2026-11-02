@@ -638,7 +638,8 @@ async def month_report(ctx, r: Req):
     if r.owner and b["n"] and mz["ready"]:
         o = b["owner"]
         parts.append(card([f"<b>💼 {r.L('Siz', 'Вы')}</b> · <i>{r.L('faqat sizga ko‘rinadi', 'видно только вам')}</i>",
-                           f"{r.L('Artur', 'Артур')}: {money(o['partner_total'])} $",
+                           f"{r.L('Artur', 'Артур')}: {money(o['partner_total'])} $" if o["partner_id"] is not None
+                           else None,                     # hamkor yo'q — pastda «⚠️ Artur hisobga kirmagan»
                            f"{r.L('Daromadingiz', 'Ваш доход')}: <b>{money(o['income'])} $</b>"] + balance_lines(b, r.lang)))
     first, last = md["first"], md["last"]
     pm = (first - dt.timedelta(days=1))
@@ -708,6 +709,8 @@ def hist_line(ctx, r: Req, a, names: dict) -> str:
                "group": r.L(" · guruhdan", " · из группы")}.get(old, "")
         icon = "🎁" if new.startswith("bonus") else ("💸" if new.startswith("adv") else "⚠️")
         t = f"{icon} {pd}: {adj_txt(new)}{src}"
+    elif k == "adj_day":
+        t = f"📅 {who}: {adj_txt(new)} · {dm(old) if old else '?'} → <b>{day}</b>"
     elif k in ("adj_off", "adj_on"):
         t = (f"✖️ {pd}: {adj_txt(new)} {r.L('bekor qilindi', 'отменён')}" if k == "adj_off" else
              f"↩️ {pd}: {adj_txt(new)} {r.L('qaytarildi', 'возвращён')}")
@@ -1105,6 +1108,22 @@ async def q_adj(ctx, r: Req):
         return f"✅ {h(P.person(db, a['person_id'])['name'])}: {word} {money(a['usd'])} $"
     await F.ask_adj(ctx, aid)
     return None
+
+
+@screen("kam", "full")
+async def adj_move(ctx, r: Req):
+    """✍ Botga yozilgan jarima/bonus boshqa kunga: shu xabardan yozilganlarning hammasi (yopilgan kun — faqat ega)."""
+    db = ctx.db
+    mid, day = int(r.args[0]), dt.date.fromisoformat(r.args[1]).isoformat()
+    rows = db.all("SELECT * FROM adj WHERE chat_id=? AND msg_id=? AND pending=0", (r.chat_id, mid))
+    msg = locked(ctx, r, day, *[a["day"] for a in rows])
+    if msg:
+        return msg
+    for a in rows:
+        if a["day"] != day:
+            db.run("UPDATE adj SET day=? WHERE id=?", (day, a["id"]))
+            K.log(db, "adj_day", a["person_id"], day, a["id"], a["day"], f"{a['kind']} {float(a['usd']):g}")
+    return F.adj_saved(ctx, r.chat_id, mid)
 
 
 @screen("qp", "full")

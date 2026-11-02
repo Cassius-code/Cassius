@@ -68,5 +68,6 @@ async def live_staff(ctx, r: Req):
                  "✍️ последнее сообщение лиду · 🚨 задержки за сегодня</i>")
     body = card(["\n".join(lines)]) if lines else r.L("<i>Bugun ishlaydigan xodim yo'q.</i>",
                                                        "<i>Сегодня работающих сотрудников нет.</i>")
-    return ui.join(title("👥", r.L("HOZIR ISHDA", "СЕЙЧАС НА РАБОТЕ"), fmt(now, ctx.tz, "%H:%M:%S")), "", body,
+    # soniyasiz: faqat holat o'zgarganda tahrirlanadi (har 3 soniyada tahrir — tugmalar sekinlashardi)
+    return ui.join(title("👥", r.L("HOZIR ISHDA", "СЕЙЧАС НА РАБОТЕ"), fmt(now, ctx.tz, "%H:%M")), "", body,
                    legend), kb(nav(r))

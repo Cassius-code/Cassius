@@ -35,6 +35,13 @@ W = {
     "not_calc": ("🧮 Zp hali hisoblanmagan", "🧮 Зп ещё не рассчитана"),
     "zp_off_all": ("🧮 Zp hisoblash o'chiq — o'zingiz hisoblaysiz", "🧮 Расчёт зп выключен — считаете сами"),
     "adjs": ("Jarima · bonus · avans", "Штрафы · бонусы · авансы"),
+    "no_partner": ("Artur (hamkor) botda belgilanmagan — uning ulushi hisoblanmadi, jarima va bonuslar hech kimga "
+                   "yozilmadi. Belgilash: 👥 Xodimlar → Artur (yo'q bo'lsa — ➕ Yangi xodim) → ⚙️ Sozlamalar → "
+                   "🏷 Turi → 🤝 Hamkor",
+                   "Артур (партнёр) не отмечен в боте — его доля не посчитана, штрафы и бонусы никому не записаны. "
+                   "Отметить: 👥 Сотрудники → Артур (если нет — ➕ Новый сотрудник) → ⚙️ Настройки → 🏷 Тип → "
+                   "🤝 Партнёр"),
+    "no_partner_s": ("Artur hisobga kirmagan", "Артур не учтён"),
 }
 
 
@@ -238,15 +245,18 @@ def owner_card(b: dict, lang: str) -> str:
     names = b["names"]
     ptag = f" {pct(o['partner_pct'])}" if o["partner_pct"] is not None else ""
     lines = [f"<b>💼 {w('you', lang)}</b> · <i>{w('only_you', lang)}</i>",
-             f"{w('kassa', lang)}: <b>{num(b['raw'])}</b> → {money(o['K'])} $ <i>({w('by_price', lang)})</i>",
-             f"{w('partner', lang)}{ptag}: {money(o['partner_share'])} $"
-             + (f" + {w('fines_pl', lang)} {money(o['pf'])}" if o["pf"] else "")
-             + (f" − {w('bonuses_pl', lang)} {money(o['pb'])}" if o["pb"] else "")
-             + f" = <b>{money(o['partner_total'])} $</b>"]
-    if o["partner_paid"]:
-        lines.append(f"   ({w('pshares', lang)}: {money(o['partner_paid'])} $)")
-    lines += [f"{w('half' if o['partner_pct'] is not None else 'after_artur', lang)}: {money(o['half'])} $",
-              f"− {w('zps', lang)}: {money(o['zps'])} $"]
+             f"{w('kassa', lang)}: <b>{num(b['raw'])}</b> → {money(o['K'])} $ <i>({w('by_price', lang)})</i>"]
+    if o["partner_id"] is None:                     # hamkor yo'q: «Artur 50%: 0 $» deb chalg'itmaymiz
+        lines.append(f"⚠️ {w('no_partner', lang)}")
+    else:
+        lines.append(f"{w('partner', lang)}{ptag}: {money(o['partner_share'])} $"
+                     + (f" + {w('fines_pl', lang)} {money(o['pf'])}" if o["pf"] else "")
+                     + (f" − {w('bonuses_pl', lang)} {money(o['pb'])}" if o["pb"] else "")
+                     + f" = <b>{money(o['partner_total'])} $</b>")
+        if o["partner_paid"]:
+            lines.append(f"   ({w('pshares', lang)}: {money(o['partner_paid'])} $)")
+        lines.append(f"{w('half' if o['partner_pct'] is not None else 'after_artur', lang)}: {money(o['half'])} $")
+    lines.append(f"− {w('zps', lang)}: {money(o['zps'])} $")
     if o["owner_paid"]:
         lines.append(f"− {w('shares', lang)}: {money(o['owner_paid'])} $")
     if o["out_self"]:
@@ -261,7 +271,7 @@ def owner_card(b: dict, lang: str) -> str:
         lines.append(f"<b>{w('by_acct', lang)}</b>")
         for a in o["per_acct"]:
             nm = h(names.get(a["pid"], "?"))
-            parts = [f"{w('partner', lang)} {money(a['artur'] + a['pshare'])}"]
+            parts = [f"{w('partner', lang)} {money(a['artur'] + a['pshare'])}"] if o["partner_id"] is not None else []
             if a["zp"]:
                 parts.append(f"{w('zp', lang).lower()} {money(a['zp'])}")
             if a["share"]:
@@ -279,11 +289,12 @@ def balance_lines(b: dict, lang: str) -> list[str]:
     art = r2(o["partner_share"] + o["partner_paid"])
     tot = r2(art + o["zps"] + o["owner_paid"] + mine)
     ru = lang == "ru"
-    parts = [f"{w('partner', lang)} {money(art)}", f"{'зп' if ru else 'xodimlar'} {money(o['zps'])}"]
+    parts = ([f"{w('partner', lang)} {money(art)}"] if o["partner_id"] is not None else []) + \
+        [f"{'зп' if ru else 'xodimlar'} {money(o['zps'])}"]
     if o["owner_paid"]:
         parts.append(f"{w('share_s', lang)} {money(o['owner_paid'])}")
     parts.append(f"{w('to_you', lang)} {money(mine)}")
-    issues = []
+    issues = [f"⚠️ {w('no_partner_s', lang)}"] if o["partner_id"] is None else []
     noprice = sum(r["noprice"] for r in b["rows"].values())
     unassigned = sum(r["unassigned"] for r in b["rows"].values())
     if noprice:
