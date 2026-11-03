@@ -903,6 +903,13 @@ def week_rules(db: Database, week: dt.date) -> dict:
                           f"AND ch.pay IN ({q}) GROUP BY r.person_id", [w0, w1] + selfs):
             self_usd[row["acct"]] = float(row["usd"])
     self_pct = percent_on(db, selfs[0], week) if selfs else None
+    stand: dict = {}                         # akkaunt -> [(xodim, $)] — o'rniga boshqa xodim ishlagan cheklar
+    for row in db.all("SELECT r.person_id acct, ch.pay pay, COALESCE(SUM(ch.usd),0) usd FROM checks ch "
+                      "JOIN reports r ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? "
+                      "AND ch.pay IS NOT NULL AND ch.pay<>r.person_id GROUP BY r.person_id, ch.pay", (w0, w1)):
+        q = ps.get(row["pay"])
+        if q is not None and q["kassa_kind"] == "worker":
+            stand.setdefault(row["acct"], []).append((q, float(row["usd"])))
     kassa_sh: dict = {}                      # (acct, payer) -> % kassadan (siz yoki Artur to'laydi)
     sh_rows = shares(db, week=week)
     for sh in sh_rows:
@@ -915,14 +922,21 @@ def week_rules(db: Database, week: dt.date) -> dict:
             continue
         kind = p["kassa_kind"]
         wp = percent_on(db, p["id"], week) if kind in ("worker", "self") else None
-        op = owner_pct_on(db, p["id"], week)
+        op = raw_op = owner_pct_on(db, p["id"], week)
         if kind == "self" and op is None:
             op = 0.0
         it = {"pid": p["id"], "name": p["name"], "kind": kind, "n": a["n"], "usd": r2(a["usd"]), "raw": int(a["raw"]),
               "wpct": wp,
               "opct": op, "kshare": kassa_sh.get((p["id"], "partner"), 0.0),
               "kshare_owner": kassa_sh.get((p["id"], "owner"), 0.0), "zp_on": bool(p["zp_on"]),
-              "self_usd": r2(self_usd.get(p["id"], 0.0)) if kind != "self" else 0.0, "self_pct": self_pct}
+              "self_usd": r2(self_usd.get(p["id"], 0.0)) if kind != "self" else 0.0, "self_pct": self_pct,
+              "stand": []}
+        if kind != "pool":                   # o'rniga ishlaganlar: zp — o'z foizi, «siz %» — o'z akkauntidagi foiz
+            for q, u in sorted(stand.get(p["id"], []), key=lambda x: order.get(x[0]["id"], 10 ** 6)):
+                qo = owner_pct_on(db, q["id"], week)
+                it["stand"].append({"pid": q["id"], "name": q["name"], "usd": r2(u), "zp_on": bool(q["zp_on"]),
+                                    "wpct": percent_on(db, q["id"], week),
+                                    "opct": None if raw_op is None else (raw_op if qo is None else qo)})
         items.append(it)
         if kind == "worker" and p["zp_on"] and not wp:
             missing.append((p["id"], "acct"))
@@ -1117,7 +1131,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     Har akkaunt kassasi (kun bo'yicha) shunday bo'linadi:
     * haftalik foizlar kiritilgan (owner_pct bor): ishlagan xodim % + siz % → qolgani Arturga. Akkauntda siz o'zingiz
       ishlagan cheklar ($) — sizga o'z % ingiz, qolgani Arturga; ulardan «siz %» olinmaydi (egasi, 2026-11-02:
-      Bayzed 621 $, siz ishlagan 372 $: 372 × 50% + (621 − 372) × 14% = 186 + 34.86);
+      Bayzed 621 $, siz ishlagan 372 $: 372 × 50% + (621 − 372) × 14% = 186 + 34.86). Akkauntda o'rniga boshqa
+      xodim ishlagan bo'lsa — o'sha qismdan «siz %» ishlagan xodimning o'z akkauntidagi foiz (egasi, 2026-11-04);
     * eski usul (owner_pct yo'q): Artur — o'z foizi (50%), qolgani sizga (xodimlar zp si sizdan).
     Ulushlar: kassadan yoki zp dan; kim to'laydi — siz (owner), Artur (partner) yoki zp dan ushlanadi (deduct).
     """
@@ -1180,7 +1195,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         pr["earn"][key] = pr["earn"].get(key, 0.0) + usd
         z = usd * pp / 100
         base_zp[(payee, d)] = base_zp.get((payee, d), 0.0) + z
-        bucket = zp_ad.setdefault((c["acct"], d), {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0, "self_usd": 0.0})
+        bucket = zp_ad.setdefault((c["acct"], d), {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0, "self_usd": 0.0,
+                                                   "op_fix": 0.0})
         bucket["all"] += z
         if pr["kind"] == "self":
             bucket["self"] += z
@@ -1189,6 +1205,12 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             bucket["on"] += z
         else:
             bucket["off"] += z
+        if pr["kind"] != "self" and payee != c["acct"] and a["kind"] != "pool":
+            # o'rniga ishlagan: «siz %» — ishlagan odamning o'z akkauntidagi foiz (egasi, 2026-11-04: Adam o'rniga
+            # Cred ishlasa — 125 × 20% (Credniki), 14% (Adamniki) emas). Uning foizi yo'q bo'lsa — akkauntniki.
+            ow, oa = opct(payee, d), opct(c["acct"], d)
+            if ow is not None and oa is not None:
+                bucket["op_fix"] += usd * (ow - oa) / 100
         if payee != c["acct"]:
             a["paid_out"][payee] = a["paid_out"].get(payee, 0.0) + usd
             name = ps[payee]["name"]
@@ -1267,7 +1289,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     acct_split: dict = {}            # acct -> {"usd","artur","zp","share","pshare","mine"}
     artur_day: dict = {}
     modes = set()
-    zero = {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0, "self_usd": 0.0}
+    zero = {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0, "self_usd": 0.0, "op_fix": 0.0}
     for (acct, d) in set(acct_usd_day) | set(share_ad):
         u = acct_usd_day.get((acct, d), 0.0)
         z = zp_ad.get((acct, d), zero)
@@ -1280,7 +1302,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             if u:
                 modes.add("legacy")
         else:                                          # «siz %» — faqat boshqalar ishlagan qismidan
-            art = u - z["all"] - (u - z["self_usd"]) * op / 100
+            art = u - z["all"] - (u - z["self_usd"]) * op / 100 - z["op_fix"]
             if u:
                 modes.add("split")
         art_net = art - sh["partner"]

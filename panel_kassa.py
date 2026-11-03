@@ -1447,7 +1447,9 @@ def rule_lines(r: Req, w: dict, names: dict, partner: str) -> list[str]:
             head += f" <i>({you.lower()})</i>"
         usd = it["usd"]
         su = it.get("self_usd") or 0.0
-        base = None if usd is None else usd - su           # siz ishlagan qismisiz
+        stand = it.get("stand") or []
+        sub_usd = sum(x["usd"] for x in stand)
+        base = None if usd is None else usd - su - sub_usd   # siz va o'rniga ishlaganlar qismisiz
         head += f" · {num(it['raw'])} · <b>{money(usd)} $</b>"
         if it["kind"] == "worker":
             rest = 100 - (it["wpct"] or 0) - (it["opct"] or 0) - it["kshare"]
@@ -1456,7 +1458,8 @@ def rule_lines(r: Req, w: dict, names: dict, partner: str) -> list[str]:
                      f"{you} {pc(it['opct']) if it['opct'] is not None else '❓'}{pusd(base, it['opct'])}"]
         elif it["kind"] == "self":
             rest = 100 - (it["wpct"] or 0) - it["kshare"]
-            parts = [f"{you} {pc(it['wpct'])}{pusd(usd, it['wpct'])}"]
+            base = None if usd is None else usd - sub_usd
+            parts = [f"{you} {pc(it['wpct'])}{pusd(base, it['wpct'])}"]
         else:
             rest = None
             parts = [r.L("ishlagan xodim — o‘z %", "кто работал — свой %"),
@@ -1468,8 +1471,7 @@ def rule_lines(r: Req, w: dict, names: dict, partner: str) -> list[str]:
         if rest is None or miss:
             parts.append(f"{h(partner)} — {r.L('qolgani', 'остаток')}")
         else:
-            parts.append(f"{h(partner)} <b>{rest:g}%</b>{pusd(base if it['kind'] != 'self' else usd, rest)}"
-                         + (" ⚠️" if rest < 0 else ""))
+            parts.append(f"{h(partner)} <b>{rest:g}%</b>{pusd(base, rest)}" + (" ⚠️" if rest < 0 else ""))
         out.append(head)
         out.append("   " + " · ".join(parts))
         if su:
@@ -1478,6 +1480,13 @@ def rule_lines(r: Req, w: dict, names: dict, partner: str) -> list[str]:
                                    f"{h(partner)} — qolgani{pusd(su, 100 - sp)}",
                                    f"↳ вы работали: {money(su)} $ — вам {pc(sp)}{pusd(su, sp)}, "
                                    f"{h(partner)} — остаток{pusd(su, 100 - sp)}"))
+        for x in stand:                                     # o'rniga ishlagan: o'z foizi va «siz %» — o'zinikidan
+            nm, u, wp, op = h(x["name"]), x["usd"], x["wpct"] or 0, x["opct"]
+            zp = f"{nm} {pc(wp)}{pusd(u, wp)}" if x["zp_on"] else f"{nm} <i>{r.L('zp o‘zingiz', 'зп сами')}</i>"
+            mine = f"{pc(op)}{pusd(u, op)}" if op is not None else "❓"
+            left = pusd(u, 100 - wp - op) if op is not None else ""
+            out.append("   " + r.L(f"↳ {nm} ishlagan: {money(u)} $ — {zp}, sizga {mine}, {h(partner)} — qolgani{left}",
+                                   f"↳ работал {nm}: {money(u)} $ — {zp}, вам {mine}, {h(partner)} — остаток{left}"))
     for it in w["subs"]:
         out.append(f"<b>{h(it['name'])}</b> — {pc(it['wpct'])} <i>({r.L('boshqa akkauntda ishladi', 'работал на другом аккаунте')})</i>")
     return out
