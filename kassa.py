@@ -213,12 +213,21 @@ def looks_like_report(db: Database, text: str) -> bool:
     """«Проёб»dagi xabar kassa hisobotimi (ishga kelish sifatida sanalmaydi — kechki hisobot)."""
     try:
         _tag, body, _name = split_tag(db, text or "")
-        return is_report_like(body) and any(line_amounts(ln) for ln in body.splitlines())
+        lo = amount_floor(body)
+        return is_report_like(body) and any(line_amounts(ln, lo) for ln in body.splitlines())
     except Exception:
         return False
 
 
-def line_amounts(line: str) -> list[int]:
+AMOUNT_MIN = 300        # «Rd» siz matnda — 300 dan kichik son summa emas
+AMOUNT_MIN_RD = 100     # «Rd 04.11» li achotda va 🔗 chekda 3 xonali summa ham chek («39)290» — egasi, 2026-11-04)
+
+
+def amount_floor(text: str) -> int:
+    return AMOUNT_MIN_RD if has_rd(text) else AMOUNT_MIN
+
+
+def line_amounts(line: str, lo: int = AMOUNT_MIN) -> list[int]:
     if TOTAL_RE.search(line):
         return []
     body = line.rsplit("=", 1)[0] if "=" in line else line
@@ -226,7 +235,7 @@ def line_amounts(line: str) -> list[int]:
     out = []
     for m in NUM_RE.finditer(body):
         v = int(re.sub(r"\D", "", m.group(1)))
-        if 300 <= v <= 99999:
+        if lo <= v <= 99999:
             out.append(v)
     return out
 
@@ -235,7 +244,8 @@ def parse_report_ex(text: str, ref=None) -> list[tuple[dt.date, int, str | None]
     """Hisobot kuni = 'Rd dd.mm' (chekdan keyingi qatorda, shu qatorda yoki sarlavhada). Rd yo'q — ref (yozilgan kun).
     -> [(kun, summa, RD raqami | None)] — RD raqami «Rd3 04.11» dan (🎯 bonus har RD uchun alohida)."""
     ref = ref or dt.date.today()
-    ents = [(find_rd(line, ref), find_rd_no(line), line_amounts(line)) for line in text.splitlines()]
+    lo = amount_floor(text)
+    ents = [(find_rd(line, ref), find_rd_no(line), line_amounts(line, lo)) for line in text.splitlines()]
     mode, seen = "suffix", False
     for rd, _no, amts in ents:
         if rd and not amts:

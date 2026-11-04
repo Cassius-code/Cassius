@@ -174,7 +174,7 @@ async def on_worker_cb(ctx, cb, data: str) -> None:
         return
     if data.startswith("wd:"):                             # /gaz dan keyingi chek — qaysi kunga
         from . import wchecks
-        await wchecks.on_day_cb(ctx, cb, data, p)
+        await wchecks.on_day_cb(ctx, cb, data)
         return
     text, markup = worker_screen(ctx, user)
     await ui.show(ctx.bot, chat_id, text, markup, edit_id=cb.message.message_id)

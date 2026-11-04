@@ -388,11 +388,9 @@ def build_router(ctx) -> Router:
             from . import private
             await private.on_worker_cb(ctx, cb, data)
             return
-        if data.startswith("wd:"):                         # ega/admin cheki: /gaz dan keyin — qaysi kunga
+        if data.startswith("wd:"):                         # ega/admin chatidagi chek (pereslat ham): /gaz dan keyin — qaysi kunga
             from . import wchecks
-            me = wchecks.admin_person(ctx, uid, req.owner)
-            if me is not None:
-                await wchecks.on_day_cb(ctx, cb, data, me)
+            await wchecks.on_day_cb(ctx, cb, data)
             return
         chat = cb.message.chat.id
         ui.touch(chat)
@@ -520,10 +518,10 @@ def build_router(ctx) -> Router:
         from .kassa import ACTOR
         ACTOR.set(uid)
         if state is None and req.text:                     # ega/admin ham RD da ishlasa: 🔗 havolali chek, /gaz, /delete
-            from . import wchecks
+            from . import wchecks                          # va pereslat qilingan xodim cheki (o'sha xodimga)
             me = wchecks.admin_person(ctx, uid, req.owner)
             try:
-                if me is not None and await wchecks.on_admin_message(ctx, message, me):
+                if await wchecks.on_admin_message(ctx, message, me):
                     # menyu darhol pastga tushadi, havolalar tepada qoladi (egasi, 2026-11-04)
                     await render(req, await main_menu(ctx, req), fresh=True)
                     return

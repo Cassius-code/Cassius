@@ -183,7 +183,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     (`05.11 · RD 9 — kassa 22 000 → 20 $ · 11 rd → 15 $ = 35 $`), jami; xodimlar zp sisiz; davr tugmalari va 📄 PDF.
     Buni faqat siz ko'rasiz (adminlar, xodimlar va «Проёб» — yo'q). Summalar: `kbonus_kassa`, `kbonus_checks`.
   - **🔗 Xodim chekni botga yozadi** (shaxsiy chatda): topik havolasi va pastida summa
-    (`https://t.me/c/…/56` / `1950`, yoki `11) 1950`, `3.500`). Bot 👍 bosadi va hisoblab boradi; havoladan
+    (`https://t.me/c/…/56` / `1950`, yoki `11) 1950`, `3.500`; 3 xonali summa ham: `39)290`). Bot 👍 bosadi va
+    hisoblab boradi; havoladan
     RD va lid kelgan kun (topik ochilgan) aniqlanadi. Xato — o'sha xabarga javob qilib
     `/delete`: hisobdan chiqadi, xabar chatda qoladi, bot 👎 bosadi. Xabar tahrirlansa — bot qayta o'qib
     javob yozadi («✏️ Изменено: 2000 → 1970 ✅» yoki «✅ Принято»), u 5 daqiqada o'chadi. Kechqurun `/gaz` —
@@ -203,9 +204,15 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     so'ramaydi (faqat `1950` — sanani so'raydi). Guruhimizdan, lekin lid topigidan emas («General» yoki topiksiz
     xabar) havola — bot 🧐 bosadi (Telegram bermasa — 🤨), chek hisobga kirmaydi. Pereslat qilingan xabar — ichida havola
     va summa bo'lsa qabul qilinadi. «Проёб» `Rd3 11.10`, `Rd 3 11.10`, `Rd3.1 11.10` dagi sanani o'qiydi (eski
-    `Rd 11.10` avvalgidek). Xabar matni saqlanmaydi — faqat summa, topik raqami, RD va vaqt.
+    `Rd 11.10` avvalgidek); `Rd` li achotda 3 xonali summa ham chek (`03.11 290` / `Rd3 04.11`), `Rd` siz matnda —
+    avvalgidek 300 dan kichik son summa emas. Narxlar ro'yxatida yo'q summa (masalan 290) — bot narxini sizdan
+    so'raydi. Xabar matni saqlanmaydi — faqat summa, topik raqami, RD va vaqt.
     **Siz (ega) ham** RD da ishlasangiz — panel chatiga xuddi xodimdek yozing: havola + summa yoki havolasiz
     `1950 10.09` — 👍, «Когда пришёл лид?», tahrir, javob qilib `/delete`, `/gaz` (cheklar «👑 Bu menman» yozuvingizga).
+    Xodimning chekini (havola + summa) panel chatiga **pereslat** qilsangiz — chek asl yozgan xodimniki (Credning
+    cheki — Credga, sizga emas), kuni — u yozgan vaqt; o'sha xodimning `/gaz` achotiga kiradi. Bitta xabarni ikki
+    marta pereslat qilsangiz — bir marta sanaladi. Bot tanimaydigan odamniki — 👎 va «⚠️ «…» xodimlar ro'yxatida
+    yo'q». Pereslat chekka ham javob qilib `/delete`, lid kuni va «за какой день?» ishlaydi.
     Tepasida ism bilan yoki `Rd 04.11` bilan yozilgan achot esa avvalgidek darhol kassaga: `Adam` + achot — Adam
     akkauntiga, o'z nomingiz + achot (yoki o'z `/gaz` achotingiz) — sizning kassangizga. Ism bilan yozganda sana faqat
     `Rd 04.11` ko'rinishida (ismdan keyin `1950 10.09` desangiz — 10.09 chek kuni deb olinadi). Kassada yozuvi bor

@@ -13,6 +13,8 @@
       Rd3 04.11
   Xodim uni «Проёб»ga tashlaydi — kassa o'sha yerda hozirgidek hisoblanadi. Havola qaysi RD dan bo'lishidan qat'i
   nazar kassa ham, zp ham achotni tashlagan xodimniki (egasi, 2026-11-04). Bu yerda kassaga hech narsa yozilmaydi.
+* Summa 3 xonali ham bo'ladi («39)290» — egasi, 2026-11-04).
+* Ega chatiga pereslat qilingan chek — asl yozgan xodimniki va o'sha yozilgan vaqt bilan (Credning cheki — Credga).
 Xabar matni saqlanmaydi: faqat summa, topik raqami, RD va vaqt."""
 from __future__ import annotations
 
@@ -42,7 +44,7 @@ def _amounts(seg: str) -> list[int]:
     seg = NUMBERING.sub(" ", seg)
     out: list[int] = []
     for line in seg.splitlines():
-        out += K.line_amounts(line)
+        out += K.line_amounts(line, K.AMOUNT_MIN_RD)
     return out
 
 
@@ -58,7 +60,7 @@ def _plain(text: str, ref) -> list[dict]:
     out, pend, i = [], None, 0
     while i < len(lines):
         ln = NUMBERING.sub(" ", lines[i])
-        amts, ds = K.line_amounts(ln), K.parse_dates(ln, ref)
+        amts, ds = K.line_amounts(ln, K.AMOUNT_MIN_RD), K.parse_dates(ln, ref)
         if not amts:
             pend = ds[0] if ds and DATE_ONLY.fullmatch(lines[i]) else None
             i += 1
@@ -160,9 +162,10 @@ async def _drop_ask(ctx, chat_id: int, rows) -> None:
             pass
 
 
-async def on_lead_date(ctx, message, p) -> bool:
+async def on_lead_date(ctx, message) -> bool:
     """Xodim lid kelgan kunni yozdi («10.09»): savolga yoki chekka javob qilib — o'sha chekka, oddiy yozsa — oxirgi
-    so'ralgan chekka. -> ishlandimi."""
+    so'ralgan chekka. Chek shu chatdagi xabar bo'yicha topiladi (ega chatida — pereslat qilingan xodim cheki ham).
+    -> ishlandimi."""
     db = ctx.db
     text = message.text or ""
     if not DATE_ONLY.fullmatch(text):
@@ -173,18 +176,18 @@ async def on_lead_date(ctx, message, p) -> bool:
         return False
     chat_id = message.chat.id
     rt = getattr(message, "reply_to_message", None)
-    base = "SELECT * FROM wchecks WHERE chat_id=? AND person_id=? AND deleted=0 AND topic_ts IS NULL"
+    base = "SELECT * FROM wchecks WHERE chat_id=? AND deleted=0 AND topic_ts IS NULL"
     if rt is not None:
-        rows = db.all(base + " AND (ask_mid=? OR msg_id=?)", (chat_id, p["id"], rt.message_id, rt.message_id))
+        rows = db.all(base + " AND (ask_mid=? OR msg_id=?)", (chat_id, rt.message_id, rt.message_id))
     else:
         last = db.one(base + " AND ask_mid IS NOT NULL AND lead_ts IS NULL ORDER BY ts DESC, msg_id DESC LIMIT 1",
-                      (chat_id, p["id"]))
-        rows = db.all(base + " AND msg_id=?", (chat_id, p["id"], last["msg_id"])) if last else []
+                      (chat_id,))
+        rows = db.all(base + " AND msg_id=?", (chat_id, last["msg_id"])) if last else []
     if not rows:
         return False
     lead = int(dt.datetime.combine(days[0], dt.time(12), tzinfo=ctx.tz).timestamp())
-    db.run("UPDATE wchecks SET lead_ts=?, ask_mid=NULL WHERE chat_id=? AND msg_id=? AND person_id=?",
-           (lead, chat_id, rows[0]["msg_id"], p["id"]))
+    db.run("UPDATE wchecks SET lead_ts=?, ask_mid=NULL WHERE chat_id=? AND msg_id=?",
+           (lead, chat_id, rows[0]["msg_id"]))
     await _drop_ask(ctx, chat_id, rows)
     await react(ctx, chat_id, message.message_id, "👍")
     await note(ctx, chat_id, f"✅ Дата лида: {days[0]:%d.%m}", reply_to=rows[0]["msg_id"])
@@ -276,12 +279,18 @@ async def on_message(ctx, message, p) -> bool:
         if any(x["reported_ts"] for x in rows):            # achotga kirgan edi — kassada ham to'g'rilanadi
             await kassa_sync(ctx, p, chat_id, rt.message_id, rows[0]["day"], [x["amount"] for x in rows], [])
         return True
-    if await on_lead_date(ctx, message, p):                # «10.09» — lid kelgan kun (bot so'ragan edi)
+    if await on_lead_date(ctx, message):                   # «10.09» — lid kelgan kun (bot so'ragan edi)
         return True
     sent_ts = int(message.date.timestamp())
     items = parse(text, local_date(sent_ts, ctx.tz))
     if not items:
         return False
+    return await _accept(ctx, message, p, items, sent_ts)
+
+
+async def _accept(ctx, message, p, items: list[dict], sent_ts: int) -> bool:
+    """Cheklarni yozish va javob: 👍 / 🧐 / 👎, kerak bo'lsa «Когда пришёл лид?» va «за какой день?»."""
+    chat_id = message.chat.id
     n, unknown, general = _store(ctx, p, chat_id, message.message_id, sent_ts, items)
     if general:                                            # «General» havolasi — lid topigi emas (egasi: 🧐)
         await react(ctx, chat_id, message.message_id, "🧐", "🤨")
@@ -320,8 +329,9 @@ async def ask_day(ctx, chat_id: int, msg_id: int, p, sent_ts: int) -> None:
         log.info("Kun savoli yuborilmadi: %s", exc)
 
 
-async def on_day_cb(ctx, cb, data: str, p) -> None:
-    """«wd:<chek xabari>:<kun>» — /gaz dan keyingi chek kuni tanlandi."""
+async def on_day_cb(ctx, cb, data: str) -> None:
+    """«wd:<chek xabari>:<kun>» — /gaz dan keyingi chek kuni tanlandi (shu chatdagi chek; ega chatida — pereslat
+    qilingan xodim cheki ham)."""
     try:
         _w, mid_s, ymd = data.split(":")
         day = dt.date(int(ymd[:4]), int(ymd[4:6]), int(ymd[6:8])).isoformat()
@@ -329,8 +339,8 @@ async def on_day_cb(ctx, cb, data: str, p) -> None:
     except (ValueError, IndexError):
         return
     chat_id = cb.message.chat.id
-    n = ctx.db.run("UPDATE wchecks SET day=? WHERE chat_id=? AND msg_id=? AND person_id=? AND deleted=0",
-                   (day, chat_id, mid, p["id"])).rowcount
+    n = ctx.db.run("UPDATE wchecks SET day=? WHERE chat_id=? AND msg_id=? AND deleted=0",
+                   (day, chat_id, mid)).rowcount
     try:
         await ctx.bot.delete_message(chat_id=chat_id, message_id=cb.message.message_id)
     except Exception:
@@ -397,20 +407,97 @@ def admin_person(ctx, uid: int | None, owner: bool):
     return q if q is not None and q["active"] and q["kassa_kind"] else None
 
 
+def _own(message, fo) -> bool:
+    """Pereslat qilingan xabar o'zinikimi (ega o'z xabarini pereslat qilgan)."""
+    u = getattr(fo, "sender_user", None)
+    return u is not None and message.from_user is not None and u.id == message.from_user.id
+
+
+def forward_person(ctx, fo):
+    """Pereslat qilingan chek kimniki: Telegram ID / @username bo'yicha (xodim botga o'zi yozgandagidek); topilmasa
+    yoki yashirin akkaunt (faqat ism ko'rinadi) — ismi bitta xodimga aniq to'g'ri kelsa. -> xodim | None (noma'lum)."""
+    from . import people as P
+    db = ctx.db
+    u = getattr(fo, "sender_user", None)
+    if u is not None:
+        q = P.identify(db, u.id, u.username)
+        if q is not None:
+            return q if q["active"] else None
+        names = [" ".join(x for x in (u.first_name, u.last_name) if x), u.first_name]
+    else:
+        names = [getattr(fo, "sender_user_name", None)]
+    keys = {P._key(x) for x in names} - {""}
+    hits = [q for q in P.people(db) if keys & {P._key(q["name"]), P._key(q["username"])}]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _fwd_name(fo) -> str:
+    u = getattr(fo, "sender_user", None)
+    if u is not None:
+        return " ".join(x for x in (u.first_name, u.last_name) if x) or u.username or "?"
+    chat = getattr(fo, "sender_chat", None) or getattr(fo, "chat", None)
+    return getattr(fo, "sender_user_name", None) or getattr(chat, "title", None) or "?"
+
+
+async def on_forward(ctx, message, fo) -> bool:
+    """Ega/admin chatiga pereslat qilingan chek (egasi, 2026-11-04: Credning «39)290» chekini pereslat qildi) — asl
+    yozgan xodimniki, kuni — o'sha yozilgan vaqt (kassa hisobotidagidek, kassa_flow.private_entry). Kassa hisoboti
+    («Rd 04.11» yoki ism bilan) va oddiy matn — avvalgidek (False). Shu xabar qayta pereslat qilinsa — ikki marta
+    sanalmaydi. -> ishlandimi."""
+    text = message.text or message.caption or ""
+    if not LINK_RE.search(text) and (K.RD_FIND.search(text) or K.split_tag(ctx.db, text)[2]):
+        return False
+    date = getattr(fo, "date", None)
+    sent_ts = int(date.timestamp()) if date else int(message.date.timestamp())
+    items = parse(text, local_date(sent_ts, ctx.tz))
+    if not items:
+        return False
+    chat_id, mid = message.chat.id, message.message_id
+    who = forward_person(ctx, fo)
+    if who is None:                                        # bot bilmaydigan odam — egasiga yozilib ketmasin
+        from .kassa_flow import L
+        name = _fwd_name(fo)
+        await react(ctx, chat_id, mid, "👎")
+        await note(ctx, chat_id, L(ctx, f"⚠️ «{name}» xodimlar ro'yxatida yo'q — chek kimniki, bilmadim. Qabul "
+                                        "qilinmadi.",
+                                   f"⚠️ «{name}» нет в списке сотрудников — не знаю, чей это чек. Не принят."),
+                   reply_to=mid)
+        return True
+    amts = sorted(a for it in items for a in it["amounts"])
+    old = sorted(x["amount"] for x in ctx.db.all("SELECT amount FROM wchecks WHERE person_id=? AND ts=? AND deleted=0",
+                                                  (who["id"], sent_ts)))
+    if amts and old == amts:                               # shu chek allaqachon hisobda (qayta pereslat qilindi)
+        await react(ctx, chat_id, mid, "👍")
+        return True
+    return await _accept(ctx, message, who, items, sent_ts)
+
+
 async def on_admin_message(ctx, message, p) -> bool:
     """Ega/admin panel chatida (egasi, 2026-11-04: «man ham RD da ishlayapman»): 🔗 havolali chek, ismsiz va «Rd» siz
     raqam («1950 10.09» — xodimdagidek), /gaz, javob qilib /delete, «Когда пришёл лид?» ga sana. Tepasida ism yoki
-    «Rd» bilan yozilgan achot — avvalgidek to'g'ridan-to'g'ri kassa hisoboti (kassa_flow). -> ishlandimi."""
+    «Rd» bilan yozilgan achot — avvalgidek to'g'ridan-to'g'ri kassa hisoboti (kassa_flow). Pereslat qilingan chek —
+    asl yozgan xodimniki (on_forward). p — ega/adminning kassadagi yozuvi; yo'q bo'lsa (None) — faqat pereslat
+    qilingan cheklar, ularga /delete va lid kuni. -> ishlandimi."""
     text = message.text or message.caption or ""
+    fo = getattr(message, "forward_origin", None)
+    if fo is not None and not _own(message, fo):
+        return await on_forward(ctx, message, fo)
     cmd = _cmd(text)
+    rt = getattr(message, "reply_to_message", None)
+    if cmd in CMD_DEL and rt is not None:                  # javob qilib /delete — chek kimniki bo'lsa (pereslat ham)
+        row = ctx.db.one("SELECT person_id FROM wchecks WHERE chat_id=? AND msg_id=? LIMIT 1",
+                         (message.chat.id, rt.message_id))
+        if row is not None:
+            from . import people as P
+            who = P.person(ctx.db, row["person_id"])
+            if who is not None:
+                return await on_message(ctx, message, who)
+    if DATE_ONLY.fullmatch(text):                          # bot so'ragan lid kuni
+        return await on_lead_date(ctx, message)
+    if p is None:
+        return False
     if cmd in CMD_GAZ or LINK_RE.search(text):
         return await on_message(ctx, message, p)
-    rt = getattr(message, "reply_to_message", None)
-    if cmd in CMD_DEL and rt is not None and ctx.db.one(
-            "SELECT 1 FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=?", (message.chat.id, rt.message_id, p["id"])):
-        return await on_message(ctx, message, p)
-    if DATE_ONLY.fullmatch(text):                          # bot so'ragan lid kuni
-        return await on_lead_date(ctx, message, p)
     # ismsiz va «Rd» siz raqam («1950 10.09») — xodimdagidek chek (egasi, 2026-11-04). Tepasida ism («Adam» / o'z
     # nomi) yoki «Rd 04.11» bo'lsa — avvalgidek darhol o'sha akkauntga kassa hisoboti (kassa_flow)
     if not K.RD_FIND.search(text) and not K.split_tag(ctx.db, text)[2] and \
