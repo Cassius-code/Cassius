@@ -222,7 +222,7 @@ async def report_done_panel(ctx, r, rid: int):
     days = K.report_days(db, rid)
     lines = []
     for d in days if p else []:
-        lines += ([""] if lines else []) + day_brief(ctx, p["id"], d).split("\n")
+        lines += ([""] if lines else []) + day_brief(ctx, p["id"], d, r.owner).split("\n")
     lines = lines or ["?"]
     btn = [[(L(ctx, "📅 Kun", "📅 День"), f"kdd:{days[0]}") if days else None,
             (f"👤 {p['name']}", f"po:{p['id']}") if p else None],
@@ -454,19 +454,29 @@ async def finalize(ctx, rid: int) -> None:
         ids = _who_can_see(ctx, pid)
         if r["chat_id"] and r["chat_id"] > 0:
             ids = [u for u in ids if u != r["chat_id"]]   # botga o'zi yozgan — unga «✅ Qabul qilindi» ekrani bor
+        own = set(ctx.notifier.owner_ids())
         for d in K.report_days(db, rid):
-            def build_brief(d=d):
-                return day_brief(ctx, pid, d), kb([(L(ctx, "👤 Kabinet", "👤 Кабинет"), f"po:{pid}")])
-            await _send(ctx, ids, build_brief, key=f"kb:{pid}:{d}")    # shu kunning eski xulosasi o'chadi
+            def build_brief(d=d, owner=False):
+                return day_brief(ctx, pid, d, owner), kb([(L(ctx, "👤 Kabinet", "👤 Кабинет"), f"po:{pid}")])
+            others = [u for u in ids if u not in own]
+            if others:
+                await _send(ctx, others, build_brief, key=f"kb:{pid}:{d}")    # shu kunning eski xulosasi o'chadi
+            else:
+                await ctx.notifier.resolve(f"kb:{pid}:{d}")    # oldingi (bonussiz) nusxa qolmasin
+            mine = [u for u in ids if u in own]                 # egasiga — 🎯 kassa bonusi bilan (faqat egasi biladi)
+            if mine:
+                await _send(ctx, mine, lambda d=d: build_brief(d, True), key=f"kbo:{pid}:{d}")
 
 
 def n3(v) -> str:
     return f"{int(v):,}"                                   # 17,100 — eski kassa botidagidek
 
 
-def day_brief(ctx, pid: int, day: str) -> str:
+def day_brief(ctx, pid: int, day: str, owner: bool = False) -> str:
     """Xodimning shu kungi xulosasi (eski kassa botidagidek): ism, sana, kassa, RD soni, kassa ($).
-    Shu kunning hamma qabul qilingan hisobotlari bo'yicha. Umumiy akkaunt — kim ishlagani ham."""
+    Shu kunning hamma qabul qilingan hisobotlari bo'yicha. Umumiy akkaunt — kim ishlagani ham.
+    owner — egasining nusxasi: 🎯 kassa bonusi (Arturniki, faqat egasi ko'radi; egasi, 2026-11-04):
+    «Касса: 22,560 = 20$+», «Бонус: 20$», «Итого: 88 + 20 = 108$»."""
     db = ctx.db
     p = P.person(db, pid)
     if p is None:
@@ -478,11 +488,19 @@ def day_brief(ctx, pid: int, day: str) -> str:
         if x["pay"] and x["pay"] != pid and x["pay"] not in ops:
             ops.append(x["pay"])
     pool = p["kassa_kind"] == "pool"
+    raw, usd = sum(x["amount"] for x in rows), sum(x["usd"] or 0 for x in rows)
+    kb, cb = K.day_bonus(db, raw, len(rows)) if owner else (0.0, 0.0)
     lines = [f"<b>{h(p['name'])}</b>" + (L(ctx, " (umumiy akkaunt)", " (общий аккаунт)") if pool else ""),
              f"{L(ctx, 'Sana', 'Дата')}: {day[8:10]}.{day[5:7]}",
-             f"{L(ctx, 'Kassa', 'Касса')}: {n3(sum(x['amount'] for x in rows))}",
-             f"{L(ctx, 'RD soni', 'Кол-во рд')}: {len(rows)}",
-             f"{L(ctx, 'Kassa ($)', 'Касса ($)')}: {money(sum(x['usd'] or 0 for x in rows))}$"]
+             f"{L(ctx, 'Kassa', 'Касса')}: {n3(raw)}" + (f" = {money(kb)}$+" if kb else ""),
+             f"{L(ctx, 'RD soni', 'Кол-во рд')}: {len(rows)}" + (f" = {money(cb)}$+" if cb else "")]
+    if kb or cb:
+        parts = [f"{money(x)}$" for x in (kb, cb) if x]
+        lines.append(f"{L(ctx, 'Bonus', 'Бонус')}: " + (" + ".join(parts) + f" = {money(kb + cb)}$" if len(parts) > 1
+                                                       else parts[0]))
+    lines.append(f"{L(ctx, 'Kassa ($)', 'Касса ($)')}: {money(usd)}$")
+    if kb or cb:
+        lines.append(f"{L(ctx, 'Jami', 'Итого')}: {money(usd)} + {money(kb + cb)} = {money(usd + kb + cb)}$")
     if ops:
         names = [P.person(db, i) for i in ops]
         lines.append(f"{L(ctx, 'Ishladi', 'Работал')}: " + ", ".join(h(q["name"]) for q in names if q is not None))

@@ -2,7 +2,8 @@
 
 Xodim: «💰 Моя зарплата» — so'rov AVVAL egaga boradi, ega ✅ bossa xodimga faqat o'z zp/jarima/bonus/avansi yuboriladi.
 Begona: «📨 Запросить доступ» — egaga so'rov (xodimga bog'lash / yangi xodim / admin / rad etish).
-Xodim xabarlari matni saqlanmaydi.
+Xodim xabarlari matni saqlanmaydi. Istisno — 🔗 chek (topik havolasi + summa), /delete va /gaz (wchecks.py):
+bulardan ham faqat summa, topik raqami va vaqt olinadi.
 """
 from __future__ import annotations
 
@@ -34,7 +35,9 @@ def worker_screen(ctx, user) -> tuple[str, object]:
     p = _person(ctx, user)
     if p is not None and p["active"]:
         text = ui.join(f"<b>👋 {h(p['name'])}</b>", "", card(
-            ["Здесь можно запросить расчёт зарплаты.", "Запрос сначала увидит руководитель."]))
+            ["Здесь можно запросить расчёт зарплаты.", "Запрос сначала увидит руководитель."]), card(
+            ["🔗 Чек: ссылка на топик и под ней сумма — бот поставит 👍.",
+             "Ошибка — ответьте на чек /delete. Вечером /gaz — готовый отчёт для «Проёб»."]))
         return text, kb([("💰 Моя зарплата", "w:zp")], [("🆔 Мой ID", "w:id")])
     text = ui.join("<b>🔒 RD CONTROL</b>", "", card(
         ["Бот только для сотрудников.", "Нажмите кнопку — руководитель получит запрос."]))
@@ -47,9 +50,18 @@ async def on_start(ctx, message) -> None:
 
 
 async def on_text(ctx, message) -> None:
-    """Matn saqlanmaydi va o'qilmaydi — faqat menyu qayta ko'rsatiladi."""
+    """Matn saqlanmaydi va o'qilmaydi — faqat menyu qayta ko'rsatiladi. Xodimning 🔗 cheki (havola + summa),
+    /delete va /gaz — wchecks (xabar chatda qoladi)."""
     if message.from_user is None:
         return
+    p = _person(ctx, message.from_user)
+    if p is not None and p["active"]:
+        from . import wchecks
+        try:
+            if await wchecks.on_message(ctx, message, p):
+                return
+        except Exception:
+            log.exception("Xodim cheki")
     try:
         await message.delete()
     except Exception:
@@ -61,6 +73,20 @@ async def on_text(ctx, message) -> None:
 def _open_request(db, kind: str, tg_id: int):
     return db.one("SELECT * FROM requests WHERE kind=? AND tg_id=? AND status='open' ORDER BY id DESC LIMIT 1",
                   (kind, tg_id))
+
+
+async def on_edit(ctx, message) -> None:
+    """Xodim 🔗 chek xabarini tahrirladi — bot qayta o'qiydi (wchecks)."""
+    if message.from_user is None:
+        return
+    p = _person(ctx, message.from_user)
+    if p is None or not p["active"]:
+        return
+    from . import wchecks
+    try:
+        await wchecks.on_edit(ctx, message, p)
+    except Exception:
+        log.exception("Xodim cheki (tahrir)")
 
 
 async def on_worker_cb(ctx, cb, data: str) -> None:

@@ -169,6 +169,21 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   - Har hisobotdan keyin sizga xodimning shu kungi xulosasi keladi (eski kassa botidagidek):
     `Adam` / `Дата: 19.10` / `Касса: 17,100` / `Кол-во рд: 8` / `Касса ($): 64$`. Shu kunga yana hisobot kelsa —
     eskisi o'chadi, kunning jami bilan yangisi keladi.
+  - **🎯 Kassa bonusi — Arturniki.** Bir akkauntning bir kunlik kassasi 20 000 va undan ko'p — 20 $, 27 000 va
+    undan ko'p — 30 $ (20 o'rniga); 11 va undan ko'p chek — yana 15 $. Sizga keladigan xulosada:
+    `Касса: 22,560 = 20$+` / `Кол-во рд: 8` / `Бонус: 20$` / `Касса ($): 88$` / `Итого: 88 + 20 = 108$`.
+    Bonus haftalik hisobda Artur jamisiga qo'shiladi («🎯 Arturga kassa bonuslari: 35 $ · Artur jami …» —
+    📋 To'lov ro'yxatida ham), daromadingiz va xodimlar zp si o'zgarmaydi. Buni faqat siz ko'rasiz (adminlar,
+    xodimlar va «Проёб» — yo'q). Summalar: `kbonus_kassa`, `kbonus_checks` sozlamalari.
+  - **🔗 Xodim chekni botga yozadi** (shaxsiy chatda): topik havolasi va pastida summa
+    (`https://t.me/c/…/56` / `1950`, yoki `11) 1950`, `3.500`). Bot 👍 bosadi va hisoblab boradi; havoladan
+    RD (kimning akkaunti) va lid kelgan kun (topik ochilgan) aniqlanadi. Xato — o'sha xabarga javob qilib
+    `/delete`: hisobdan chiqadi, xabar chatda qoladi, bot 👎 bosadi. Xabar tahrirlansa — bot qayta o'qib
+    javob yozadi («✏️ Изменено: 2000 → 1970 ✅» yoki «✅ Принято»), u 5 daqiqada o'chadi. Kechqurun `/gaz` —
+    bot tayyor achot beradi, har akkaunt alohida: `Adam` / `10.09 1950` / `Rd 04.11` (bo'sh qator, keyingi chek).
+    Xodim uni «Проёб»ga tashlaydi — kassa o'sha yerda hozirgidek hisoblanadi (Adam akkaunti, zp ishlagan xodimga).
+    Topik topilmasa — chek qabul qilinadi, achotda lid kuni bo'lmaydi, xodimga «⚠️ Топик не найден». Xabar matni
+    saqlanmaydi — faqat summa, topik raqami va vaqt.
   - Pul amallari (to'landi, avans, ulushlar, foizlar) — faqat siz. Adminlar cheklarni tuzatadi.
   - Xodim faqat o'z zp sini ko'radi, so'rov avval sizga keladi. Daromadingizni faqat siz ko'rasiz.
   - **👤 Xodim kabineti** (👥 Xodimlar → xodim): kassa, Кол-во рд, Kassa ($), bonus, jarimalar va zp — 🧮 hafta

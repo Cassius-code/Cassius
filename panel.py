@@ -441,6 +441,15 @@ def build_router(ctx) -> Router:
             return
         await message.answer(f"🆔 <code>{message.from_user.id}</code>", parse_mode="HTML")
 
+    @r.edited_message(F.chat.type == "private")
+    async def on_private_edit(message: Message) -> None:
+        """Xodim 🔗 chek xabarini tahrirladi (adminlar — panel, ularga tegilmaydi)."""
+        uid = message.from_user.id if message.from_user else None
+        if make_req(ctx, uid, message.chat.id).level:
+            return
+        from . import private
+        await private.on_edit(ctx, message)
+
     @r.message(F.chat.type == "private")
     async def on_message(message: Message) -> None:
         if await locked_input(message):

@@ -1030,6 +1030,33 @@ def zp_state(db: Database, start: dt.date, end: dt.date, today: dt.date) -> dict
     return {"ready": not weeks, "mode": mode, "weeks": weeks}
 
 
+# ───────────────────────── 🎯 kunlik kassa bonusi — Arturniki (egasi, 2026-11-04)
+def _limits(raw: str) -> list[tuple[float, float]]:
+    """«20000=20 27000=30» -> [(20000, 20), (27000, 30)]."""
+    out = []
+    for p in (raw or "").replace(",", " ").split():
+        a, _, b = p.partition("=")
+        try:
+            out.append((float(a), float(b)))
+        except ValueError:
+            continue
+    return sorted(out)
+
+
+def day_bonus(db: Database, raw: int, n: int) -> tuple[float, float]:
+    """Bir akkauntning bir kunlik bonusi: (kassa uchun, chek soni uchun) $. Kassa 20 000 va undan ko'p — 20 $,
+    27 000 va undan ko'p — 30 $ (20 o'rniga); 11 va undan ko'p chek — yana 15 $. Bonus Arturga qo'shiladi (haftalik
+    hisobda ham), xodimlarga daxli yo'q va faqat egasi ko'radi."""
+    kb = cb = 0.0
+    for lim, usd in _limits(db.get("kbonus_kassa")):
+        if raw >= lim:
+            kb = usd
+    for lim, usd in _limits(db.get("kbonus_checks")):
+        if n >= lim:
+            cb = usd
+    return kb, cb
+
+
 # ───────────────────────── «oylik berildi» davrlari
 def last_payout(db: Database, pid: int):
     return db.one("SELECT * FROM payouts WHERE person_id=? ORDER BY upto_day DESC, id DESC LIMIT 1", (pid,))
@@ -1250,6 +1277,15 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         if r["kind"] in PAYABLE:
             r["zp"] = r2(sum(u * p / 100 for (_acct, p), u in r["earn"].items()))
 
+    # 🎯 kunlik kassa bonuslari (har akkaunt × kun) — Arturga
+    kb_items = []
+    for pid, r in rows.items():
+        for d, dd in r["days"].items():
+            kb, cb = day_bonus(db, dd["raw"], dd["n"])
+            if kb or cb:
+                kb_items.append({"acct": pid, "day": d, "raw": dd["raw"], "n": dd["n"], "kassa": kb, "checks": cb})
+    kbonus = r2(sum(x["kassa"] + x["checks"] for x in kb_items)) if partner is not None else 0.0
+
     # jarima / bonus / avans
     rd_of: dict = {}                 # odam (akkaunt) -> papkalari (RD): «RD 7, RD 9» — hisobda qaysi papkadan ekani
     for x in db.all("SELECT fp.person_id pid, f.name FROM folder_people fp JOIN folders f ON f.id=fp.folder_id "
@@ -1380,8 +1416,9 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
                             + r["sin_sum"] - r["sout_sum"])
         elif r["kind"] == "partner":
             r["pf"], r["pb"] = pf, pb
+            r["kbonus"] = kbonus                       # 🎯 kassa bonuslari ham Arturga (egasi, 2026-11-04)
             r["total"] = r2(r["share_part"] + pf - pb - r["fine"] + r["bonus"] - r["adv"] - r["tr_out"] + r["tr_in"]
-                            + r["sin_sum"])            # Arturga yozilgan ulush ham (egasi, 2026-11-04)
+                            + r["sin_sum"] + kbonus)   # Arturga yozilgan ulush ham (egasi, 2026-11-04)
 
     K = r2(sum(acct_usd_day.values()))
     me = next((r for r in rows.values() if r["kind"] == "self"), None)
@@ -1420,6 +1457,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
              # boshqa akkauntlarda «siz %» bor, bularda yo'q — eski usulda hisoblandi (egasi, 2026-11-04: ogohlantirish)
              "no_opct": [ps[x]["name"] for x in sorted(no_op, key=lambda x: ps[x]["name"].lower())]
              if "split" in modes else [], "no_opct_pp": partner_pct_of(db, partner, e) if partner else None,
+             "kbonus": kbonus, "kbonus_items": kb_items if partner is not None else [],
              "mine": mine, "self_zp": me["zp"] if me else 0.0, "per_acct": per_acct, "unknown_zp": unknown,
              "partner_id": partner["id"] if partner else None,
              "partner_total": rows[partner["id"]]["total"] if partner else 0.0,

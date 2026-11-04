@@ -21,6 +21,9 @@ DEFAULTS: dict[str, str] = {
     "fine_late_table": "30=10 40=15 60=25 120=50",   # 🕘 kech qolish: necha daqiqa kech = necha $ (o'sha daqiqadan
                                      # boshlab; birinchisidan kam — 0 $). Egasi bergan summalar (2026-10-30); bo'sh — jarimasiz
     "late_after_min": "15",          # shuncha daqiqa va undan ko'p kech kelsa — «kech qoldi» (kamiga xabar ham yo'q)
+    "kbonus_kassa": "20000=20 27000=30",   # 🎯 kunlik kassa bonusi (Arturga, egasi 2026-11-04): akkauntning kunlik
+                                     # kassasi (cheklar yig'indisi) shundan ko'p — $ (eng kattasi: 27 000 — 30 $, 20 o'rniga)
+    "kbonus_checks": "11=15",        # 🎯 kunlik chek soni shundan ko'p — yana $ (kassa bonusiga qo'shiladi)
     "break_words": "",               # ☕ egasi qo'shgan tanaffus so'zlari (botning o'zi taniydiganlardan tashqari)
     "back_words": "",                # ☕ egasi qo'shgan «qaytdim» so'zlari
     "clean_delay_min": "10",         # 🧹 «задержка» xabari javobdan shuncha daqiqa keyin o'chadi (0 — o'chmaydi)

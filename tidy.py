@@ -16,8 +16,11 @@ DELAY_CHOICES = (0, 5, 10, 15, 30, 60)
 INFO_CHOICES = (0, 30, 60, 120, 180)
 
 
+NOTE_MIN = 5                 # p5 — xodimga shaxsiy chatdagi qisqa javob («✏️ Изменено …») 5 daqiqada o'chadi
+
+
 def remember(db, gid: int, mid: int, kind: str, ts: int) -> None:
-    """kind: delay (ts — yopilgan vaqt) | info (ts — yozilgan vaqt)."""
+    """kind: delay (ts — yopilgan vaqt) | info (ts — yozilgan vaqt) | p5 (shaxsiy chatda, 5 daqiqadan keyin)."""
     db.run("INSERT OR IGNORE INTO group_msgs(gid, mid, kind, ts) VALUES(?,?,?,?)", (int(gid), int(mid), kind, int(ts)))
 
 
@@ -28,13 +31,14 @@ def minutes(db, kind: str) -> int:
 async def sweep(ctx, now: int) -> int:
     """Vaqti kelganlarini o'chiradi. Sozlama o'zgarsa — navbatdagilarga ham darhol ta'sir qiladi. -> nechta."""
     db = ctx.db
-    lim = {"delay": minutes(db, "delay"), "info": minutes(db, "info")}
+    lim = {"delay": minutes(db, "delay"), "info": minutes(db, "info"), "p5": NOTE_MIN}
     n = 0
     # faqat vaqti kelganlar (va juda eskilari) olinadi: «0 — o'chmaydi» turidagi xabarlar navbatni to'sib qo'ymasin
     due_delay = now - lim["delay"] * 60 if lim["delay"] > 0 else -1
     due_info = now - lim["info"] * 60 if lim["info"] > 0 else -1
     for row in db.all("SELECT gid, mid, kind, ts FROM group_msgs WHERE ts<? OR (kind='delay' AND ts<=?) "
-                      "OR (kind<>'delay' AND ts<=?) ORDER BY ts LIMIT 300", (now - MAX_AGE, due_delay, due_info)):
+                      "OR (kind='p5' AND ts<=?) OR (kind NOT IN ('delay', 'p5') AND ts<=?) ORDER BY ts LIMIT 300",
+                      (now - MAX_AGE, due_delay, now - NOTE_MIN * 60, due_info)):
         if now - row["ts"] > MAX_AGE:
             db.run("DELETE FROM group_msgs WHERE gid=? AND mid=?", (row["gid"], row["mid"]))
             continue

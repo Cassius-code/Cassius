@@ -48,6 +48,8 @@ W = {
     "acct_s": ("akk", "акк."), "delay_w": ("zaderjka", "задержка"), "late_w": ("kech qolish", "опоздание"),
     "advs_pl": ("avans", "аванс"), "zp_total": ("Zp jami", "Зп всего"),
     "your_bonus": ("sizning bonusingiz", "ваш бонус"), "your_fine": ("sizning jarimangiz", "ваш штраф"),
+    "kbonus_to": ("Arturga kassa bonuslari", "Артуру бонусы за кассу"), "partner_all": ("Artur jami", "Артур всего"),
+    "kbonus_pl": ("kassa bonuslari", "бонусы за кассу"),
     "moved_to": ("o'rniga ishlagan {}ga o'tdi — bu yerda hisobga kirmaydi:",
                  "перешло {} (работал(а) вместо) — здесь не считается:"),
 }
@@ -198,6 +200,8 @@ def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[
             out.append(f"+ {w('fines_pl', lang)} {money(r['pf'])} $")
         if r["pb"]:
             out.append(f"− {w('bonuses_pl', lang)} {money(r['pb'])} $")
+        if r.get("kbonus"):
+            out.append(f"+ 🎯 {w('kbonus_pl', lang)} {money(r['kbonus'])} $")
     elif r["zp_on"]:                                   # har RD (akkaunt) bo'yicha, o'zinikidan boshlab
         me = r["p"]["id"]
         earn = sorted(r["earn"].items(), key=lambda kv: kv[0][0] != me)
@@ -352,6 +356,14 @@ def owner_card(b: dict, lang: str) -> str:
     if o.get("sout_self"):
         lines.append(f"− {w('share_s', lang)} {money(o['sout_self'])} $")
     lines.append(f"= <b>{w('income', lang)}: {money(o['income'])} $</b>")
+    if o.get("kbonus") and o["partner_id"] is not None:   # 🎯 kassadan tashqari — Arturga (daromadingiz o'zgarmaydi)
+        per: dict = {}
+        for x in o["kbonus_items"]:
+            per[x["acct"]] = per.get(x["acct"], 0.0) + x["kassa"] + x["checks"]
+        tail = " · ".join(f"{h(names.get(a, '?'))} {money(v)}" for a, v in per.items())
+        lines.append(f"🎯 {w('kbonus_to', lang)}: <b>{money(o['kbonus'])} $</b>"
+                     + (f" <i>({tail})</i>" if len(per) > 1 else "")
+                     + f" · {w('partner_all', lang)} <b>{money(o['partner_total'])} $</b>")
     lines.append("")
     lines += balance_lines(b, lang)
     if o["per_acct"]:
