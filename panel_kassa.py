@@ -1244,7 +1244,11 @@ async def check_day(ctx, r: Req):
         names = {x["id"]: x["name"] for x in db.all("SELECT id, name FROM people")}
         info.append("")
         info += [hist_line(ctx, r, a, names).replace("\n", " · ") for a in hist]
-    return ui.join(title("🧾", f"{h(p['name'])} · {day[8:10]}.{day[5:7]}"), "", card(info)), kb(*rows)
+    # tepada — kunlik xulosa (Дата · Касса · Кол-во рд · Касса ($)), xodimga boradiganidek, alohida blok (egasi,
+    # 2026-11-04); chek 🚫/✅ qilinsa — darhol yangilanadi
+    brief = F.day_brief(ctx, pid, day, r.owner)
+    return ui.join(title("🧾", f"{h(p['name'])} · {day[8:10]}.{day[5:7]}"), "",
+                   card(brief.split("\n")) if brief else "", card(info)), kb(*rows)
 
 
 @screen("kxa", "full")

@@ -222,6 +222,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     ko'rasiz.
   - **👤 Xodim kabineti** (👥 Xodimlar → xodim): kassa, Кол-во рд, Kassa ($), bonus, jarimalar va zp — 🧮 hafta
     hisoblanmagan bo'lsa ham «≈ taxminiy» (foizlar yozilmagan bo'lsa ham), 📄 PDF.
+  - **🧾 Xodim · kun** (cheklar ro'yxati, chekni bosib 🚫/✅): tepada alohida blok — kunlik xulosa, xodimga
+    boradiganidek: ism · `Дата` · `Касса` · `Кол-во рд` · `Касса ($)` (sizda 🎯 bonus bo'lsa — `Бонус` va `Итого`
+    ham). Chek 🚫/✅ qilinsa — darhol yangilanadi.
   - **📅 Sana xatosi.** Hisobotda bitta chek boshqa (eski) sanada bo'lsa yoki hamma cheklar eski sanada bo'lsa —
     bot yozishdan oldin so'raydi: «1 950 — 25.10 ga yozilgan, qolgan cheklar esa 29.10. Xato emasmi?».
   - Hisobot qabul qilinsa «Проёб»da: «✅ Baxa · 29.10 · 3 чека · 8 550».
