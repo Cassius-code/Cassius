@@ -297,14 +297,47 @@ async def on_message(ctx, message, p) -> bool:
     return True
 
 
-async def on_edit(ctx, message, p) -> None:
+def admin_person(ctx, uid: int | None, owner: bool):
+    """Ega yoki admin ham RD da ishlasa — uning kassadagi yozuvi: egada — «👑 Bu menman» (self), boshqasida —
+    Telegram ID si bog'langan xodim. Yo'q bo'lsa — None."""
+    db = ctx.db
+    if owner:
+        me = db.one("SELECT * FROM people WHERE kassa_kind='self' AND active=1 ORDER BY id LIMIT 1")
+        if me is not None:
+            return me
+    from . import people as P
+    q = P.by_tg(db, uid) if uid else None
+    return q if q is not None and q["active"] and q["kassa_kind"] else None
+
+
+async def on_admin_message(ctx, message, p) -> bool:
+    """Ega/admin panel chatida (egasi, 2026-11-04: «man ham RD da ishlayapman»): faqat 🔗 havolali chek, /gaz,
+    javob qilib /delete va «Когда пришёл лид?» ga sana. Havolasiz raqamli matn — avvalgidek to'g'ridan-to'g'ri
+    kassa hisoboti (kassa_flow). -> ishlandimi."""
+    text = message.text or message.caption or ""
+    cmd = _cmd(text)
+    if cmd in CMD_GAZ or LINK_RE.search(text):
+        return await on_message(ctx, message, p)
+    rt = getattr(message, "reply_to_message", None)
+    if cmd in CMD_DEL and rt is not None and ctx.db.one(
+            "SELECT 1 FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=?", (message.chat.id, rt.message_id, p["id"])):
+        return await on_message(ctx, message, p)
+    if DATE_ONLY.fullmatch(text):                          # bot so'ragan lid kuni
+        return await on_lead_date(ctx, message, p)
+    return False
+
+
+async def on_edit(ctx, message, p, links_only: bool = False) -> None:
     """Xabar tahrirlandi: qayta o'qiladi; «✏️ Изменено: 2000 → 1970 ✅» / «✅ Принято» (5 daqiqada o'chadi)."""
     db = ctx.db
     chat_id, mid = message.chat.id, message.message_id
     old = db.all("SELECT * FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=? ORDER BY pos",
                  (chat_id, mid, p["id"]))
     sent_ts = int(message.date.timestamp())
-    items = parse(message.text or message.caption or "", local_date(sent_ts, ctx.tz))
+    text = message.text or message.caption or ""
+    if links_only and not old and not LINK_RE.search(text):
+        return                                             # adminning oddiy (kassa hisoboti) xabari — tegilmaydi
+    items = parse(text, local_date(sent_ts, ctx.tz))
     if not old and not items:
         return
     before = [x["amount"] for x in old if not x["deleted"]]

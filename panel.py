@@ -484,9 +484,17 @@ def build_router(ctx) -> Router:
 
     @r.edited_message(F.chat.type == "private")
     async def on_private_edit(message: Message) -> None:
-        """Xodim 🔗 chek xabarini tahrirladi (adminlar — panel, ularga tegilmaydi)."""
+        """🔗 chek xabari tahrirlandi: xodimniki — private; ega/adminniki — faqat havolali chek bo'lsa (wchecks)."""
         uid = message.from_user.id if message.from_user else None
-        if make_req(ctx, uid, message.chat.id).level:
+        req = make_req(ctx, uid, message.chat.id)
+        if req.level:
+            from . import wchecks
+            me = wchecks.admin_person(ctx, uid, req.owner)
+            if me is not None and not ctx.notifier.locked(uid):
+                try:
+                    await wchecks.on_edit(ctx, message, me, links_only=True)
+                except Exception:
+                    log.exception("Ega/admin cheki (tahrir)")
             return
         from . import private
         await private.on_edit(ctx, message)
@@ -505,6 +513,14 @@ def build_router(ctx) -> Router:
         state = ui.WAIT.get(uid)
         from .kassa import ACTOR
         ACTOR.set(uid)
+        if state is None and req.text:                     # ega/admin ham RD da ishlasa: 🔗 havolali chek, /gaz, /delete
+            from . import wchecks
+            me = wchecks.admin_person(ctx, uid, req.owner)
+            try:
+                if me is not None and await wchecks.on_admin_message(ctx, message, me):
+                    return
+            except Exception:
+                log.exception("Ega/admin cheki")
         if state is None and req.text and req.can("full"):  # hisobot / jarima shu yerga yozilsa — qabul qilinadi
             from . import kassa_flow
             try:

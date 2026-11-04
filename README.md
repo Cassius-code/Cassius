@@ -195,6 +195,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     xabar) havola — bot 🧐 bosadi (Telegram bermasa — 🤨), chek hisobga kirmaydi. Pereslat qilingan xabar — ichida havola
     va summa bo'lsa qabul qilinadi. «Проёб» `Rd3 11.10`, `Rd 3 11.10`, `Rd3.1 11.10` dagi sanani o'qiydi (eski
     `Rd 11.10` avvalgidek). Xabar matni saqlanmaydi — faqat summa, topik raqami, RD va vaqt.
+    **Siz (ega) ham** RD da ishlasangiz — panel chatiga havola + summa yuboring: xuddi xodimdagidek 👍, «Когда пришёл
+    лид?», tahrir, javob qilib `/delete`, `/gaz` (cheklar «👑 Bu menman» yozuvingizga). Havolasiz raqamli matn esa
+    panelda avvalgidek to'g'ridan-to'g'ri kassa hisoboti bo'ladi. Kassada yozuvi bor admin uchun ham shunday.
   - Pul amallari (to'landi, avans, ulushlar, foizlar) — faqat siz. Adminlar cheklarni tuzatadi.
   - Xodim o'z zp sini bot orqali ko'rmaydi (botda faqat 🔗 cheklar va `/gaz` achoti). Daromadingizni faqat siz
     ko'rasiz.
