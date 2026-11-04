@@ -146,8 +146,16 @@ async def amain() -> None:
     await panel.set_commands(ctx)
     pool.sync()
 
+    from . import lock                                    # 🔓 bir martalik: egasi qulf kodini unutdi (2026-11-05)
+    try:
+        opened = lock.force_unlock(db)
+    except Exception:
+        log.exception("Bir martalik qulf ochish")
+        opened = []
     # yangi xabar emas: egalardagi panel joyida yangilanadi (holat 🟢/🔴 panelning o'zida ko'rinadi)
     await panel.refresh_panels(ctx, note_old)
+    if opened:
+        await lock.after_force_unlock(ctx, opened)
     try:                                                  # eski: telefon raqami «Чей отчёт?» bo'lib qolgan bo'lsa
         from .kassa_flow import cleanup_phone_reports
         await cleanup_phone_reports(ctx)

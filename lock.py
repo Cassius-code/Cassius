@@ -5,19 +5,27 @@
 * Qulf paytida shu chatda nima qilinsa ham (/start, tugma, matn) — faqat «Бот сейчас не работает.» (doim ruscha).
 * To'g'ri kod yozilsa — panel qaytadi va qulf paytida kutib turgan xabarlar keladi. Xato kod — o'sha matn turaveradi
   (cheklov yo'q — egasi tanlagan). Yozilgan kod chatdan darhol o'chadi.
-* Kod hamma ega akkauntlari uchun bitta (⚙️ → 👮 Adminlar → 🔒 Qulf kodi). Bazada faqat izi (PBKDF2, tuz bilan)."""
+* Kod hamma ega akkauntlari uchun bitta (⚙️ → 👮 Adminlar → 🔒 Qulf kodi). Bazada faqat izi (PBKDF2, tuz bilan).
+* Bir martalik ochish (FORCE_UNLOCK): ikkala akkaunt qulflanib, kod esdan chiqsa (egasi, 2026-11-05) — yangi versiya
+  ishga tushganda bir marta hamma qulf ochiladi va eski kod o'chadi; yangi kodni ega o'zi qo'yadi."""
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import hmac
+import logging
 import os
 import time
 
 from . import ui
 from .ui import Req, card, kb, on_input, screen, title
 
+log = logging.getLogger("lock")
+
 DECOY = "Бот сейчас не работает."
+FORCE_UNLOCK = "2026-11-05"      # o'zgartirilsa — keyingi ishga tushishda yana bir marta hamma qulf ochiladi
+UNLOCK_NOTE = ("🔓 <b>Qulf ochildi.</b> Eski qulf kodi o'chirildi.\n"
+               "Yangi kod: ⚙️ Sozlamalar → 👮 Adminlar → 🔒 Qulf kodi (yoki «🔒 Qulflash» bosilganda bot o'zi so'raydi).")
 MIN_LEN = 4
 MAX_LEN = 32
 ITER = 100_000
@@ -47,6 +55,41 @@ def matches(db, code: str) -> bool:
 
 def locked(db, uid: int | None) -> bool:
     return bool(uid) and db.get(f"lock:{uid}") == "1"
+
+
+def force_unlock(db) -> list[int]:
+    """Bir martalik ochish (ishga tushishda, panel yangilanishidan oldin): hamma qulf ochiladi, eski kod o'chadi.
+    -> qulflangan bo'lgan akkauntlar (kutib turgan xabarlari va panel uchun). Keyingi ishga tushishda — hech narsa."""
+    if db.get("force_unlock_done") == FORCE_UNLOCK:
+        return []
+    uids = []
+    for row in db.all("SELECT key FROM settings WHERE key LIKE 'lock:%' AND value='1'"):
+        try:
+            uids.append(int(row["key"].split(":", 1)[1]))
+        except ValueError:
+            continue
+        db.set(row["key"], "0")
+    db.set("lock_hash", "")
+    db.set("lock_code_ts", "")
+    db.set("force_unlock_done", FORCE_UNLOCK)
+    return uids
+
+
+async def after_force_unlock(ctx, uids: list[int]) -> None:
+    """Ochilgan akkauntlarga: xabar, qulf paytida kutib turgan xabarlar va panel — eng pastda (darhol ishlaydi)."""
+    from .panel import main_menu, make_req
+    for uid in uids:
+        try:
+            await ctx.bot.send_message(chat_id=uid, text=UNLOCK_NOTE, parse_mode="HTML")
+            await ctx.notifier.release(uid)
+            req = make_req(ctx, uid, uid, "m")
+            if not req.level:
+                continue
+            text, markup = await main_menu(ctx, req)
+            ui.HIST.pop(uid, None)
+            await ui.show(ctx.bot, uid, text, markup, fresh=True, view="m")
+        except Exception as exc:
+            log.info("Ochilgan akkauntga yozilmadi %s: %s", uid, exc)
 
 
 async def show_decoy(ctx, chat_id: int, fresh: bool = True) -> None:

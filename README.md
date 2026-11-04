@@ -376,7 +376,10 @@ Bot guruhda xabarlarni ko'rishi uchun uni guruhda admin qiling.
 - Qulf paytida shu chatda /start, tugma yoki matn — faqat «Бот сейчас не работает.». Xato kod — o'sha matn turaveradi.
 - To'g'ri kodni yozsangiz — panel qaytadi va qulf paytida kelgan xabarlar (savollar, ogohlantirishlar, haftalik baza
   nusxasi) keladi. Yozgan kodingiz chatdan darhol o'chadi.
-- Kodni unutsangiz: ikkinchi (ochiq) akkauntdan 🔒 Qulf kodini almashtiring.
+- Kodni unutsangiz: ikkinchi (ochiq) akkauntdan 🔒 Qulf kodini almashtiring. Ikkalasi ham qulflangan bo'lsa — bot
+  kodida bir martalik ochish bor (`lock.FORCE_UNLOCK`, 2026-11-05 da ishlatildi): yangi versiya ishga tushganda
+  hamma qulf ochiladi, eski kod o'chadi, sizga «🔓 Qulf ochildi», qulf paytidagi xabarlar va panel keladi. Yangi
+  kodni o'zingiz qo'yasiz (⚙️ → 👮 Adminlar → 🔒 Qulf kodi yoki «🔒 Qulflash» bosilganda bot o'zi so'raydi).
 
 ## 🫀 Bot tirikligi
 
