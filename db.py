@@ -397,13 +397,13 @@ CREATE TABLE IF NOT EXISTS held (
 );
 CREATE INDEX IF NOT EXISTS idx_held_uid ON held(uid, id);
 -- 🔗 xodim botga yozgan cheklar: topik havolasi + summa (kechki /gaz achoti uchun). Xabar matni saqlanmaydi —
--- faqat summa, topik (guruh/topik raqami), kimning akkaunti va vaqt. Kassaga achot «Проёб»ga tashlanganda yoziladi.
+-- faqat summa, topik (guruh/topik raqami), RD va vaqt. Kassaga achot «Проёб»ga tashlanganda yoziladi.
 CREATE TABLE IF NOT EXISTS wchecks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id INTEGER NOT NULL,               -- yozgan xodim
     chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, pos INTEGER NOT NULL DEFAULT 0,
     link_chat INTEGER, link_topic INTEGER,    -- havoladagi guruh va topik
-    acct INTEGER,                             -- kimning akkaunti (havola qaysi RD dan)
+    folder_id INTEGER,                        -- havola qaysi RD dan (achotda «Rd3»)
     topic_ts INTEGER,                         -- lid kelgan vaqt (topik ochilgan)
     amount INTEGER NOT NULL,
     day TEXT NOT NULL,                        -- yozilgan kun (achotda «Rd»)

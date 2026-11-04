@@ -133,7 +133,9 @@ def del_price(db: Database, pid: int) -> None:
 
 
 # ───────────────────────── matnni tushunish (faqat raqamli hisobot xabarlari)
-RD_FIND = re.compile(r"(?<![A-Za-zА-Яа-яЁё])(?:rd|рд)\W{0,3}(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?", re.I)
+# «Rd 04.11», shuningdek RD raqami bilan: «Rd3 04.11», «Rd 3 04.11», «Rd3.1 04.11» (🔗 /gaz achoti, egasi 2026-11-04)
+RD_FIND = re.compile(r"(?<![A-Za-zА-Яа-яЁё])(?:rd|рд)\W{0,3}(?:\d{1,2}(?:\.\d)?[ \t]+)?"
+                     r"(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?", re.I)
 RD_WORD = re.compile(r"(?<![A-Za-zА-Яа-яЁё])(?:rd|рд)(?![A-Za-zА-Яа-яЁё])", re.I)
 DATE_RE = re.compile(r"(?<!\d)\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?(?!\d)")
 DATE_G = re.compile(r"(?<!\d)(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?!\d)")

@@ -177,15 +177,20 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     xodimlar va «Проёб» — yo'q). Summalar: `kbonus_kassa`, `kbonus_checks` sozlamalari.
   - **🔗 Xodim chekni botga yozadi** (shaxsiy chatda): topik havolasi va pastida summa
     (`https://t.me/c/…/56` / `1950`, yoki `11) 1950`, `3.500`). Bot 👍 bosadi va hisoblab boradi; havoladan
-    RD (kimning akkaunti) va lid kelgan kun (topik ochilgan) aniqlanadi. Xato — o'sha xabarga javob qilib
+    RD va lid kelgan kun (topik ochilgan) aniqlanadi. Xato — o'sha xabarga javob qilib
     `/delete`: hisobdan chiqadi, xabar chatda qoladi, bot 👎 bosadi. Xabar tahrirlansa — bot qayta o'qib
     javob yozadi («✏️ Изменено: 2000 → 1970 ✅» yoki «✅ Принято»), u 5 daqiqada o'chadi. Kechqurun `/gaz` —
-    bot tayyor achot beradi, har akkaunt alohida: `Adam` / `10.09 1950` / `Rd 04.11` (bo'sh qator, keyingi chek).
-    Xodim uni «Проёб»ga tashlaydi — kassa o'sha yerda hozirgidek hisoblanadi (Adam akkaunti, zp ishlagan xodimga).
-    Topik topilmasa — chek qabul qilinadi, achotda lid kuni bo'lmaydi, xodimga «⚠️ Топик не найден». Xabar matni
-    saqlanmaydi — faqat summa, topik raqami va vaqt.
+    bot bitta tayyor achot beradi, har chekda RD raqami: `10.09 1818` / `Rd3 11.10` (bo'sh qator, keyingi chek;
+    `10.09` — lid kelgan kun, `Rd3` — havola qaysi RD dan, `11.10` — chek kuni). Xodim uni «Проёб»ga tashlaydi —
+    kassa o'sha yerda hozirgidek hisoblanadi. Havola qaysi RD dan bo'lishidan qat'i nazar, kassa ham, zp ham
+    achotni tashlagan xodimniki. Ikkinchi `/gaz` — kunning hammasi (yangi qo'shilgani bilan); kechagi `/gaz`
+    qilinmagan cheklar — o'z kuni bilan. Bot bilmaydigan guruh/topik — chek qabul qilinadi, achotda lid kuni va
+    RD raqami bo'lmaydi (`4000` / `Rd 11.10`), xodimga «⚠️ Топик не найден». Pereslat qilingan xabar — ichida havola
+    va summa bo'lsa qabul qilinadi. «Проёб» `Rd3 11.10`, `Rd 3 11.10`, `Rd3.1 11.10` dagi sanani o'qiydi (eski
+    `Rd 11.10` avvalgidek). Xabar matni saqlanmaydi — faqat summa, topik raqami, RD va vaqt.
   - Pul amallari (to'landi, avans, ulushlar, foizlar) — faqat siz. Adminlar cheklarni tuzatadi.
-  - Xodim faqat o'z zp sini ko'radi, so'rov avval sizga keladi. Daromadingizni faqat siz ko'rasiz.
+  - Xodim o'z zp sini bot orqali ko'rmaydi (botda faqat 🔗 cheklar va `/gaz` achoti). Daromadingizni faqat siz
+    ko'rasiz.
   - **👤 Xodim kabineti** (👥 Xodimlar → xodim): kassa, Кол-во рд, Kassa ($), bonus, jarimalar va zp — 🧮 hafta
     hisoblanmagan bo'lsa ham «≈ taxminiy» (foizlar yozilmagan bo'lsa ham), 📄 PDF.
   - **📅 Sana xatosi.** Hisobotda bitta chek boshqa (eski) sanada bo'lsa yoki hamma cheklar eski sanada bo'lsa —

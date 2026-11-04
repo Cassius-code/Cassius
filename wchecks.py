@@ -1,17 +1,17 @@
 """🔗 Xodim chekni botga yozadi: topik havolasi + summa (egasi, 2026-11-04).
 
 * Xodim botga (shaxsiy chatda) yozadi: «https://t.me/c/1234567890/56» va pastida summa («1950», «11) 1950»,
-  «3.500»). Bot 👍 bosadi va hisoblab boradi. Havola qaysi RD (kimning akkaunti) ekanini va lid qachon kelganini
-  (topik ochilgan kun) bildiradi — buni bot o'z bazasidan oladi (asosiy akkaunt kuzatadigan guruhlar).
+  «3.500»). Bot 👍 bosadi va hisoblab boradi. Havola qaysi RD ekanini va lid qachon kelganini (topik ochilgan kun)
+  bildiradi — buni bot o'z bazasidan oladi (asosiy akkaunt kuzatadigan guruhlar).
 * Xato bo'lsa — o'sha xabarga javob qilib /delete: hisobdan chiqadi, xabar chatda qoladi, bot 👎 bosadi.
 * Xabar tahrirlansa (2000 → 1970) — bot qayta o'qiydi va javob yozadi: «✏️ Изменено: 2000 → 1970 ✅» yoki
   «✅ Принято»; bu javob 5 daqiqada o'chadi.
-* Kechqurun /gaz — bot tayyor achotni beradi (har akkaunt alohida xabar):
-      Adam
+* Kechqurun /gaz — bot tayyor achotni beradi (bitta xabar, har chekda RD raqami):
       10.09 1950
-      Rd 04.11
-  Xodim uni «Проёб»ga tashlaydi — kassa o'sha yerda hozirgidek hisoblanadi (bu yerda kassaga hech narsa yozilmaydi).
-Xabar matni saqlanmaydi: faqat summa, topik raqami, kimning akkaunti va vaqt."""
+      Rd3 04.11
+  Xodim uni «Проёб»ga tashlaydi — kassa o'sha yerda hozirgidek hisoblanadi. Havola qaysi RD dan bo'lishidan qat'i
+  nazar kassa ham, zp ham achotni tashlagan xodimniki (egasi, 2026-11-04). Bu yerda kassaga hech narsa yozilmaydi.
+Xabar matni saqlanmaydi: faqat summa, topik raqami, RD va vaqt."""
 from __future__ import annotations
 
 import logging
@@ -19,7 +19,6 @@ import re
 import time
 
 from . import kassa as K
-from . import people as P
 from .timeutil import fmt, local_date
 
 log = logging.getLogger("wchecks")
@@ -76,17 +75,11 @@ def topic_info(db, chat_id: int, topic_id: int):
     return c["folder_id"], ts
 
 
-def folder_acct(db, fid, worker_id: int) -> int:
-    """Papka (RD) kimning akkaunti: kassadagi yagona xodimi; bir nechta bo'lsa — yozgan xodim (o'zi o'sha yerda
-    bo'lsa) yoki birinchisi. Topilmasa — yozgan xodimning o'z akkaunti."""
-    ids = [x["id"] for x in db.all("SELECT p.id FROM people p JOIN folder_people fp ON fp.person_id=p.id "
-                                   "WHERE fp.folder_id=? AND p.active=1 AND p.kassa_kind IN ('worker','self','pool') "
-                                   "ORDER BY lower(p.name)", (fid,))] if fid else []
-    if len(ids) == 1:
-        return ids[0]
-    if worker_id in ids or not ids:
-        return worker_id
-    return ids[0]
+def rd_label(db, fid) -> str:
+    """Papka nomidan achot yorlig'i: «RD 3» → «Rd3», «RD 3.1 🔥» → «Rd3.1», raqamsiz yoki noma'lum — «Rd»."""
+    f = db.one("SELECT name FROM folders WHERE id=?", (fid,)) if fid else None
+    m = re.search(r"\d{1,2}(?:\.\d)?", f["name"]) if f else None
+    return f"Rd{m.group(0)}" if m else "Rd"
 
 
 def _store(ctx, p, chat_id: int, msg_id: int, sent_ts: int, items: list[dict]) -> tuple[int, int]:
@@ -96,13 +89,12 @@ def _store(ctx, p, chat_id: int, msg_id: int, sent_ts: int, items: list[dict]) -
     n = unknown = pos = 0
     for it in items:
         fid, tts = topic_info(db, it["chat"], it["topic"])
-        acct = folder_acct(db, fid, p["id"])
         if fid is None or tts is None:
             unknown += len(it["amounts"])
         for a in it["amounts"]:
-            db.run("INSERT INTO wchecks(person_id, chat_id, msg_id, pos, link_chat, link_topic, acct, topic_ts, amount, "
-                   "day, ts) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                   (p["id"], chat_id, msg_id, pos, it["chat"], it["topic"], acct, tts, a, day, sent_ts))
+            db.run("INSERT INTO wchecks(person_id, chat_id, msg_id, pos, link_chat, link_topic, folder_id, topic_ts, "
+                   "amount, day, ts) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                   (p["id"], chat_id, msg_id, pos, it["chat"], it["topic"], fid, tts, a, day, sent_ts))
             pos += 1
             n += 1
     return n, unknown
@@ -209,27 +201,19 @@ async def on_edit(ctx, message, p) -> None:
 def report_rows(db, pid: int, today: str):
     """/gaz: bugungi cheklar va hali achotga kirmagan eskilari (o'chirilganlarsiz)."""
     return db.all("SELECT * FROM wchecks WHERE person_id=? AND deleted=0 AND (day=? OR (reported_ts IS NULL AND day<?)) "
-                  "ORDER BY ts, pos", (pid, today, today))
+                  "ORDER BY ts, msg_id, pos", (pid, today, today))
 
 
-def report_texts(ctx, p, rows) -> list[str]:
-    """Har akkaunt — alohida achot (tepasida akkaunt nomi: kassa to'g'ri akkauntga, zp ishlagan odamga tushadi)."""
-    db = ctx.db
-    by: dict = {}
-    for x in rows:
-        by.setdefault(x["acct"] or p["id"], []).append(x)
-    out = []
-    for acct, items in by.items():
-        q = P.person(db, acct)
-        lines = [q["name"] if q is not None else p["name"]]
-        for i, x in enumerate(items):
-            if i:
-                lines.append("")
-            lead = fmt(x["topic_ts"], ctx.tz, "%d.%m") + " " if x["topic_ts"] else ""
-            lines.append(f"{lead}{x['amount']}")
-            lines.append(f"Rd {x['day'][8:10]}.{x['day'][5:7]}")
-        out.append("\n".join(lines))
-    return out
+def report_text(ctx, rows) -> str:
+    """Bitta achot: har chek — «10.09 1950» (lid kelgan kun va summa) va «Rd3 04.11» (RD va yozilgan kun)."""
+    lines = []
+    for i, x in enumerate(rows):
+        if i:
+            lines.append("")
+        lead = fmt(x["topic_ts"], ctx.tz, "%d.%m") + " " if x["topic_ts"] else ""
+        lines.append(f"{lead}{x['amount']}")
+        lines.append(f"{rd_label(ctx.db, x['folder_id'])} {x['day'][8:10]}.{x['day'][5:7]}")
+    return "\n".join(lines)
 
 
 async def send_report(ctx, chat_id: int, p) -> None:
@@ -239,11 +223,10 @@ async def send_report(ctx, chat_id: int, p) -> None:
     if not rows:
         await note(ctx, chat_id, "Сегодня чеков нет.")
         return
-    for t in report_texts(ctx, p, rows):
-        try:
-            await ctx.bot.send_message(chat_id=chat_id, text=t)
-        except Exception as exc:
-            log.info("Achot yuborilmadi: %s", exc)
+    try:
+        await ctx.bot.send_message(chat_id=chat_id, text=report_text(ctx, rows))
+    except Exception as exc:
+        log.info("Achot yuborilmadi: %s", exc)
     now = int(ctx.clock())
     for x in rows:
         if not x["reported_ts"]:

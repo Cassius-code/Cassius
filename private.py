@@ -1,6 +1,6 @@
 """Admin bo'lmaganlar bilan shaxsiy chat.
 
-Xodim: «💰 Моя зарплата» — so'rov AVVAL egaga boradi, ega ✅ bossa xodimga faqat o'z zp/jarima/bonus/avansi yuboriladi.
+Xodim: zp sini bot orqali ko'rmaydi (egasi, 2026-11-04) — faqat 🔗 cheklar va /gaz achoti (wchecks.py).
 Begona: «📨 Запросить доступ» — egaga so'rov (xodimga bog'lash / yangi xodim / admin / rad etish).
 Xodim xabarlari matni saqlanmaydi. Istisno — 🔗 chek (topik havolasi + summa), /delete va /gaz (wchecks.py):
 bulardan ham faqat summa, topik raqami va vaqt olinadi.
@@ -34,11 +34,11 @@ def _person(ctx, user):
 def worker_screen(ctx, user) -> tuple[str, object]:
     p = _person(ctx, user)
     if p is not None and p["active"]:
+        # xodim zp sini bot orqali ko'rmaydi — faqat cheklar va achot (egasi, 2026-11-04)
         text = ui.join(f"<b>👋 {h(p['name'])}</b>", "", card(
-            ["Здесь можно запросить расчёт зарплаты.", "Запрос сначала увидит руководитель."]), card(
             ["🔗 Чек: ссылка на топик и под ней сумма — бот поставит 👍.",
              "Ошибка — ответьте на чек /delete. Вечером /gaz — готовый отчёт для «Проёб»."]))
-        return text, kb([("💰 Моя зарплата", "w:zp")], [("🆔 Мой ID", "w:id")])
+        return text, kb([("🆔 Мой ID", "w:id")])
     text = ui.join("<b>🔒 RD CONTROL</b>", "", card(
         ["Бот только для сотрудников.", "Нажмите кнопку — руководитель получит запрос."]))
     return text, kb([("📨 Запросить доступ", "w:acc")], [("🆔 Мой ID", "w:id")])
@@ -97,12 +97,12 @@ async def on_worker_cb(ctx, cb, data: str) -> None:
     if act == "id":
         await ui.toast(ctx.bot, chat_id, f"🆔 <code>{user.id}</code>", 20)
         return
-    if act not in ("zp", "acc"):
+    p = _person(ctx, user)
+    if act != "acc" or (p is not None and p["active"]):     # «💰 Моя зарплата» yo'q (eski tugma — menyu)
         text, markup = worker_screen(ctx, user)
         await ui.show(ctx.bot, chat_id, text, markup, edit_id=cb.message.message_id)
         return
-    p = _person(ctx, user)
-    kind = "zp" if act == "zp" and p is not None else "access"
+    kind = "access"
     last = db.one("SELECT ts FROM requests WHERE kind=? AND tg_id=? ORDER BY id DESC LIMIT 1", (kind, user.id))
     if last is not None and time.time() - last["ts"] < REQ_GAP:
         await ui.toast(ctx.bot, chat_id, "⏳ Запрос уже отправлен. Ответ придёт сюда.", 6)
