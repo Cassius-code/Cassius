@@ -405,6 +405,8 @@ CREATE TABLE IF NOT EXISTS wchecks (
     link_chat INTEGER, link_topic INTEGER,    -- havoladagi guruh va topik
     folder_id INTEGER,                        -- havola qaysi RD dan (achotda «Rd3»)
     topic_ts INTEGER,                         -- lid kelgan vaqt (topik ochilgan)
+    lead_ts INTEGER,                          -- topik topilmasa: lid kelgan kun — xodim yozgan (bot so'raydi)
+    ask_mid INTEGER,                          -- «Когда пришёл лид?» savoli (botning xabari)
     amount INTEGER NOT NULL,
     day TEXT NOT NULL,                        -- yozilgan kun (achotda «Rd»)
     ts INTEGER NOT NULL,

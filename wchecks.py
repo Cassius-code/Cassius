@@ -6,7 +6,9 @@
 * Xato bo'lsa — o'sha xabarga javob qilib /delete: hisobdan chiqadi, xabar chatda qoladi, bot 👎 bosadi.
 * Xabar tahrirlansa (2000 → 1970) — bot qayta o'qiydi va javob yozadi: «✏️ Изменено: 2000 → 1970 ✅» yoki
   «✅ Принято»; bu javob 5 daqiqada o'chadi.
-* Kechqurun /gaz — bot tayyor achotni beradi (bitta xabar, har chekda RD raqami):
+* Topik bizning RD larda topilmasa (xodim bizga aloqasi yo'q RD da ishlagan) — bot chek ostida so'raydi:
+  «Когда пришёл лид?»; xodim sanani yozadi («10.09») — achotga o'sha kun qo'yiladi (egasi, 2026-11-04).
+* Kechqurun /gaz — bot tayyor achotni beradi (bitta oddiy xabar, har chekda RD raqami; «RD 3.1» ham «Rd3»):
       10.09 1950
       Rd3 04.11
   Xodim uni «Проёб»ga tashlaydi — kassa o'sha yerda hozirgidek hisoblanadi. Havola qaysi RD dan bo'lishidan qat'i
@@ -14,6 +16,7 @@
 Xabar matni saqlanmaydi: faqat summa, topik raqami, RD va vaqt."""
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import re
 import time
@@ -76,10 +79,65 @@ def topic_info(db, chat_id: int, topic_id: int):
 
 
 def rd_label(db, fid) -> str:
-    """Papka nomidan achot yorlig'i: «RD 3» → «Rd3», «RD 3.1 🔥» → «Rd3.1», raqamsiz yoki noma'lum — «Rd»."""
+    """Papka nomidan achot yorlig'i: «RD 3» va «RD 3.1 🔥» → «Rd3» (egasi: «3.1» shart emas), raqamsiz yoki
+    noma'lum — «Rd»."""
     f = db.one("SELECT name FROM folders WHERE id=?", (fid,)) if fid else None
-    m = re.search(r"\d{1,2}(?:\.\d)?", f["name"]) if f else None
+    m = re.search(r"\d{1,2}", f["name"]) if f else None
     return f"Rd{m.group(0)}" if m else "Rd"
+
+
+ASK = "📅 Не нашёл этот топик в наших RD. Когда пришёл лид? Ответьте на это сообщение датой, например: 10.09"
+DATE_ONLY = re.compile(r"\s*\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\s*")
+
+
+async def ask_lead(ctx, chat_id: int, msg_id: int, pid: int) -> None:
+    """Topik topilmadi (bizga aloqasi yo'q RD) — lid qachon kelganini xodimdan so'raymiz (egasi, 2026-11-04)."""
+    try:
+        m = await ctx.bot.send_message(chat_id=chat_id, text=ASK, reply_to_message_id=msg_id)
+    except Exception as exc:
+        log.info("Savol yuborilmadi: %s", exc)
+        return
+    ctx.db.run("UPDATE wchecks SET ask_mid=? WHERE chat_id=? AND msg_id=? AND person_id=? AND topic_ts IS NULL "
+               "AND lead_ts IS NULL", (m.message_id, chat_id, msg_id, pid))
+
+
+async def _drop_ask(ctx, chat_id: int, rows) -> None:
+    for mid in {x["ask_mid"] for x in rows if x["ask_mid"]}:
+        try:
+            await ctx.bot.delete_message(chat_id=chat_id, message_id=mid)
+        except Exception:
+            pass
+
+
+async def on_lead_date(ctx, message, p) -> bool:
+    """Xodim lid kelgan kunni yozdi («10.09»): savolga yoki chekka javob qilib — o'sha chekka, oddiy yozsa — oxirgi
+    so'ralgan chekka. -> ishlandimi."""
+    db = ctx.db
+    text = message.text or ""
+    if not DATE_ONLY.fullmatch(text):
+        return False
+    today = local_date(int(message.date.timestamp()), ctx.tz)
+    days = K.parse_dates(text, today)
+    if not days:
+        return False
+    chat_id = message.chat.id
+    rt = getattr(message, "reply_to_message", None)
+    base = "SELECT * FROM wchecks WHERE chat_id=? AND person_id=? AND deleted=0 AND topic_ts IS NULL"
+    if rt is not None:
+        rows = db.all(base + " AND (ask_mid=? OR msg_id=?)", (chat_id, p["id"], rt.message_id, rt.message_id))
+    else:
+        last = db.one(base + " AND ask_mid IS NOT NULL AND lead_ts IS NULL ORDER BY ts DESC, msg_id DESC LIMIT 1",
+                      (chat_id, p["id"]))
+        rows = db.all(base + " AND msg_id=?", (chat_id, p["id"], last["msg_id"])) if last else []
+    if not rows:
+        return False
+    lead = int(dt.datetime.combine(days[0], dt.time(12), tzinfo=ctx.tz).timestamp())
+    db.run("UPDATE wchecks SET lead_ts=?, ask_mid=NULL WHERE chat_id=? AND msg_id=? AND person_id=?",
+           (lead, chat_id, rows[0]["msg_id"], p["id"]))
+    await _drop_ask(ctx, chat_id, rows)
+    await react(ctx, chat_id, message.message_id, "👍")
+    await note(ctx, chat_id, f"✅ Дата лида: {days[0]:%d.%m}", reply_to=rows[0]["msg_id"])
+    return True
 
 
 def _store(ctx, p, chat_id: int, msg_id: int, sent_ts: int, items: list[dict]) -> tuple[int, int]:
@@ -141,14 +199,17 @@ async def on_message(ctx, message, p) -> bool:
         if rt is None:
             await note(ctx, chat_id, "↩️ Ответьте /delete на сообщение с чеком.")
             return True
-        rows = ctx.db.all("SELECT id FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=? AND deleted=0",
+        rows = ctx.db.all("SELECT id, ask_mid FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=? AND deleted=0",
                           (chat_id, rt.message_id, p["id"]))
         if not rows:
             await note(ctx, chat_id, "⚠️ Это сообщение не чек (или уже удалён).", reply_to=rt.message_id)
             return True
-        ctx.db.run("UPDATE wchecks SET deleted=1 WHERE chat_id=? AND msg_id=? AND person_id=?",
+        ctx.db.run("UPDATE wchecks SET deleted=1, ask_mid=NULL WHERE chat_id=? AND msg_id=? AND person_id=?",
                    (chat_id, rt.message_id, p["id"]))
+        await _drop_ask(ctx, chat_id, rows)                # «Когда пришёл лид?» savoli ham ketadi
         await react(ctx, chat_id, rt.message_id, "👎")
+        return True
+    if await on_lead_date(ctx, message, p):                # «10.09» — lid kelgan kun (bot so'ragan edi)
         return True
     items = parse(text)
     if not items:
@@ -161,9 +222,8 @@ async def on_message(ctx, message, p) -> bool:
                    reply_to=message.message_id)
         return True
     await react(ctx, chat_id, message.message_id, "👍")
-    if unknown:
-        await note(ctx, chat_id, "⚠️ Топик не найден — в отчёте будет без даты лида. Проверьте ссылку.",
-                   reply_to=message.message_id)
+    if unknown:                                            # bizga aloqasi yo'q RD — lid qachon kelganini so'raymiz
+        await ask_lead(ctx, chat_id, message.message_id, p["id"])
     return True
 
 
@@ -178,10 +238,17 @@ async def on_edit(ctx, message, p) -> None:
         return
     before = [x["amount"] for x in old if not x["deleted"]]
     reported = next((x["reported_ts"] for x in old if x["reported_ts"]), None)
+    lead = next((x["lead_ts"] for x in old if x["lead_ts"]), None)        # xodim yozgan lid kuni qoladi
+    ask = next((x["ask_mid"] for x in old if x["ask_mid"]), None)
     db.run("DELETE FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=?", (chat_id, mid, p["id"]))
     n, unknown = _store(ctx, p, chat_id, mid, int(message.date.timestamp()), items) if items else (0, 0)
     if reported:
         db.run("UPDATE wchecks SET reported_ts=? WHERE chat_id=? AND msg_id=?", (reported, chat_id, mid))
+    if unknown and (lead or ask):
+        db.run("UPDATE wchecks SET lead_ts=?, ask_mid=? WHERE chat_id=? AND msg_id=? AND topic_ts IS NULL",
+               (lead, None if lead else ask, chat_id, mid))
+    elif ask:                                              # endi topik topildi (yoki chek yo'q) — savol kerak emas
+        await _drop_ask(ctx, chat_id, [{"ask_mid": ask}])
     after = [x["amount"] for x in db.all("SELECT amount FROM wchecks WHERE chat_id=? AND msg_id=? ORDER BY pos",
                                          (chat_id, mid))]
     if not n:
@@ -193,9 +260,9 @@ async def on_edit(ctx, message, p) -> None:
         txt = f"✏️ Изменено: {' '.join(map(str, before))} → {' '.join(map(str, after))} ✅"
     else:
         txt = "✅ Принято"
-    if unknown:
-        txt += "\n⚠️ Топик не найден — в отчёте будет без даты лида."
     await note(ctx, chat_id, txt, reply_to=mid)
+    if unknown and not (lead or ask):
+        await ask_lead(ctx, chat_id, mid, p["id"])
 
 
 def report_rows(db, pid: int, today: str):
@@ -210,7 +277,8 @@ def report_text(ctx, rows) -> str:
     for i, x in enumerate(rows):
         if i:
             lines.append("")
-        lead = fmt(x["topic_ts"], ctx.tz, "%d.%m") + " " if x["topic_ts"] else ""
+        ts = x["topic_ts"] or x["lead_ts"]                 # topik ochilgan kun yoki xodim yozgani
+        lead = fmt(ts, ctx.tz, "%d.%m") + " " if ts else ""
         lines.append(f"{lead}{x['amount']}")
         lines.append(f"{rd_label(ctx.db, x['folder_id'])} {x['day'][8:10]}.{x['day'][5:7]}")
     return "\n".join(lines)
@@ -227,6 +295,9 @@ async def send_report(ctx, chat_id: int, p) -> None:
         await ctx.bot.send_message(chat_id=chat_id, text=report_text(ctx, rows))
     except Exception as exc:
         log.info("Achot yuborilmadi: %s", exc)
+    miss = sum(1 for x in rows if not (x["topic_ts"] or x["lead_ts"]))
+    if miss:
+        await note(ctx, chat_id, f"⚠️ Без даты лида: {miss} — ответьте датой на вопрос «Когда пришёл лид?» и снова /gaz.")
     now = int(ctx.clock())
     for x in rows:
         if not x["reported_ts"]:
