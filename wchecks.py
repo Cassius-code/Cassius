@@ -29,6 +29,7 @@ log = logging.getLogger("wchecks")
 LINK_RE = re.compile(r"(?:https?://)?(?:t|telegram)\.me/c/(\d{5,})/(\d+)(?:/(\d+))?(?:\?thread=(\d+))?", re.I)
 NUMBERING = re.compile(r"(?m)^\s*\d{1,2}[).]\s+")          # «11) 1950» — tartib raqami summa emas
 CMD_GAZ = ("/gaz",)
+GAZ_ASK_SEC = 3 * 3600      # /gaz dan keyin shuncha vaqt ichida yangi chek — «за какой день?» (egasi: 2–3 soat)
 CMD_DEL = ("/delete", "/del")
 
 
@@ -263,8 +264,8 @@ async def on_message(ctx, message, p) -> bool:
         if rt is None:
             await note(ctx, chat_id, "↩️ Ответьте /delete на сообщение с чеком.")
             return True
-        rows = ctx.db.all("SELECT id, ask_mid FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=? AND deleted=0",
-                          (chat_id, rt.message_id, p["id"]))
+        rows = ctx.db.all("SELECT id, ask_mid, amount, day, reported_ts FROM wchecks WHERE chat_id=? AND msg_id=? "
+                          "AND person_id=? AND deleted=0", (chat_id, rt.message_id, p["id"]))
         if not rows:
             await note(ctx, chat_id, "⚠️ Это сообщение не чек (или уже удалён).", reply_to=rt.message_id)
             return True
@@ -272,6 +273,8 @@ async def on_message(ctx, message, p) -> bool:
                    (chat_id, rt.message_id, p["id"]))
         await _drop_ask(ctx, chat_id, rows)                # «Когда пришёл лид?» savoli ham ketadi
         await react(ctx, chat_id, rt.message_id, "👎")
+        if any(x["reported_ts"] for x in rows):            # achotga kirgan edi — kassada ham to'g'rilanadi
+            await kassa_sync(ctx, p, chat_id, rt.message_id, rows[0]["day"], [x["amount"] for x in rows], [])
         return True
     if await on_lead_date(ctx, message, p):                # «10.09» — lid kelgan kun (bot so'ragan edi)
         return True
@@ -294,7 +297,91 @@ async def on_message(ctx, message, p) -> bool:
     if unknown:                                            # bizga aloqasi yo'q RD — lid qachon kelganini so'raymiz
         await ask_lead(ctx, chat_id, message.message_id, p["id"],
                        ASK if any(it["chat"] for it in items) else ASK_PLAIN)
+    if n:
+        await ask_day(ctx, chat_id, message.message_id, p, sent_ts)
     return True
+
+
+async def ask_day(ctx, chat_id: int, msg_id: int, p, sent_ts: int) -> None:
+    """/gaz dan keyin 3 soat ichida yangi chek — qaysi kunga (egasi, 2026-11-04: achotdan keyin 2–3 soat yana
+    nimadir bo'lib qolishi mumkin): achot kuni yoki keyingi kun. Tanlanmasa — xabar yozilgan kun."""
+    raw = ctx.db.get(f"gaz:{p['id']}") or ""
+    ts_s, _, day_s = raw.partition(":")
+    if not ts_s.isdigit() or not day_s or not 0 <= sent_ts - int(ts_s) <= GAZ_ASK_SEC:
+        return
+    d0 = dt.date.fromisoformat(day_s)
+    d1 = d0 + dt.timedelta(days=1)
+    from .ui import kb
+    markup = kb([(f"📅 {d0:%d.%m}", f"wd:{msg_id}:{d0:%Y%m%d}"), (f"📅 {d1:%d.%m}", f"wd:{msg_id}:{d1:%Y%m%d}")])
+    try:
+        await ctx.bot.send_message(chat_id=chat_id, text=f"📅 Отчёт за {d0:%d.%m} уже был. Этот чек за какой день?",
+                                   reply_to_message_id=msg_id, reply_markup=markup)
+    except Exception as exc:
+        log.info("Kun savoli yuborilmadi: %s", exc)
+
+
+async def on_day_cb(ctx, cb, data: str, p) -> None:
+    """«wd:<chek xabari>:<kun>» — /gaz dan keyingi chek kuni tanlandi."""
+    try:
+        _w, mid_s, ymd = data.split(":")
+        day = dt.date(int(ymd[:4]), int(ymd[4:6]), int(ymd[6:8])).isoformat()
+        mid = int(mid_s)
+    except (ValueError, IndexError):
+        return
+    chat_id = cb.message.chat.id
+    n = ctx.db.run("UPDATE wchecks SET day=? WHERE chat_id=? AND msg_id=? AND person_id=? AND deleted=0",
+                   (day, chat_id, mid, p["id"])).rowcount
+    try:
+        await ctx.bot.delete_message(chat_id=chat_id, message_id=cb.message.message_id)
+    except Exception:
+        pass
+    if n:
+        await note(ctx, chat_id, f"✅ Чек за {day[8:10]}.{day[5:7]}. Отправьте /gaz ещё раз — он войдёт в отчёт.",
+                   reply_to=mid)
+
+
+async def kassa_sync(ctx, p, chat_id: int, mid: int, day: str, before: list[int], after: list[int]) -> None:
+    """Achotga kirgan chek o'zgardi yoki o'chdi (egasi, 2026-11-04: kechagi chekni tahrirlasa/o'chirsa ham xatosiz):
+    * achot «Проёб»da qabul qilingan (kassada o'sha kun cheklari bor) — kassadagi chek ham o'zgaradi/o'chadi;
+    * kun yopilgan — kassaga tegilmaydi, egaga xabar;
+    * achot hali kassada yo'q — o'sha kunning cheklari keyingi /gaz achotiga qayta kiradi."""
+    db = ctx.db
+    rem, add = list(before), list(after)
+    for a in list(rem):
+        if a in add:
+            rem.remove(a)
+            add.remove(a)
+    if not rem and not add:
+        return
+    rows = db.all("SELECT ch.id, ch.amount FROM checks ch JOIN reports r ON r.id=ch.report_id WHERE r.status='done' "
+                  "AND ch.rd=? AND ch.skip=0 AND (r.person_id=? OR ch.pay=?) ORDER BY ch.id", (day, p["id"], p["id"]))
+    dm = f"{day[8:10]}.{day[5:7]}"
+    what = f"{' '.join(map(str, before)) or '—'} → {' '.join(map(str, after)) or '—'}"
+    if not rows:                                           # achot hali tashlanmagan — kun keyingi /gaz ga to'liq
+        db.run("UPDATE wchecks SET reported_ts=NULL WHERE person_id=? AND day=?", (p["id"], day))
+        await note(ctx, chat_id, f"↻ Чек за {dm} изменён. Отправьте /gaz — в отчёт войдёт весь день {dm}.", reply_to=mid)
+        return
+    if K.is_closed(db, day):
+        from .kassa_view import h
+        msg = (f"⚠️ <b>{h(p['name'])}</b>: {dm} — chek o'zgardi ({h(what)}), kun yopilgan. Kassani o'zingiz "
+               "to'g'rilang (💵 Kassa → 📊 Hisobot → 📅 Kunlar).")
+        await ctx.notifier._send_many(ctx.notifier.owner_ids(), msg)
+        await note(ctx, chat_id, f"🔒 День {dm} закрыт — руководитель получил сообщение.", reply_to=mid)
+        return
+    pool = list(rows)
+    for old_a, new_a in zip(rem, add):                     # summa o'zgardi
+        hit = next((x for x in pool if x["amount"] == old_a), None)
+        if hit is not None:
+            K.edit_check_amount(db, hit["id"], new_a)
+            pool.remove(hit)
+    for old_a in rem[len(add):]:                           # o'chirildi
+        hit = next((x for x in pool if x["amount"] == old_a), None)
+        if hit is not None:
+            K.delete_check(db, hit["id"])
+            pool.remove(hit)
+    for new_a in add[len(rem):]:                           # qo'shildi
+        K.add_check(db, p["id"], day, new_a)
+    await note(ctx, chat_id, f"✅ Касса за {dm} исправлена: {what}", reply_to=mid)
 
 
 def admin_person(ctx, uid: int | None, owner: bool):
@@ -347,10 +434,13 @@ async def on_edit(ctx, message, p, links_only: bool = False) -> None:
         return
     before = [x["amount"] for x in old if not x["deleted"]]
     reported = next((x["reported_ts"] for x in old if x["reported_ts"]), None)
+    day_keep = next((x["day"] for x in old), None)          # kechagi (yoki tanlangan) kun — tahrirda o'zgarmaydi
     lead = next((x["lead_ts"] for x in old if x["lead_ts"]), None)        # xodim yozgan lid kuni qoladi
     ask = next((x["ask_mid"] for x in old if x["ask_mid"]), None)
     db.run("DELETE FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=?", (chat_id, mid, p["id"]))
     n, unknown, general = _store(ctx, p, chat_id, mid, sent_ts, items) if items else (0, 0, 0)
+    if day_keep:
+        db.run("UPDATE wchecks SET day=? WHERE chat_id=? AND msg_id=?", (day_keep, chat_id, mid))
     if reported:
         db.run("UPDATE wchecks SET reported_ts=? WHERE chat_id=? AND msg_id=?", (reported, chat_id, mid))
     if unknown and (lead or ask):
@@ -360,6 +450,8 @@ async def on_edit(ctx, message, p, links_only: bool = False) -> None:
         await _drop_ask(ctx, chat_id, [{"ask_mid": ask}])
     after = [x["amount"] for x in db.all("SELECT amount FROM wchecks WHERE chat_id=? AND msg_id=? ORDER BY pos",
                                          (chat_id, mid))]
+    if reported and before != after:                       # achotga kirgan edi — kassada ham to'g'rilanadi
+        await kassa_sync(ctx, p, chat_id, mid, day_keep, before, after)
     if not n:
         if general:
             await react(ctx, chat_id, mid, "🧐", "🤨")
@@ -414,3 +506,4 @@ async def send_report(ctx, chat_id: int, p) -> None:
     for x in rows:
         if not x["reported_ts"]:
             db.run("UPDATE wchecks SET reported_ts=? WHERE id=?", (now, x["id"]))
+    db.set(f"gaz:{p['id']}", f"{now}:{today}")              # 3 soat ichidagi yangi chek — «за какой день?»

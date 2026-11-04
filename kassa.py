@@ -134,8 +134,8 @@ def del_price(db: Database, pid: int) -> None:
 
 # ───────────────────────── matnni tushunish (faqat raqamli hisobot xabarlari)
 # «Rd 04.11», shuningdek RD raqami bilan: «Rd3 04.11», «Rd 3 04.11», «Rd3.1 04.11» (🔗 /gaz achoti, egasi 2026-11-04)
-RD_FIND = re.compile(r"(?<![A-Za-zА-Яа-яЁё])(?:rd|рд)\W{0,3}(?:\d{1,2}(?:\.\d)?[ \t]+)?"
-                     r"(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?", re.I)
+RD_FIND = re.compile(r"(?<![A-Za-zА-Яа-яЁё])(?:rd|рд)\W{0,3}(?:(?P<no>\d{1,2})(?:\.\d)?[ \t]+)?"
+                     r"(?P<d>\d{1,2})[./-](?P<m>\d{1,2})(?:[./-](?P<y>\d{2,4}))?", re.I)
 RD_WORD = re.compile(r"(?<![A-Za-zА-Яа-яЁё])(?:rd|рд)(?![A-Za-zА-Яа-яЁё])", re.I)
 DATE_RE = re.compile(r"(?<!\d)\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?(?!\d)")
 DATE_G = re.compile(r"(?<!\d)(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?(?!\d)")
@@ -162,7 +162,13 @@ def mk_date(d, m, y=None, ref: dt.date | None = None) -> dt.date | None:
 
 def find_rd(line: str, ref=None):
     m = RD_FIND.search(line)
-    return mk_date(m.group(1), m.group(2), m.group(3), ref) if m else None
+    return mk_date(m.group("d"), m.group("m"), m.group("y"), ref) if m else None
+
+
+def find_rd_no(line: str) -> str | None:
+    """«Rd3 04.11» → «3» (RD raqami; «Rd3.1» ham «3»), «Rd 04.11» → None."""
+    m = RD_FIND.search(line)
+    return m.group("no") if m and m.group("no") else None
 
 
 def parse_dates(text: str, ref=None) -> list[dt.date]:
@@ -225,41 +231,46 @@ def line_amounts(line: str) -> list[int]:
     return out
 
 
-def parse_report(text: str, ref=None) -> list[tuple[dt.date, int]]:
-    """Hisobot kuni = 'Rd dd.mm' (chekdan keyingi qatorda, shu qatorda yoki sarlavhada). Rd yo'q — ref (yozilgan kun)."""
+def parse_report_ex(text: str, ref=None) -> list[tuple[dt.date, int, str | None]]:
+    """Hisobot kuni = 'Rd dd.mm' (chekdan keyingi qatorda, shu qatorda yoki sarlavhada). Rd yo'q — ref (yozilgan kun).
+    -> [(kun, summa, RD raqami | None)] — RD raqami «Rd3 04.11» dan (🎯 bonus har RD uchun alohida)."""
     ref = ref or dt.date.today()
-    ents = [(find_rd(line, ref), line_amounts(line)) for line in text.splitlines()]
+    ents = [(find_rd(line, ref), find_rd_no(line), line_amounts(line)) for line in text.splitlines()]
     mode, seen = "suffix", False
-    for rd, amts in ents:
+    for rd, _no, amts in ents:
         if rd and not amts:
             mode = "suffix" if seen else "header"
             break
         if amts:
             seen = True
-    slots, pending, cur = [], [], None
-    for rd, amts in ents:
+    slots, pending, cur, cur_no = [], [], None, None
+    for rd, no, amts in ents:
         if rd and amts:
-            slots += [[rd, a] for a in amts]
-            cur = rd
+            slots += [[rd, a, no] for a in amts]
+            cur, cur_no = rd, no
         elif rd:
             if mode == "suffix":
                 for i in pending:
-                    slots[i][0] = rd
+                    slots[i][0], slots[i][2] = rd, no
                 pending = []
-            cur = rd
+            cur, cur_no = rd, no
         elif amts:
             for a in amts:
                 if mode == "header" and cur:
-                    slots.append([cur, a])
+                    slots.append([cur, a, cur_no])
                 else:
-                    slots.append([None, a])
+                    slots.append([None, a, None])
                     pending.append(len(slots) - 1)
     fill = cur or ref
-    return [(rd or fill, a) for rd, a in slots]
+    return [(rd or fill, a, no) for rd, a, no in slots]
 
 
-def report_checks(text: str, post: dt.date, is_owner: bool) -> list[tuple[dt.date, int]]:
-    out = parse_report(text, post)
+def parse_report(text: str, ref=None) -> list[tuple[dt.date, int]]:
+    return [(d, a) for d, a, _no in parse_report_ex(text, ref)]
+
+
+def report_checks_ex(text: str, post: dt.date, is_owner: bool) -> list[tuple[dt.date, int, str | None]]:
+    out = parse_report_ex(text, post)
     if is_owner and out and not has_rd(text):
         lines = [(line_amounts(ln), set(parse_dates(ln, post))) for ln in text.splitlines()]
         filled = [x for x in lines if x[0]]
@@ -267,8 +278,12 @@ def report_checks(text: str, post: dt.date, is_owner: bool) -> list[tuple[dt.dat
             common = set.intersection(*[x[1] for x in filled])
             if len(common) == 1:
                 d = next(iter(common))
-                return [(d, a) for _, a in out]
+                return [(d, a, no) for _, a, no in out]
     return out
+
+
+def report_checks(text: str, post: dt.date, is_owner: bool) -> list[tuple[dt.date, int]]:
+    return [(d, a) for d, a, _no in report_checks_ex(text, post, is_owner)]
 
 
 def kassa_people(db: Database, active_only=True, kinds=("worker", "self", "pool")):
@@ -538,7 +553,7 @@ def create_report(db: Database, person_id, chat_id, msg_id, sender_id, raw, chec
                 old = amounts_of(db, o["id"])
                 days = report_days(db, o["id"])
                 log(db, "rep_edit", o["person_id"] or person_id, days[0] if days else None, o["id"],
-                    amounts_text(old), amounts_text(a for _d, a in checks))
+                    amounts_text(old), amounts_text(c[1] for c in checks))
             if o["person_id"] == person_id:
                 for x in db.all("SELECT rd, pay FROM checks WHERE report_id=?", (o["id"],)):
                     keep.setdefault(x["rd"], set()).add(x["pay"])
@@ -546,12 +561,13 @@ def create_report(db: Database, person_id, chat_id, msg_id, sender_id, raw, chec
     rid = int(db.run("INSERT INTO reports(person_id, chat_id, msg_id, sender_id, sender_name, raw, created) "
                      "VALUES(?,?,?,?,?,?,?)", (person_id, chat_id, msg_id, sender_id, sender_name, raw,
                                                dt.datetime.now().isoformat())).lastrowid)
-    for rd, amt in checks:
+    for c in checks:                                    # (kun, summa) yoki (kun, summa, RD raqami)
+        rd, amt, no = c[0], c[1], (c[2] if len(c) > 2 else None)
         d = iso(rd) if rd else None
         was = keep.get(d) or set()
         pay = next(iter(was)) if len(was) == 1 else None
-        db.run("INSERT INTO checks(report_id, rd, amount, usd, pay) VALUES(?,?,?,?,?)",
-               (rid, d, amt, price_for(db, amt), pay))
+        db.run("INSERT INTO checks(report_id, rd, amount, usd, pay, rd_no) VALUES(?,?,?,?,?,?)",
+               (rid, d, amt, price_for(db, amt), pay, no))
     return rid
 
 
@@ -748,6 +764,14 @@ def add_check(db: Database, pid: int, day: str, amount: int) -> None:
     cid = db.run("INSERT INTO checks(report_id, rd, amount, usd, pay) VALUES(?,?,?,?,?)",
                  (rid, day, amount, price_for(db, amount), w)).lastrowid
     log(db, "chk_add", pid, day, cid, "", amount)
+
+
+def delete_check(db: Database, cid: int) -> None:
+    """Chekni o'chirish (xodim botdagi chekini o'chirdi — kassadagisi ham; tarixda qoladi)."""
+    c = check_row(db, cid)
+    db.run("DELETE FROM checks WHERE id=?", (cid,))
+    if c is not None:
+        log(db, "chk_del", c["acct"], c["rd"], cid, c["amount"], "")
 
 
 def edit_check_amount(db: Database, cid: int, amount: int) -> None:
@@ -1045,6 +1069,27 @@ def _limits(raw: str) -> list[tuple[float, float]]:
     return sorted(out)
 
 
+def bonus_groups(db: Database, start, end) -> list[dict]:
+    """🎯 Kassa bonusi har RD papka × kun alohida (egasi, 2026-11-04: Cred o'z RD si va Lazarus RD sida ishlasa —
+    ikkalasining kassasi qo'shilmaydi). RD raqami hisobotdagi «Rd3 04.11» dan; raqamsiz hisobot — akkaunt bo'yicha.
+    -> [{day, rd, acct, accts, raw, n, kassa, checks}] (bonussizlari ham)."""
+    grp: dict = {}
+    for c in db.all("SELECT ch.rd, ch.amount, ch.rd_no, r.person_id acct FROM checks ch JOIN reports r "
+                    "ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? "
+                    "AND r.person_id IS NOT NULL", (iso(start), iso(end))):
+        key = (c["rd"], f"rd{c['rd_no']}" if c["rd_no"] else f"a{c['acct']}")
+        g = grp.setdefault(key, {"day": c["rd"], "rd": c["rd_no"], "acct": None if c["rd_no"] else c["acct"],
+                                 "raw": 0, "n": 0, "accts": set()})
+        g["raw"] += int(c["amount"])
+        g["n"] += 1
+        g["accts"].add(c["acct"])
+    out = []
+    for g in grp.values():
+        kb, cb = day_bonus(db, g["raw"], g["n"])
+        out.append({**g, "accts": sorted(g["accts"]), "kassa": kb, "checks": cb})
+    return sorted(out, key=lambda x: (x["day"], int(x["rd"]) if x["rd"] else 99, x["acct"] or 0))
+
+
 def day_bonus(db: Database, raw: int, n: int) -> tuple[float, float]:
     """Bir akkauntning bir kunlik bonusi: (kassa uchun, chek soni uchun) $. Kassa 20 000 va undan ko'p — 20 $,
     27 000 va undan ko'p — 30 $ (20 o'rniga); 11 va undan ko'p chek — yana 15 $. Bonus Arturga qo'shiladi (haftalik
@@ -1279,13 +1324,9 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         if r["kind"] in PAYABLE:
             r["zp"] = r2(sum(u * p / 100 for (_acct, p), u in r["earn"].items()))
 
-    # 🎯 kunlik kassa bonuslari (har akkaunt × kun) — Arturga
-    kb_items = []
-    for pid, r in rows.items():
-        for d, dd in r["days"].items():
-            kb, cb = day_bonus(db, dd["raw"], dd["n"])
-            if kb or cb:
-                kb_items.append({"acct": pid, "day": d, "raw": dd["raw"], "n": dd["n"], "kassa": kb, "checks": cb})
+    # 🎯 kunlik kassa bonuslari (har RD papka × kun alohida) — Arturga
+    kb_items = [g for g in bonus_groups(db, start, end) if (g["kassa"] or g["checks"]) and
+                any(a in rows for a in g["accts"])]
     kbonus = r2(sum(x["kassa"] + x["checks"] for x in kb_items)) if partner is not None else 0.0
 
     # jarima / bonus / avans

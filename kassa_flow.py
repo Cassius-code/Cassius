@@ -58,7 +58,7 @@ def make_report(ctx, text: str, day: dt.date, chat_id: int, msg_id, uid: int | N
     tag, body, tag_name = K.split_tag(db, text)
     if not K.is_report_like(body):
         return None
-    checks = K.report_checks(body, day, is_owner)
+    checks = K.report_checks_ex(body, day, is_owner)     # (kun, summa, RD raqami) — 🎯 bonus har RD uchun
     if not checks:
         return None
     poster = _poster(ctx, uid, staff, is_owner, username)
@@ -488,14 +488,22 @@ def day_brief(ctx, pid: int, day: str, owner: bool = False) -> str:
         if x["pay"] and x["pay"] != pid and x["pay"] not in ops:
             ops.append(x["pay"])
     pool = p["kassa_kind"] == "pool"
-    raw, usd = sum(x["amount"] for x in rows), sum(x["usd"] or 0 for x in rows)
-    kb, cb = K.day_bonus(db, raw, len(rows)) if owner else (0.0, 0.0)
+    raw, usd, n = sum(x["amount"] for x in rows), sum(x["usd"] or 0 for x in rows), len(rows)
+    # 🎯 bonus har RD papka × kun (egasi, 2026-11-04); bitta RD — avvalgi ko'rinish, bir nechta — har RD alohida qator
+    groups = [g for g in K.bonus_groups(db, day, day) if pid in g["accts"]] if owner else []
+    simple = len(groups) <= 1 and (not groups or (groups[0]["raw"] == raw and groups[0]["n"] == n))
+    kb, cb = sum(g["kassa"] for g in groups), sum(g["checks"] for g in groups)
     lines = [f"<b>{h(p['name'])}</b>" + (L(ctx, " (umumiy akkaunt)", " (общий аккаунт)") if pool else ""),
              f"{L(ctx, 'Sana', 'Дата')}: {day[8:10]}.{day[5:7]}",
-             f"{L(ctx, 'Kassa', 'Касса')}: {n3(raw)}" + (f" = {money(kb)}$+" if kb else ""),
-             f"{L(ctx, 'RD soni', 'Кол-во рд')}: {len(rows)}" + (f" = {money(cb)}$+" if cb else "")]
+             f"{L(ctx, 'Kassa', 'Касса')}: {n3(raw)}" + (f" = {money(kb)}$+" if kb and simple else ""),
+             f"{L(ctx, 'RD soni', 'Кол-во рд')}: {n}" + (f" = {money(cb)}$+" if cb and simple else "")]
+    if not simple:
+        for g in groups:
+            bits = [f"{money(x)}$" for x in (g["kassa"], g["checks"]) if x]
+            lab = f"RD {g['rd']}" if g["rd"] else "RD"
+            lines.append(f"  {lab}: {n3(g['raw'])} · {g['n']} {L(ctx, 'rd', 'рд')}" + (f" = {'+'.join(bits)}" if bits else ""))
     if kb or cb:
-        parts = [f"{money(x)}$" for x in (kb, cb) if x]
+        parts = [f"{money(x)}$" for x in (kb, cb) if x] if simple else [f"{money(kb + cb)}$"]
         lines.append(f"{L(ctx, 'Bonus', 'Бонус')}: " + (" + ".join(parts) + f" = {money(kb + cb)}$" if len(parts) > 1
                                                        else parts[0]))
     lines.append(f"{L(ctx, 'Kassa ($)', 'Касса ($)')}: {money(usd)}$")

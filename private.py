@@ -167,9 +167,14 @@ async def on_worker_cb(ctx, cb, data: str) -> None:
     yo'riqnoma, begonaga — «Бот сейчас не работает.» (so'rov yuborilmaydi)."""
     user = cb.from_user
     chat_id = cb.message.chat.id
-    if _worker(ctx, user) is None:
+    p = _worker(ctx, user)
+    if p is None:
         from . import lock
         await lock.show_decoy(ctx, chat_id)
+        return
+    if data.startswith("wd:"):                             # /gaz dan keyingi chek — qaysi kunga
+        from . import wchecks
+        await wchecks.on_day_cb(ctx, cb, data, p)
         return
     text, markup = worker_screen(ctx, user)
     await ui.show(ctx.bot, chat_id, text, markup, edit_id=cb.message.message_id)

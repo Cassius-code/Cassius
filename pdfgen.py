@@ -137,6 +137,36 @@ def overall_pdf(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, zp: boo
     return buf.getvalue()
 
 
+def bonus_pdf(items: list[dict], names: dict, s: dt.date, e: dt.date, lang: str) -> bytes:
+    """🎯 Kassa bonuslari (Arturga): har kun × RD — kassa, rd soni, nima uchun qancha; jami. Xodimlar zp sisiz."""
+    _setup()
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Spacer
+    st = _styles()
+    L = (lambda uz, ru: ru if lang == "ru" else uz)
+    story = [_p(L("Kassa bonuslari (Arturga)", "Бонусы за кассу (Артуру)"), st["h"]), _p(V.label(s, e), st["sub"]),
+             Spacer(1, 10)]
+    head = [L("Kun", "День"), "RD", L("Kassa", "Касса"), L("RD soni", "Кол-во рд"), L("Kassa uchun", "За кассу"),
+            L("Chek uchun", "За чеки"), L("Jami", "Итого")]
+    data = [[_p(x, st["cb"]) for x in head]]
+    tk = tc = 0.0
+    for x in items:
+        data.append([_p(V.dshort(x["day"]), st["c"]), _p(V.bonus_where(x, names), st["c"]), _p(V.num(x["raw"]), st["c"]),
+                     _p(x["n"], st["c"]), _p(V.money(x["kassa"]) + " $" if x["kassa"] else "—", st["c"]),
+                     _p(V.money(x["checks"]) + " $" if x["checks"] else "—", st["c"]),
+                     _p(V.money(x["kassa"] + x["checks"]) + " $", st["c"])])
+        tk, tc = tk + x["kassa"], tc + x["checks"]
+    data.append([_p(L("JAMI", "ИТОГО"), st["c"]), _p("", st["c"]), _p("", st["c"]), _p("", st["c"]),
+                 _p(V.money(tk) + " $", st["c"]), _p(V.money(tc) + " $", st["c"]), _p(V.money(tk + tc) + " $", st["c"])])
+    story.append(_table(data, [45, 70, 75, 60, 75, 75, 70]))
+    if not items:
+        story.append(_p(L("Bu davrda bonus yo'q.", "За период бонусов нет."), st["p"]))
+    story += [Spacer(1, 12), _p(dt.datetime.now().strftime("%d.%m.%Y %H:%M"), st["sub"])]
+    buf = io.BytesIO()
+    SimpleDocTemplate(buf, pagesize=A4, leftMargin=32, rightMargin=32, topMargin=32, bottomMargin=32).build(story)
+    return buf.getvalue()
+
+
 def person_pdf(b: dict, r: dict, s: dt.date, e: dt.date, lang: str, owner: bool, ready: bool = True) -> bytes:
     """📄 Bitta xodim: kassa (cheklar soni, $), kunlar bo'yicha cheklar, bonus/jarima va zp (hisoblanmagan bo'lsa —
     «taxminiy»). Egasining va Arturning ulushi yo'q."""

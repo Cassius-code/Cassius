@@ -357,10 +357,11 @@ def owner_card(b: dict, lang: str) -> str:
         lines.append(f"− {w('share_s', lang)} {money(o['sout_self'])} $")
     lines.append(f"= <b>{w('income', lang)}: {money(o['income'])} $</b>")
     if o.get("kbonus") and o["partner_id"] is not None:   # 🎯 kassadan tashqari — Arturga (daromadingiz o'zgarmaydi)
-        per: dict = {}
+        per: dict = {}                                       # har RD bo'yicha (raqamsiz hisobot — akkaunt nomi)
         for x in o["kbonus_items"]:
-            per[x["acct"]] = per.get(x["acct"], 0.0) + x["kassa"] + x["checks"]
-        tail = " · ".join(f"{h(names.get(a, '?'))} {money(v)}" for a, v in per.items())
+            k = f"RD {x['rd']}" if x["rd"] else names.get(x["acct"], "?")
+            per[k] = per.get(k, 0.0) + x["kassa"] + x["checks"]
+        tail = " · ".join(f"{h(k)} {money(v)}" for k, v in per.items())
         lines.append(f"🎯 {w('kbonus_to', lang)}: <b>{money(o['kbonus'])} $</b>"
                      + (f" <i>({tail})</i>" if len(per) > 1 else "")
                      + f" · {w('partner_all', lang)} <b>{money(o['partner_total'])} $</b>")
@@ -395,6 +396,23 @@ def owner_card(b: dict, lang: str) -> str:
             if v:                                           # ro'yxat yig'indisi «Daromadingiz» bilan teng bo'lsin
                 lines.append(f"{sign} {word} {money(v)} $")
     return card(lines, expandable=len(lines) > 14)
+
+
+def bonus_where(x: dict, names: dict) -> str:
+    """🎯 bonus guruhi qayerda: «RD 3» yoki (RD raqamisiz hisobot) akkaunt nomi."""
+    return f"RD {x['rd']}" if x.get("rd") else names.get(x.get("acct"), "?")
+
+
+def bonus_line(x: dict, names: dict, lang: str) -> str:
+    """«02.11 · RD 3 — kassa 22 560 → 20 $ · 12 rd → 15 $ = 35 $» (qaysi kuni, qaysi RD, nima uchun, qancha)."""
+    ru = lang == "ru"
+    parts = []
+    if x["kassa"]:
+        parts.append(f"{'касса' if ru else 'kassa'} {num(x['raw'])} → {money(x['kassa'])} $")
+    if x["checks"]:
+        parts.append(f"{x['n']} {'рд' if ru else 'rd'} → {money(x['checks'])} $")
+    tot = f" = <b>{money(x['kassa'] + x['checks'])} $</b>" if len(parts) > 1 else ""
+    return f"{dshort(x['day'])} · {h(bonus_where(x, names))} — " + " · ".join(parts) + tot
 
 
 def balance_lines(b: dict, lang: str) -> list[str]:

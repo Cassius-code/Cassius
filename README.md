@@ -171,12 +171,16 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   - Har hisobotdan keyin sizga xodimning shu kungi xulosasi keladi (eski kassa botidagidek):
     `Adam` / `Дата: 19.10` / `Касса: 17,100` / `Кол-во рд: 8` / `Касса ($): 64$`. Shu kunga yana hisobot kelsa —
     eskisi o'chadi, kunning jami bilan yangisi keladi.
-  - **🎯 Kassa bonusi — Arturniki.** Bir akkauntning bir kunlik kassasi 20 000 va undan ko'p — 20 $, 27 000 va
-    undan ko'p — 30 $ (20 o'rniga); 11 va undan ko'p chek — yana 15 $. Sizga keladigan xulosada:
-    `Касса: 22,560 = 20$+` / `Кол-во рд: 8` / `Бонус: 20$` / `Касса ($): 88$` / `Итого: 88 + 20 = 108$`.
-    Bonus haftalik hisobda Artur jamisiga qo'shiladi («🎯 Arturga kassa bonuslari: 35 $ · Artur jami …» —
-    📋 To'lov ro'yxatida ham), daromadingiz va xodimlar zp si o'zgarmaydi. Buni faqat siz ko'rasiz (adminlar,
-    xodimlar va «Проёб» — yo'q). Summalar: `kbonus_kassa`, `kbonus_checks` sozlamalari.
+  - **🎯 Kassa bonusi — Arturniki, har RD papka × kun alohida.** Bir RD ning bir kunlik kassasi 20 000 va undan
+    ko'p — 20 $, 27 000 va undan ko'p — 30 $ (20 o'rniga); 11 va undan ko'p chek — yana 15 $. Cred bugun o'z RD
+    si va Lazarus o'rniga RD 8 da ishlasa — ikkala RD ning kassasi qo'shilmaydi, har biri o'zicha. RD — achotdagi
+    `Rd3 04.11` dan (bot har chekda saqlaydi); RD raqami yo'q eski hisobot — akkaunt bo'yicha. Sizga keladigan xulosada:
+    `Касса: 22,560 = 20$+` / `Кол-во рд: 8` / `Бонус: 20$` / `Касса ($): 88$` / `Итого: 88 + 20 = 108$` (bir kunda
+    ikki RD bo'lsa — har RD alohida qator). Bonus haftalik hisobda Artur jamisiga qo'shiladi («🎯 Arturga kassa
+    bonuslari: 65 $ (RD 8 30 · RD 9 35) · Artur jami …» — 📋 To'lov ro'yxatida ham), daromadingiz va xodimlar zp si
+    o'zgarmaydi. **Alohida panel:** 📊 Hisobot → «🎯 Kassa bonuslari» — qaysi kuni, qaysi RD, nima uchun, qancha
+    (`05.11 · RD 9 — kassa 22 000 → 20 $ · 11 rd → 15 $ = 35 $`), jami; xodimlar zp sisiz; davr tugmalari va 📄 PDF.
+    Buni faqat siz ko'rasiz (adminlar, xodimlar va «Проёб» — yo'q). Summalar: `kbonus_kassa`, `kbonus_checks`.
   - **🔗 Xodim chekni botga yozadi** (shaxsiy chatda): topik havolasi va pastida summa
     (`https://t.me/c/…/56` / `1950`, yoki `11) 1950`, `3.500`). Bot 👍 bosadi va hisoblab boradi; havoladan
     RD va lid kelgan kun (topik ochilgan) aniqlanadi. Xato — o'sha xabarga javob qilib
@@ -186,7 +190,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     `10.09` — lid kelgan kun, `Rd3` — havola qaysi RD dan, `11.10` — chek kuni). Xodim uni «Проёб»ga tashlaydi —
     kassa o'sha yerda hozirgidek hisoblanadi. Havola qaysi RD dan bo'lishidan qat'i nazar, kassa ham, zp ham
     achotni tashlagan xodimniki. Ikkinchi `/gaz` — kunning hammasi (yangi qo'shilgani bilan); kechagi `/gaz`
-    qilinmagan cheklar — o'z kuni bilan. «RD 3.1» papkasi ham achotda `Rd3`. Topik bizning RD larda topilmasa (xodim
+    qilinmagan cheklar — o'z kuni bilan. `/gaz` dan keyin 3 soat ichida yangi chek kelsa — bot so'raydi:
+    «📅 Отчёт за 04.11 уже был. Этот чек за какой день?» [04.11] [05.11]. Kechagi (yoki oldingi) chekni tahrirlasa
+    yoki `/delete` qilsa — kuni o'zgarmaydi; achot «Проёб»da qabul qilingan bo'lsa kassadagi chek ham o'zgaradi/
+    o'chadi («✅ Касса за 03.11 исправлена»); hali tashlanmagan bo'lsa — o'sha kun keyingi `/gaz` ga to'liq kiradi;
+    kun yopilgan bo'lsa — kassaga tegilmaydi, sizga xabar keladi. «RD 3.1» papkasi ham achotda `Rd3`. Topik bizning RD larda topilmasa (xodim
     bizga aloqasi yo'q RD da ishlagan) — chek qabul qilinadi va bot chek ostida so'raydi «Когда пришёл лид?»; xodim
     sanani yozadi (`10.09` — savolga javob qilib yoki shunchaki) — achotda `10.09 4000` / `Rd 11.10` (RD raqamisiz).
     Javob bo'lmasa — sanasiz, `/gaz` da «⚠️ Без даты лида». Asosiy akkaunt ko'rmaydigan RD da xodim havolasiz

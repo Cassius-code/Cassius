@@ -239,7 +239,8 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS idx_reports_person ON reports(person_id, status);
 CREATE TABLE IF NOT EXISTS checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, rd TEXT, amount INTEGER NOT NULL,
-    usd REAL, skip INTEGER NOT NULL DEFAULT 0, pay INTEGER
+    usd REAL, skip INTEGER NOT NULL DEFAULT 0, pay INTEGER,
+    rd_no TEXT                                -- hisobotdagi RD raqami («Rd3 04.11» → 3): 🎯 bonus har RD uchun alohida
 );
 CREATE INDEX IF NOT EXISTS idx_checks_report ON checks(report_id);
 CREATE INDEX IF NOT EXISTS idx_checks_rd ON checks(rd);

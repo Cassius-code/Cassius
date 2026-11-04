@@ -175,6 +175,8 @@ def report_show(ctx, r: Req, key: str):
                          (r.L("📋 To'lov ro'yxati", "📋 Ведомость"), f"kpay:{s.isoformat()}")])
     rows.append([(r.L("📅 Kunlar bo'yicha", "📅 По дням"), f"kd:{pkey}" if s != e else f"kdd:{s.isoformat()}"),
                  (r.L("🏆 Reyting", "🏆 Рейтинг"), f"kg:{key}"), ("📄 PDF", f"kf:{key}")])
+    if r.owner:                                              # 🎯 kassa bonuslari — alohida panel (egasi, 2026-11-04)
+        rows.append([(r.L("🎯 Kassa bonuslari", "🎯 Бонусы за кассу"), f"kbn:{key}")])
     if key in ("tm", "lm"):                                  # 🗓 oy yakuni — oy tanlansa
         rows.append([(r.L("🗓 Oy yakuni", "🗓 Итоги месяца"), f"km:{s.year}-{s.month:02d}")])
     rows.append(nav(r, "kr"))
@@ -464,6 +466,49 @@ async def pdf(ctx, r: Req):
     await ctx.notifier.send_document(r.chat_id, data, f"kassa_{s.isoformat()}_{e.isoformat()}.pdf",
                                      f"📄 {plabel(s, e)}")
     return None
+
+
+def bonus_items(ctx, s: dt.date, e: dt.date) -> list[dict]:
+    return [x for x in K.bonus_groups(ctx.db, s, e) if x["kassa"] or x["checks"]]
+
+
+def bonus_rule(ctx, r: Req) -> str:
+    """Qoida (sozlamadan): «kassa 20 000 — 20 $, 27 000 — 30 $; 11+ rd — yana 15 $» — har RD × kun alohida."""
+    kas = ", ".join(f"{num(int(a))} — {money(u)} $" for a, u in K._limits(ctx.db.get("kbonus_kassa")))
+    chk = ", ".join(f"{int(a)}+ {r.L('rd', 'рд')} — {money(u)} $" for a, u in K._limits(ctx.db.get("kbonus_checks")))
+    return r.L(f"Har RD × kun alohida: kassa {kas}; {chk} (yana). Bonus Arturga, xodimlarga daxli yo'q.",
+               f"Каждый RD × день отдельно: касса {kas}; {chk} (ещё). Бонус Артуру, сотрудникам не идёт.")
+
+
+@screen("kbn", "owner")
+async def bonus_panel(ctx, r: Req):
+    """🎯 Kassa bonuslari: qaysi kuni, qaysi RD, nima uchun, qancha; jami (xodimlar zp sisiz) — va 📄 PDF."""
+    from .kassa_view import bonus_line
+    key = r.args[0] if r.args else "tw"
+    s, e = range_of(ctx, key)
+    items = bonus_items(ctx, s, e)
+    names = {p["id"]: p["name"] for p in ctx.db.all("SELECT id, name FROM people")}
+    if len(r.args) > 1 and r.args[1] == "pdf":
+        from . import pdfgen
+        try:
+            data = await asyncio.to_thread(pdfgen.bonus_pdf, items, names, s, e, r.lang)
+        except Exception as exc:
+            return r.L(f"⚠️ PDF yaratilmadi: {h(exc)}", f"⚠️ PDF не создан: {h(exc)}")
+        await ctx.notifier.send_document(r.chat_id, data, f"bonus_{s.isoformat()}_{e.isoformat()}.pdf",
+                                         f"🎯 {plabel(s, e)}")
+        return None
+    lines = [bonus_line(x, names, r.lang) for x in items] or [r.L("<i>Bu davrda bonus yo'q.</i>",
+                                                                  "<i>За период бонусов нет.</i>")]
+    total = sum(x["kassa"] + x["checks"] for x in items)
+    opts = [(r.L("Bugun", "Сегодня"), "td"), (r.L("Kecha", "Вчера"), "yd"), (r.L("Bu hafta", "Эта неделя"), "tw"),
+            (r.L("O'tgan hafta", "Прошлая неделя"), "lw"), (r.L("Bu oy", "Этот месяц"), "tm"),
+            (r.L("O'tgan oy", "Прошлый месяц"), "lm")]
+    rows = grid([(("✅ " if k == key else "") + t, f"kbn:{k}") for t, k in opts], 3)
+    rows.append([("📄 PDF", f"kbn:{key}:pdf")])
+    rows.append(nav(r, f"kr:{key}"))
+    return ui.join(title("🎯", r.L("KASSA BONUSLARI", "БОНУСЫ ЗА КАССУ"), plabel(s, e)), "", card(lines),
+                   card([r.L(f"Jami: <b>{money(total)} $</b> → Arturga", f"Итого: <b>{money(total)} $</b> → Артуру")]),
+                   f"<i>{bonus_rule(ctx, r)}</i>"), kb(*rows)
 
 
 @screen("kfx", "full")

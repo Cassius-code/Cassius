@@ -388,6 +388,12 @@ def build_router(ctx) -> Router:
             from . import private
             await private.on_worker_cb(ctx, cb, data)
             return
+        if data.startswith("wd:"):                         # ega/admin cheki: /gaz dan keyin — qaysi kunga
+            from . import wchecks
+            me = wchecks.admin_person(ctx, uid, req.owner)
+            if me is not None:
+                await wchecks.on_day_cb(ctx, cb, data, me)
+            return
         chat = cb.message.chat.id
         ui.touch(chat)
         before, shown = ui.VIEW.get(chat), ui.SHOW_N.get(chat, 0)
