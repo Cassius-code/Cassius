@@ -311,9 +311,9 @@ def admin_person(ctx, uid: int | None, owner: bool):
 
 
 async def on_admin_message(ctx, message, p) -> bool:
-    """Ega/admin panel chatida (egasi, 2026-11-04: «man ham RD da ishlayapman»): faqat 🔗 havolali chek, /gaz,
-    javob qilib /delete va «Когда пришёл лид?» ga sana. Havolasiz raqamli matn — avvalgidek to'g'ridan-to'g'ri
-    kassa hisoboti (kassa_flow). -> ishlandimi."""
+    """Ega/admin panel chatida (egasi, 2026-11-04: «man ham RD da ishlayapman»): 🔗 havolali chek, ismsiz va «Rd» siz
+    raqam («1950 10.09» — xodimdagidek), /gaz, javob qilib /delete, «Когда пришёл лид?» ga sana. Tepasida ism yoki
+    «Rd» bilan yozilgan achot — avvalgidek to'g'ridan-to'g'ri kassa hisoboti (kassa_flow). -> ishlandimi."""
     text = message.text or message.caption or ""
     cmd = _cmd(text)
     if cmd in CMD_GAZ or LINK_RE.search(text):
@@ -324,6 +324,11 @@ async def on_admin_message(ctx, message, p) -> bool:
         return await on_message(ctx, message, p)
     if DATE_ONLY.fullmatch(text):                          # bot so'ragan lid kuni
         return await on_lead_date(ctx, message, p)
+    # ismsiz va «Rd» siz raqam («1950 10.09») — xodimdagidek chek (egasi, 2026-11-04). Tepasida ism («Adam» / o'z
+    # nomi) yoki «Rd 04.11» bo'lsa — avvalgidek darhol o'sha akkauntga kassa hisoboti (kassa_flow)
+    if not K.RD_FIND.search(text) and not K.split_tag(ctx.db, text)[2] and \
+            parse(text, local_date(int(message.date.timestamp()), ctx.tz)):
+        return await on_message(ctx, message, p)
     return False
 
 
