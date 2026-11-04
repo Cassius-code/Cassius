@@ -524,6 +524,8 @@ def build_router(ctx) -> Router:
             me = wchecks.admin_person(ctx, uid, req.owner)
             try:
                 if me is not None and await wchecks.on_admin_message(ctx, message, me):
+                    # menyu darhol pastga tushadi, havolalar tepada qoladi (egasi, 2026-11-04)
+                    await render(req, await main_menu(ctx, req), fresh=True)
                     return
             except Exception:
                 log.exception("Ega/admin cheki")
