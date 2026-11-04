@@ -506,4 +506,6 @@ async def send_report(ctx, chat_id: int, p) -> None:
     for x in rows:
         if not x["reported_ts"]:
             db.run("UPDATE wchecks SET reported_ts=? WHERE id=?", (now, x["id"]))
-    db.set(f"gaz:{p['id']}", f"{now}:{today}")              # 3 soat ichidagi yangi chek — «за какой день?»
+    # 3 soat ichidagi yangi chek — «за какой день?»; achot kuni — achotdagi oxirgi kun (yarim tundan keyin /gaz
+    # qilsa ham kechagi ish uchun — o'sha kun)
+    db.set(f"gaz:{p['id']}", f"{now}:{max(x['day'] for x in rows)}")
