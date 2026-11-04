@@ -133,7 +133,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     ishlagan bo'lsa, o'shanga. «🔁 Kim ishladi» belgisi o'sha kunda saqlanadi: hisobot xabari tahrirlansa, o'sha kunga
     to'liqroq hisobot kelsa yoki chek qo'lda qo'shilsa ham zp belgilangan odamga (umumiy akkauntda har hisobot
     avvalgidek alohida so'raladi).
-  - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
+  - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga); **🔗 Bugungi cheklar** (faqat egaga) —
+    xodimlar bugun botga yozgan cheklar, har xodim bir qatorda: `Cred — 8 550 · 3 rd · 34 $` (kassa · nechta rd ·
+    $ prays bo'yicha; ❓ — praysda yo'q summa bor) va «Jami»; /delete qilinganlari kirmaydi. Va «Задержки сейчас» — har RD
     bitta qisqa qator (📌 doskadagi bilan bir xil: 🔴 задержка · 🟡 скоро задержка · ☕ перерыв · 🟢, «ждут N»).
     Hammasi bitta ramkada. Menyu o‘z joyida yangilanadi: 5 soniyada bir tekshiriladi, faqat raqam o'zgarsa
     tahrirlanadi (tugma bosilgan paytda tegmaydi). Soatda soniya yo'q: har soniya tahrirlansa, Telegram tugmalarni

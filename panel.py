@@ -53,6 +53,38 @@ def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", messag
 
 
 # ───────────────────────── bosh menyu
+def today_checks(db, day: str, r: Req) -> list[str]:
+    """🔗 Bugun xodimlar botga yozgan cheklar (o'chirilganlarsiz), har xodim: kassa · nechta rd · $ (prays bo'yicha).
+    Faqat egaga (bosh menyuda jonli yangilanadi)."""
+    from .kassa_view import money, num
+    rows = db.all("SELECT w.person_id pid, p.name name, w.amount amount FROM wchecks w JOIN people p ON p.id=w.person_id "
+                  "WHERE w.day=? AND w.deleted=0 ORDER BY w.ts", (day,))
+    if not rows:
+        return []
+    price = [(x["lo"], x["hi"], float(x["usd"])) for x in db.all("SELECT lo, hi, usd FROM prices")]
+
+    def usd_of(a: int):                                    # kassa.price_for bilan bir xil: eng tor oraliq
+        hit = [(hi - lo, u) for lo, hi, u in price if lo <= a <= hi]
+        return min(hit)[1] if hit else None
+    per: dict = {}
+    for x in rows:
+        s = per.setdefault(x["pid"], {"name": x["name"], "n": 0, "raw": 0, "usd": 0.0, "noprice": 0})
+        u = usd_of(int(x["amount"]))
+        s["n"] += 1
+        s["raw"] += int(x["amount"])
+        s["usd"] += u or 0.0
+        s["noprice"] += u is None
+    rd = r.L("rd", "рд")
+    out = ["", f"<b>{r.L('🔗 Bugungi cheklar', '🔗 Чеки за сегодня')}</b>"]
+    for s in sorted(per.values(), key=lambda v: -v["raw"]):
+        out.append(f"{h(s['name'])} — {num(s['raw'])} · {s['n']} {rd} · <b>{money(s['usd'])} $</b>"
+                   + (" ❓" if s["noprice"] else ""))
+    if len(per) > 1:
+        out.append(f"{r.L('Jami', 'Итого')} — <b>{num(sum(v['raw'] for v in per.values()))}</b> · "
+                   f"{sum(v['n'] for v in per.values())} {rd} · <b>{money(sum(v['usd'] for v in per.values()))} $</b>")
+    return out
+
+
 @screen("m", "zp")
 async def main_menu(ctx, r: Req):
     if not r.can("view"):               # 💵 faqat zp ko'radigan admin — uning menyusi shu
@@ -86,6 +118,7 @@ async def main_menu(ctx, r: Req):
         b = K.calc(db, K.week_start(t.date()), t.date())
         cash = sum(x["usd"] for x in b["rows"].values() if x["kind"] != "partner")
         lines.append(f"💰 Cash — <b>{money(cash)} $</b> <i>({r.L('dushanbadan', 'с понедельника')})</i>")
+        lines += today_checks(db, day, r)                 # 🔗 kim bugun nechta chek: kassa · rd · $ (egasi, 2026-11-04)
     # har RD hozir — aniq va qisqa: 🔴 zaderjka · 🟡 tez orada zaderjka (15+ daq) · ☕ xodim tanaffusda · 🟢 joyida;
     # «kutyapti N» — shu RD da javob kutayotgan lidlar (hammasi qo'shilsa — tepadagi «Javob kutyapti»)
     live = [f"<b>{r.L('Hozir zaderjka', 'Задержки сейчас')}</b>"]
