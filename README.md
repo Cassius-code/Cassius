@@ -168,7 +168,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   - **🧮 Tekshiruv.** Hisobotda: Kassa = Artur (jarima/bonus bilan) + xodimlar (zp + bonus − jarima) + ulushlar +
     sizga ✅.
   - Zp hisoblash usuli: **tugma bilan** (odatiy) / **avtomatik** / **o'chiq** (o'zingiz hisoblaysiz).
-  - Har hisobotdan keyin sizga xodimning shu kungi xulosasi keladi (eski kassa botidagidek):
+  - Har hisobotdan keyin sizga xodimning shu kungi xulosasi keladi (eski kassa botidagidek, doim ruscha — menyu
+    o'zbekcha bo'lsa ham):
     `Adam` / `Дата: 19.10` / `Касса: 17,100` / `Кол-во рд: 8` / `Касса ($): 64$`. Shu kunga yana hisobot kelsa —
     eskisi o'chadi, kunning jami bilan yangisi keladi.
   - **🎯 Kassa bonusi — Arturniki, har RD papka × kun alohida.** Bir RD ning bir kunlik kassasi 20 000 va undan

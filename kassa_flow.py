@@ -476,7 +476,8 @@ def day_brief(ctx, pid: int, day: str, owner: bool = False) -> str:
     """Xodimning shu kungi xulosasi (eski kassa botidagidek): ism, sana, kassa, RD soni, kassa ($).
     Shu kunning hamma qabul qilingan hisobotlari bo'yicha. Umumiy akkaunt — kim ishlagani ham.
     owner — egasining nusxasi: 🎯 kassa bonusi (Arturniki, faqat egasi ko'radi; egasi, 2026-11-04):
-    «Касса: 22,560 = 20$+», «Бонус: 20$», «Итого: 88 + 20 = 108$»."""
+    «Касса: 22,560 = 20$+», «Бонус: 20$», «Итого: 88 + 20 = 108$».
+    Doim ruscha — menyu o'zbekcha bo'lsa ham (egasi, 2026-11-04; eski kassa botidagidek)."""
     db = ctx.db
     p = P.person(db, pid)
     if p is None:
@@ -493,25 +494,25 @@ def day_brief(ctx, pid: int, day: str, owner: bool = False) -> str:
     groups = [g for g in K.bonus_groups(db, day, day) if pid in g["accts"]] if owner else []
     simple = len(groups) <= 1 and (not groups or (groups[0]["raw"] == raw and groups[0]["n"] == n))
     kb, cb = sum(g["kassa"] for g in groups), sum(g["checks"] for g in groups)
-    lines = [f"<b>{h(p['name'])}</b>" + (L(ctx, " (umumiy akkaunt)", " (общий аккаунт)") if pool else ""),
-             f"{L(ctx, 'Sana', 'Дата')}: {day[8:10]}.{day[5:7]}",
-             f"{L(ctx, 'Kassa', 'Касса')}: {n3(raw)}" + (f" = {money(kb)}$+" if kb and simple else ""),
-             f"{L(ctx, 'RD soni', 'Кол-во рд')}: {n}" + (f" = {money(cb)}$+" if cb and simple else "")]
+    lines = [f"<b>{h(p['name'])}</b>" + (" (общий аккаунт)" if pool else ""),
+             f"Дата: {day[8:10]}.{day[5:7]}",
+             f"Касса: {n3(raw)}" + (f" = {money(kb)}$+" if kb and simple else ""),
+             f"Кол-во рд: {n}" + (f" = {money(cb)}$+" if cb and simple else "")]
     if not simple:
         for g in groups:
             bits = [f"{money(x)}$" for x in (g["kassa"], g["checks"]) if x]
             lab = f"RD {g['rd']}" if g["rd"] else "RD"
-            lines.append(f"  {lab}: {n3(g['raw'])} · {g['n']} {L(ctx, 'rd', 'рд')}" + (f" = {'+'.join(bits)}" if bits else ""))
+            lines.append(f"  {lab}: {n3(g['raw'])} · {g['n']} рд" + (f" = {'+'.join(bits)}" if bits else ""))
     if kb or cb:
         parts = [f"{money(x)}$" for x in (kb, cb) if x] if simple else [f"{money(kb + cb)}$"]
-        lines.append(f"{L(ctx, 'Bonus', 'Бонус')}: " + (" + ".join(parts) + f" = {money(kb + cb)}$" if len(parts) > 1
+        lines.append("Бонус: " + (" + ".join(parts) + f" = {money(kb + cb)}$" if len(parts) > 1
                                                        else parts[0]))
-    lines.append(f"{L(ctx, 'Kassa ($)', 'Касса ($)')}: {money(usd)}$")
+    lines.append(f"Касса ($): {money(usd)}$")
     if kb or cb:
-        lines.append(f"{L(ctx, 'Jami', 'Итого')}: {money(usd)} + {money(kb + cb)} = {money(usd + kb + cb)}$")
+        lines.append(f"Итого: {money(usd)} + {money(kb + cb)} = {money(usd + kb + cb)}$")
     if ops:
         names = [P.person(db, i) for i in ops]
-        lines.append(f"{L(ctx, 'Ishladi', 'Работал')}: " + ", ".join(h(q["name"]) for q in names if q is not None))
+        lines.append("Работал: " + ", ".join(h(q["name"]) for q in names if q is not None))
     return "\n".join(lines)
 
 
