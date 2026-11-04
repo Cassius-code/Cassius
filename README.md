@@ -313,15 +313,22 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 
 - **Zaxira ega.** Railway → Variables → `ADMIN_IDS` ga ikkinchi akkauntingiz ID sini vergul bilan qo'shing:
   `111111111,222222222`. Ikkalasi ham to'liq ega.
-- **Botning o'zidan:** ⚙️ → 👮 Adminlar → ➕ ID bo'yicha admin → nomini bosib 👑 ega darajasiga o'tkazing.
+- **Botning o'zidan:** ⚙️ → 👮 Adminlar → ➕ ID bo'yicha admin → kontaktini (📎 → Kontakt) yoki ID sini yuboring →
+  nomini bosib 👑 ega darajasiga o'tkazing.
+- **🔒 Begona akkaunt (xavfsizlik).** Bot tanimaydigan akkaunt /start bossa yoki nima yozsa ham — faqat
+  «Бот сейчас не работает.» (tugmasiz; ID ham, «Запросить доступ» ham yo'q). Shu chatga 🔒 qulf kodini (yoki 🔐 tiklash
+  kodini) yozsangiz — o'sha akkaunt 👑 ega bo'ladi va panel ochiladi; kod xabari darhol o'chadi, boshqa egalarga
+  «🔐 Yangi 👑 ega … kirdi» xabari boradi. Noto'g'ri kod: bir akkauntga kuniga 5 ta, hammaga 20 ta urinish
+  (/start kabi buyruqlar sanalmaydi).
 - **🔐 Tiklash kodi:** ⚙️ → 👮 Adminlar → 🔐 Tiklash kodi → kamida 8 belgili kod yozing va qog'ozga yozib qo'ying.
-  Akkauntingiz yo'qolsa — yangi akkauntdan botga `/ega KOD` yozasiz va ega bo'lasiz. Kod bir marta ishlaydi.
-  Noto'g'ri urinishlar haqida egalarga xabar boradi.
+  Akkauntingiz yo'qolsa — yangi akkauntdan botga shu kodni (yoki `/ega KOD`) yozasiz va ega bo'lasiz. Kod bir marta
+  ishlaydi.
 - Akkaunt o'g'irlangan bo'lsa: Railway → `ADMIN_IDS` dan eski ID ni olib tashlang (ma'lumot o'chmaydi).
 
 ## Buyruqlar
 
-- Shaxsiy chat: `/menu` — panel, `/hisobot` — bugungi hisobot, `/id` — Telegram ID.
+- Shaxsiy chat: `/menu` — panel, `/hisobot` — bugungi hisobot, `/id` — Telegram ID (faqat adminlarga; xodim /start
+  bossa — faqat cheklar yo'riqnomasi, tugmasiz).
 - «Проёб» guruhi:
   - `/proyob` — shu guruhni «Проёб» qilish
   - `/statistika` — hafta xulosasi va eng yaxshilar

@@ -714,18 +714,25 @@ async def recovery_set(ctx, r: Req):
 async def admin_add_ask(ctx, r: Req):
     ui.ask(r, "admin_add", "sd")
     return title("➕", r.L("YANGI ADMIN", "НОВЫЙ АДМИН")) + "\n\n" + card(
-        [r.L("Telegram ID sini yuboring (u botga /id yozib bilib oladi). Boshida «🛠 to'liq».",
-             "Пришлите Telegram ID (он узнает через /id у бота). По умолчанию «🛠 полный».")]), ui.cancel_kb(r, "sd")
+        [r.L("Uning kontaktini yuboring (📎 → Kontakt) yoki Telegram ID sini yozing. Boshida «🛠 to'liq». "
+             "Bot begonaga ID ni aytmaydi — faqat «Бот сейчас не работает.».",
+             "Пришлите его контакт (📎 → Контакт) или Telegram ID. По умолчанию «🛠 полный». "
+             "Посторонним бот ID не показывает — только «Бот сейчас не работает.».")]), ui.cancel_kb(r, "sd")
 
 
 @on_input("admin_add", "owner")
 async def admin_add(ctx, r: Req):
-    m = re.search(r"\d{5,}", r.text)
-    if not m:
-        return r.L("⚠️ ID — son", "⚠️ ID — число")
-    P.set_admin(ctx.db, int(m.group(0)), "full")
+    contact = getattr(r.message, "contact", None)          # 📎 → Kontakt (Telegram foydalanuvchisi bo'lsa — ID bor)
+    if contact is not None and getattr(contact, "user_id", None):
+        uid, name = int(contact.user_id), " ".join(x for x in (contact.first_name, contact.last_name) if x)
+    else:
+        m = re.search(r"\d{5,}", r.text or "")
+        if not m:
+            return r.L("⚠️ Kontakt yoki ID (son) yuboring", "⚠️ Пришлите контакт или ID (число)")
+        uid, name = int(m.group(0)), ""
+    P.set_admin(ctx.db, uid, "full", name)
     try:
-        await ctx.bot.send_message(int(m.group(0)), "👮 /menu")
+        await ctx.bot.send_message(uid, "👮 /menu")
     except Exception:
         pass
     r.args = []

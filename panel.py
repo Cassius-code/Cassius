@@ -416,6 +416,10 @@ def build_router(ctx) -> Router:
             return
         from . import recovery
         u = message.from_user
+        if not level_of(ctx, u.id if u else None):         # begona — «Бот сейчас не работает.» yoki kod (private)
+            from . import private
+            await private.on_text(ctx, message)
+            return
         parts = (message.text or "").split(maxsplit=1)
         try:
             await message.delete()                          # kod chatda qolmasin
@@ -438,6 +442,10 @@ def build_router(ctx) -> Router:
     @r.message(F.chat.type == "private", Command("id"))
     async def on_id(message: Message) -> None:
         if await locked_input(message):
+            return
+        if not level_of(ctx, message.from_user.id if message.from_user else None):
+            from . import private                          # begona va xodimga ID ko'rsatilmaydi (xavfsizlik)
+            await private.on_text(ctx, message)
             return
         await message.answer(f"🆔 <code>{message.from_user.id}</code>", parse_mode="HTML")
 
