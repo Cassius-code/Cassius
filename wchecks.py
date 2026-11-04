@@ -27,7 +27,7 @@ from .timeutil import fmt, local_date
 log = logging.getLogger("wchecks")
 
 LINK_RE = re.compile(r"(?:https?://)?(?:t|telegram)\.me/c/(\d{5,})/(\d+)(?:/(\d+))?(?:\?thread=(\d+))?", re.I)
-NUMBERING = re.compile(r"(?m)^\s*\d{1,3}[).]\s+")          # «11) 1950» — tartib raqami summa emas
+NUMBERING = re.compile(r"(?m)^\s*\d{1,2}[).]\s+")          # «11) 1950» — tartib raqami summa emas
 CMD_GAZ = ("/gaz",)
 CMD_DEL = ("/delete", "/del")
 
@@ -45,10 +45,44 @@ def _amounts(seg: str) -> list[int]:
     return out
 
 
-def parse(text: str) -> list[dict]:
-    """Xabardagi havolalar va ularning summalari: [{chat, topic, amounts}]. Havolasiz xabar — [] (chek emas)."""
+PLAIN_OK = re.compile(r"[\d\s.,;:/()+=\-–—]+")             # havolasiz chek: faqat raqam, sana, belgilar
+
+
+def _plain(text: str, ref) -> list[dict]:
+    """Havolasiz chek — asosiy akkaunt ko'rmaydigan RD (egasi, 2026-11-04): «1950 10.09», «1950\n10.09»,
+    «1950. 10.09» (summa va lid kelgan kun), «10.09\n1950» ham. Sanasiz «1950» — bot sanani so'raydi."""
+    if not PLAIN_OK.fullmatch(text) or K.is_phone(text):
+        return []
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    out, pend, i = [], None, 0
+    while i < len(lines):
+        ln = NUMBERING.sub(" ", lines[i])
+        amts, ds = K.line_amounts(ln), K.parse_dates(ln, ref)
+        if not amts:
+            pend = ds[0] if ds and DATE_ONLY.fullmatch(lines[i]) else None
+            i += 1
+            continue
+        if not ds and i + 1 < len(lines) and DATE_ONLY.fullmatch(lines[i + 1]):
+            ds = K.parse_dates(lines[i + 1], ref)
+            i += 1
+        if not ds and pend:
+            ds = [pend]
+        pend = None
+        if len(ds) == len(amts) > 1:
+            out += [{"chat": None, "topic": None, "amounts": [a], "lead": d} for a, d in zip(amts, ds)]
+        else:
+            out.append({"chat": None, "topic": None, "amounts": amts, "lead": ds[0] if ds else None})
+        i += 1
+    return out
+
+
+def parse(text: str, ref=None) -> list[dict]:
+    """Xabardagi cheklar: [{chat, topic, amounts, lead}]. Havola bo'lsa — havola va undan keyingi summa; havolasiz —
+    summa va lid kelgan kun («1950 10.09»). Chekka o'xshamasa — [] (oddiy matn)."""
     text = text or ""
     links = list(LINK_RE.finditer(text))
+    if not links:
+        return [] if K.RD_FIND.search(text) else _plain(text, ref)      # «Rd 04.11» — achot, chek emas
     out = []
     for i, m in enumerate(links):
         end = links[i + 1].start() if i + 1 < len(links) else len(text)
@@ -56,8 +90,23 @@ def parse(text: str) -> list[dict]:
         if not amts and i == 0:                            # summa havoladan oldin yozilgan bo'lsa
             amts = _amounts(text[:m.start()])
         topic = int(m.group(4) or m.group(2))
-        out.append({"chat": int(f"-100{m.group(1)}"), "topic": topic, "amounts": amts})
+        out.append({"chat": int(f"-100{m.group(1)}"), "topic": topic, "amounts": amts, "lead": None})
     return out
+
+
+def link_state(db, chat_id: int, topic_id: int) -> str:
+    """Havola: ok — bizning RD dagi lid topigi (yoki oddiy guruh); general — guruhimizda, lekin lid topigi emas
+    («General» yoki topiksiz xabar); unknown — bot bilmaydigan guruh."""
+    c = db.one("SELECT is_forum FROM chats WHERE chat_id=?", (chat_id,))
+    if c is None:
+        return "unknown"
+    if not c["is_forum"]:
+        return "ok"
+    if topic_id <= 1:
+        return "general"
+    known = db.one("SELECT 1 FROM topics WHERE chat_id=? AND topic_id=?", (chat_id, topic_id)) or \
+        db.one("SELECT 1 FROM threads WHERE chat_id=? AND topic_id=?", (chat_id, topic_id))
+    return "ok" if known else "general"
 
 
 def topic_info(db, chat_id: int, topic_id: int):
@@ -87,13 +136,14 @@ def rd_label(db, fid) -> str:
 
 
 ASK = "📅 Не нашёл этот топик в наших RD. Когда пришёл лид? Ответьте на это сообщение датой, например: 10.09"
+ASK_PLAIN = "📅 Когда пришёл лид? Ответьте на это сообщение датой, например: 10.09"      # havolasiz, sanasiz chek
 DATE_ONLY = re.compile(r"\s*\d{1,2}[./]\d{1,2}(?:[./]\d{2,4})?\s*")
 
 
-async def ask_lead(ctx, chat_id: int, msg_id: int, pid: int) -> None:
+async def ask_lead(ctx, chat_id: int, msg_id: int, pid: int, text: str = ASK) -> None:
     """Topik topilmadi (bizga aloqasi yo'q RD) — lid qachon kelganini xodimdan so'raymiz (egasi, 2026-11-04)."""
     try:
-        m = await ctx.bot.send_message(chat_id=chat_id, text=ASK, reply_to_message_id=msg_id)
+        m = await ctx.bot.send_message(chat_id=chat_id, text=text, reply_to_message_id=msg_id)
     except Exception as exc:
         log.info("Savol yuborilmadi: %s", exc)
         return
@@ -140,30 +190,44 @@ async def on_lead_date(ctx, message, p) -> bool:
     return True
 
 
-def _store(ctx, p, chat_id: int, msg_id: int, sent_ts: int, items: list[dict]) -> tuple[int, int]:
-    """Cheklarni yozish. -> (nechta chek, nechtasining topigi topilmadi)."""
+def _store(ctx, p, chat_id: int, msg_id: int, sent_ts: int, items: list[dict]) -> tuple[int, int, int]:
+    """Cheklarni yozish. -> (nechta chek, nechtasining lid kuni noma'lum, nechta «General» havolasi — yozilmadi)."""
     db = ctx.db
     day = local_date(sent_ts, ctx.tz).isoformat()
-    n = unknown = pos = 0
+    n = unknown = general = pos = 0
     for it in items:
-        fid, tts = topic_info(db, it["chat"], it["topic"])
-        if fid is None or tts is None:
+        lead = None
+        if it["chat"] is None:                             # havolasiz: lid kuni xodim yozgan
+            fid, tts = None, None
+            if it["lead"]:
+                lead = int(dt.datetime.combine(it["lead"], dt.time(12), tzinfo=ctx.tz).timestamp())
+        else:
+            if link_state(db, it["chat"], it["topic"]) == "general":
+                general += 1                               # lid topigi emas — 🧐, hisobga kirmaydi
+                continue
+            fid, tts = topic_info(db, it["chat"], it["topic"])
+        if tts is None and lead is None:
             unknown += len(it["amounts"])
         for a in it["amounts"]:
             db.run("INSERT INTO wchecks(person_id, chat_id, msg_id, pos, link_chat, link_topic, folder_id, topic_ts, "
-                   "amount, day, ts) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                   (p["id"], chat_id, msg_id, pos, it["chat"], it["topic"], fid, tts, a, day, sent_ts))
+                   "lead_ts, amount, day, ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (p["id"], chat_id, msg_id, pos, it["chat"], it["topic"], fid, tts, lead, a, day, sent_ts))
             pos += 1
             n += 1
-    return n, unknown
+    return n, unknown, general
 
 
-async def react(ctx, chat_id: int, msg_id: int, emoji: str) -> None:
-    try:
-        from aiogram.types import ReactionTypeEmoji
-        await ctx.bot.set_message_reaction(chat_id=chat_id, message_id=msg_id, reaction=[ReactionTypeEmoji(emoji=emoji)])
-    except Exception as exc:
-        log.info("Reaksiya qo'yilmadi: %s", exc)
+async def react(ctx, chat_id: int, msg_id: int, emoji: str, fallback: str = "") -> None:
+    """Reaksiya. Telegram botga hamma emojini bermaydi — bo'lmasa fallback (🧐 → 🤨)."""
+    from aiogram.types import ReactionTypeEmoji
+    for e in (emoji, fallback):
+        if not e:
+            continue
+        try:
+            await ctx.bot.set_message_reaction(chat_id=chat_id, message_id=msg_id, reaction=[ReactionTypeEmoji(emoji=e)])
+            return
+        except Exception as exc:
+            log.info("Reaksiya %s qo'yilmadi: %s", e, exc)
 
 
 async def note(ctx, chat_id: int, text: str, reply_to: int | None = None) -> None:
@@ -211,19 +275,25 @@ async def on_message(ctx, message, p) -> bool:
         return True
     if await on_lead_date(ctx, message, p):                # «10.09» — lid kelgan kun (bot so'ragan edi)
         return True
-    items = parse(text)
+    sent_ts = int(message.date.timestamp())
+    items = parse(text, local_date(sent_ts, ctx.tz))
     if not items:
         return False
-    sent_ts = int(message.date.timestamp())
-    n, unknown = _store(ctx, p, chat_id, message.message_id, sent_ts, items)
-    if not n:
+    n, unknown, general = _store(ctx, p, chat_id, message.message_id, sent_ts, items)
+    if general:                                            # «General» havolasi — lid topigi emas (egasi: 🧐)
+        await react(ctx, chat_id, message.message_id, "🧐", "🤨")
+        if not n:
+            return True
+    elif not n:
         await react(ctx, chat_id, message.message_id, "👎")
         await note(ctx, chat_id, "⚠️ Сумма не найдена — чек не принят. Исправьте сообщение.",
                    reply_to=message.message_id)
         return True
-    await react(ctx, chat_id, message.message_id, "👍")
+    else:
+        await react(ctx, chat_id, message.message_id, "👍")
     if unknown:                                            # bizga aloqasi yo'q RD — lid qachon kelganini so'raymiz
-        await ask_lead(ctx, chat_id, message.message_id, p["id"])
+        await ask_lead(ctx, chat_id, message.message_id, p["id"],
+                       ASK if any(it["chat"] for it in items) else ASK_PLAIN)
     return True
 
 
@@ -233,7 +303,8 @@ async def on_edit(ctx, message, p) -> None:
     chat_id, mid = message.chat.id, message.message_id
     old = db.all("SELECT * FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=? ORDER BY pos",
                  (chat_id, mid, p["id"]))
-    items = parse(message.text or message.caption or "")
+    sent_ts = int(message.date.timestamp())
+    items = parse(message.text or message.caption or "", local_date(sent_ts, ctx.tz))
     if not old and not items:
         return
     before = [x["amount"] for x in old if not x["deleted"]]
@@ -241,28 +312,31 @@ async def on_edit(ctx, message, p) -> None:
     lead = next((x["lead_ts"] for x in old if x["lead_ts"]), None)        # xodim yozgan lid kuni qoladi
     ask = next((x["ask_mid"] for x in old if x["ask_mid"]), None)
     db.run("DELETE FROM wchecks WHERE chat_id=? AND msg_id=? AND person_id=?", (chat_id, mid, p["id"]))
-    n, unknown = _store(ctx, p, chat_id, mid, int(message.date.timestamp()), items) if items else (0, 0)
+    n, unknown, general = _store(ctx, p, chat_id, mid, sent_ts, items) if items else (0, 0, 0)
     if reported:
         db.run("UPDATE wchecks SET reported_ts=? WHERE chat_id=? AND msg_id=?", (reported, chat_id, mid))
     if unknown and (lead or ask):
-        db.run("UPDATE wchecks SET lead_ts=?, ask_mid=? WHERE chat_id=? AND msg_id=? AND topic_ts IS NULL",
-               (lead, None if lead else ask, chat_id, mid))
+        db.run("UPDATE wchecks SET lead_ts=?, ask_mid=? WHERE chat_id=? AND msg_id=? AND topic_ts IS NULL "
+               "AND lead_ts IS NULL", (lead, None if lead else ask, chat_id, mid))
     elif ask:                                              # endi topik topildi (yoki chek yo'q) — savol kerak emas
         await _drop_ask(ctx, chat_id, [{"ask_mid": ask}])
     after = [x["amount"] for x in db.all("SELECT amount FROM wchecks WHERE chat_id=? AND msg_id=? ORDER BY pos",
                                          (chat_id, mid))]
     if not n:
-        await react(ctx, chat_id, mid, "👎")
-        await note(ctx, chat_id, "❌ Не принято — сумма не найдена.", reply_to=mid)
+        if general:
+            await react(ctx, chat_id, mid, "🧐", "🤨")
+        else:
+            await react(ctx, chat_id, mid, "👎")
+            await note(ctx, chat_id, "❌ Не принято — сумма не найдена.", reply_to=mid)
         return
-    await react(ctx, chat_id, mid, "👍")
+    await react(ctx, chat_id, mid, "🧐" if general else "👍", "🤨" if general else "")
     if before and before != after:
         txt = f"✏️ Изменено: {' '.join(map(str, before))} → {' '.join(map(str, after))} ✅"
     else:
         txt = "✅ Принято"
     await note(ctx, chat_id, txt, reply_to=mid)
     if unknown and not (lead or ask):
-        await ask_lead(ctx, chat_id, mid, p["id"])
+        await ask_lead(ctx, chat_id, mid, p["id"], ASK if any(it["chat"] for it in items) else ASK_PLAIN)
 
 
 def report_rows(db, pid: int, today: str):

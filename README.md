@@ -187,7 +187,10 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     qilinmagan cheklar — o'z kuni bilan. «RD 3.1» papkasi ham achotda `Rd3`. Topik bizning RD larda topilmasa (xodim
     bizga aloqasi yo'q RD da ishlagan) — chek qabul qilinadi va bot chek ostida so'raydi «Когда пришёл лид?»; xodim
     sanani yozadi (`10.09` — savolga javob qilib yoki shunchaki) — achotda `10.09 4000` / `Rd 11.10` (RD raqamisiz).
-    Javob bo'lmasa — sanasiz, `/gaz` da «⚠️ Без даты лида». Pereslat qilingan xabar — ichida havola
+    Javob bo'lmasa — sanasiz, `/gaz` da «⚠️ Без даты лида». Asosiy akkaunt ko'rmaydigan RD da xodim havolasiz
+    yozadi — summa va lid kelgan kun: `1950 10.09`, `1950` / `10.09` (pastida), `1950. 10.09`; bot 👍 bosadi va
+    so'ramaydi (faqat `1950` — sanani so'raydi). Guruhimizdan, lekin lid topigidan emas («General» yoki topiksiz
+    xabar) havola — bot 🧐 bosadi (Telegram bermasa — 🤨), chek hisobga kirmaydi. Pereslat qilingan xabar — ichida havola
     va summa bo'lsa qabul qilinadi. «Проёб» `Rd3 11.10`, `Rd 3 11.10`, `Rd3.1 11.10` dagi sanani o'qiydi (eski
     `Rd 11.10` avvalgidek). Xabar matni saqlanmaydi — faqat summa, topik raqami, RD va vaqt.
   - Pul amallari (to'landi, avans, ulushlar, foizlar) — faqat siz. Adminlar cheklarni tuzatadi.

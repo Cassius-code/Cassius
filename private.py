@@ -37,6 +37,7 @@ def worker_screen(ctx, user) -> tuple[str, object]:
         # xodim zp sini bot orqali ko'rmaydi — faqat cheklar va achot (egasi, 2026-11-04)
         text = ui.join(f"<b>👋 {h(p['name'])}</b>", "", card(
             ["🔗 Чек: ссылка на топик и под ней сумма — бот поставит 👍.",
+             "Топика нет в наших RD — сумма и дата лида: 1950 10.09",
              "Ошибка — ответьте на чек /delete. Вечером /gaz — готовый отчёт для «Проёб»."]))
         return text, kb([("🆔 Мой ID", "w:id")])
     text = ui.join("<b>🔒 RD CONTROL</b>", "", card(
