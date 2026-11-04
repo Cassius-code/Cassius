@@ -529,6 +529,7 @@ def report_amounts_by_msg(db: Database, chat_id: int, msg_id: int):
 
 
 def create_report(db: Database, person_id, chat_id, msg_id, sender_id, raw, checks, sender_name="") -> int:
+    keep: dict = {}                                     # tahrir: eski nusxadagi «🔁 Kim ishladi» (kun bo'yicha) qoladi
     if msg_id is not None:
         for o in db.all("SELECT id, person_id, status FROM reports WHERE chat_id=? AND msg_id=?", (chat_id, msg_id)):
             if o["status"] == "done":                   # guruhda xabar tahrirlandi: eski raqamlar tarixda qoladi
@@ -536,13 +537,19 @@ def create_report(db: Database, person_id, chat_id, msg_id, sender_id, raw, chec
                 days = report_days(db, o["id"])
                 log(db, "rep_edit", o["person_id"] or person_id, days[0] if days else None, o["id"],
                     amounts_text(old), amounts_text(a for _d, a in checks))
+            if o["person_id"] == person_id:
+                for x in db.all("SELECT rd, pay FROM checks WHERE report_id=?", (o["id"],)):
+                    keep.setdefault(x["rd"], set()).add(x["pay"])
             delete_report(db, o["id"])
     rid = int(db.run("INSERT INTO reports(person_id, chat_id, msg_id, sender_id, sender_name, raw, created) "
                      "VALUES(?,?,?,?,?,?,?)", (person_id, chat_id, msg_id, sender_id, sender_name, raw,
                                                dt.datetime.now().isoformat())).lastrowid)
     for rd, amt in checks:
-        db.run("INSERT INTO checks(report_id, rd, amount, usd) VALUES(?,?,?,?)",
-               (rid, iso(rd) if rd else None, amt, price_for(db, amt)))
+        d = iso(rd) if rd else None
+        was = keep.get(d) or set()
+        pay = next(iter(was)) if len(was) == 1 else None
+        db.run("INSERT INTO checks(report_id, rd, amount, usd, pay) VALUES(?,?,?,?,?)",
+               (rid, d, amt, price_for(db, amt), pay))
     return rid
 
 
@@ -668,6 +675,27 @@ def set_pay_report(db: Database, rid: int, pid) -> None:
     db.run("UPDATE checks SET pay=? WHERE report_id=? AND pay IS NULL", (pid, rid))
 
 
+def day_pay(db: Database, acct: int, day: str, skip_rid: int = 0) -> int | None:
+    """Shu akkauntning shu kuni «🔁 Kim ishladi» belgisi: qabul qilingan hamma cheklari bitta boshqa odamniki bo'lsa —
+    o'sha odam. Keyin kelgan chek (to'liqroq hisobot, qo'lda qo'shilgan) ham unga (egasi, 2026-11-04)."""
+    pays = {x["pay"] for x in db.all("SELECT DISTINCT ch.pay FROM checks ch JOIN reports r ON r.id=ch.report_id "
+                                     "WHERE r.person_id=? AND r.status='done' AND ch.rd=? AND r.id<>?",
+                                     (acct, iso(day), skip_rid))}
+    return next(iter(pays)) if len(pays) == 1 and None not in pays else None
+
+
+def inherit_pay(db: Database, rid: int) -> None:
+    """Hisobotning «kim ishladi» belgilanmagan cheklariga — o'sha kunning belgisi (umumiy akkauntda har hisobot o'zi
+    so'raladi — tegilmaydi)."""
+    r = report(db, rid)
+    if r is None or not r["person_id"] or is_pool(db, r["person_id"]):
+        return
+    for d in report_days(db, rid):
+        w = day_pay(db, r["person_id"], d, rid)
+        if w is not None:
+            db.run("UPDATE checks SET pay=? WHERE report_id=? AND rd=? AND pay IS NULL", (w, rid, d))
+
+
 def set_pay_day(db: Database, acct: int, day: str, pid) -> None:
     """Shu akkauntning shu kundagi hamma cheklari uchun zp oluvchi (None = akkaunt egasi)."""
     log(db, "pay_day", acct, day, pid, "", pid or "")
@@ -712,10 +740,11 @@ def set_check_day(db: Database, cid: int, day: str) -> None:
 
 
 def add_check(db: Database, pid: int, day: str, amount: int) -> None:
+    w = None if is_pool(db, pid) else day_pay(db, pid, day)     # kun «🔁 Kim ishladi» bilan belgilangan bo'lsa — unga
     rid = db.run("INSERT INTO reports(person_id, chat_id, sender_name, raw, status, created) VALUES(?,?,?,?,?,?)",
                  (pid, 0, "вручную", str(amount), "done", dt.datetime.now().isoformat())).lastrowid
-    cid = db.run("INSERT INTO checks(report_id, rd, amount, usd) VALUES(?,?,?,?)",
-                 (rid, day, amount, price_for(db, amount))).lastrowid
+    cid = db.run("INSERT INTO checks(report_id, rd, amount, usd, pay) VALUES(?,?,?,?,?)",
+                 (rid, day, amount, price_for(db, amount), w)).lastrowid
     log(db, "chk_add", pid, day, cid, "", amount)
 
 
@@ -1289,6 +1318,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     acct_split: dict = {}            # acct -> {"usd","artur","zp","share","pshare","mine"}
     artur_day: dict = {}
     modes = set()
+    no_op: set = set()
     zero = {"all": 0.0, "on": 0.0, "self": 0.0, "off": 0.0, "self_usd": 0.0, "op_fix": 0.0}
     for (acct, d) in set(acct_usd_day) | set(share_ad):
         u = acct_usd_day.get((acct, d), 0.0)
@@ -1301,6 +1331,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             art = u * pct(partner["id"], d) / 100
             if u:
                 modes.add("legacy")
+                if rows[acct]["kind"] in ("worker", "pool"):
+                    no_op.add(acct)                    # «siz %» yozilmagan — eski usulda (ogohlantiriladi)
         else:                                          # «siz %» — faqat boshqalar ishlagan qismidan
             art = u - z["all"] - (u - z["self_usd"]) * op / 100 - z["op_fix"]
             if u:
@@ -1348,7 +1380,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
                             + r["sin_sum"] - r["sout_sum"])
         elif r["kind"] == "partner":
             r["pf"], r["pb"] = pf, pb
-            r["total"] = r2(r["share_part"] + pf - pb - r["fine"] + r["bonus"] - r["adv"] - r["tr_out"] + r["tr_in"])
+            r["total"] = r2(r["share_part"] + pf - pb - r["fine"] + r["bonus"] - r["adv"] - r["tr_out"] + r["tr_in"]
+                            + r["sin_sum"])            # Arturga yozilgan ulush ham (egasi, 2026-11-04)
 
     K = r2(sum(acct_usd_day.values()))
     me = next((r for r in rows.values() if r["kind"] == "self"), None)
@@ -1371,14 +1404,22 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     # bonusni Artur to'laydi. Sizning o'z jarimangiz/bonusingiz ham Artur bilan; Artur yo'q bo'lsa — hammasi sizda.
     wf = r2(sum(r["fine"] for r in rows.values() if r["kind"] == "worker"))
     wb = r2(sum(r["bonus"] for r in rows.values() if r["kind"] == "worker"))
+    # ulush: sizga yozilgani — daromadga, o'z zp ingizdan berganingiz — ayriladi (egasi, 2026-11-04: avval yo'qolardi)
+    sin_self = me["sin_sum"] if me else 0.0
+    sout_self = me["sout_sum"] if me else 0.0
     if partner is not None:
-        income = r2(mine - out_self + in_self - (me["fine"] if me else 0.0) + (me["bonus"] if me else 0.0))
+        income = r2(mine - out_self + in_self - (me["fine"] if me else 0.0) + (me["bonus"] if me else 0.0)
+                    + sin_self - sout_self)
     else:
-        income = r2(mine - out_self + in_self - wb + wf)
+        income = r2(mine - out_self + in_self - wb + wf + sin_self - sout_self)
     mode = "split" if modes == {"split"} else ("legacy" if modes <= {"legacy"} else "mixed")
     owner = {"K": K, "partner_pct": partner_pct_of(db, partner, e) if mode == "legacy" else None, "mode": mode,
              "half": r2(K - share_part - partner_paid), "zps": zps, "owner_paid": owner_paid,
              "partner_paid": partner_paid, "out_self": r2(out_self), "in_self": r2(in_self), "income": income,
+             "sin_self": r2(sin_self), "sout_self": r2(sout_self),
+             # boshqa akkauntlarda «siz %» bor, bularda yo'q — eski usulda hisoblandi (egasi, 2026-11-04: ogohlantirish)
+             "no_opct": [ps[x]["name"] for x in sorted(no_op, key=lambda x: ps[x]["name"].lower())]
+             if "split" in modes else [], "no_opct_pp": partner_pct_of(db, partner, e) if partner else None,
              "mine": mine, "self_zp": me["zp"] if me else 0.0, "per_acct": per_acct, "unknown_zp": unknown,
              "partner_id": partner["id"] if partner else None,
              "partner_total": rows[partner["id"]]["total"] if partner else 0.0,

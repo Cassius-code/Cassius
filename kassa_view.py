@@ -47,6 +47,7 @@ W = {
                                                          "работал(а) вместо — перешло ему"),
     "acct_s": ("akk", "акк."), "delay_w": ("zaderjka", "задержка"), "late_w": ("kech qolish", "опоздание"),
     "advs_pl": ("avans", "аванс"), "zp_total": ("Zp jami", "Зп всего"),
+    "your_bonus": ("sizning bonusingiz", "ваш бонус"), "your_fine": ("sizning jarimangiz", "ваш штраф"),
     "moved_to": ("o'rniga ishlagan {}ga o'tdi — bu yerda hisobga kirmaydi:",
                  "перешло {} (работал(а) вместо) — здесь не считается:"),
 }
@@ -346,6 +347,10 @@ def owner_card(b: dict, lang: str) -> str:
         lines.append(f"− {w('transfer_out', lang)} {money(o['out_self'])} $")
     if o["in_self"]:
         lines.append(f"+ {money(o['in_self'])} $")
+    if o.get("sin_self"):
+        lines.append(f"+ {w('share_s', lang)} {money(o['sin_self'])} $")
+    if o.get("sout_self"):
+        lines.append(f"− {w('share_s', lang)} {money(o['sout_self'])} $")
     lines.append(f"= <b>{w('income', lang)}: {money(o['income'])} $</b>")
     lines.append("")
     lines += balance_lines(b, lang)
@@ -367,6 +372,16 @@ def owner_card(b: dict, lang: str) -> str:
             tag = f" ({w('you', lang).lower()})" if a["self"] else ""
             rd = b.get("rds", {}).get(a["pid"])
             lines.append(f"{nm}{tag}{' · ' + h(rd) if rd else ''} · {money(a['usd'])} $ → " + " · ".join(parts))
+        me = next((r for r in b["rows"].values() if r["kind"] == "self"), None)
+        if me is not None and o["partner_id"] is not None:  # o'z bonusingiz/jarimangiz daromadga kirgan (egasi, 2026-11-04)
+            if me["bonus"]:
+                lines.append(f"+ {w('your_bonus', lang)} {money(me['bonus'])} $")
+            if me["fine"]:
+                lines.append(f"− {w('your_fine', lang)} {money(me['fine'])} $")
+        for v, sign, word in ((o["in_self"], "+", w("transfers", lang)), (o["out_self"], "−", w("transfers", lang)),
+                              (o.get("sin_self"), "+", w("share_s", lang)), (o.get("sout_self"), "−", w("share_s", lang))):
+            if v:                                           # ro'yxat yig'indisi «Daromadingiz» bilan teng bo'lsin
+                lines.append(f"{sign} {word} {money(v)} $")
     return card(lines, expandable=len(lines) > 14)
 
 
@@ -374,7 +389,7 @@ def balance_lines(b: dict, lang: str) -> list[str]:
     """🧮 Kassa = Artur (jarima/bonus bilan) + xodimlar (zp, bonus, jarima bilan) + ulushlar + sizga — pul to'liq
     taqsimlanganini tekshirish (faqat egaga)."""
     o = b["owner"]
-    mine = r2(o["income"] + o["out_self"] - o["in_self"])
+    mine = r2(o["income"] + o["out_self"] - o["in_self"] - o.get("sin_self", 0.0) + o.get("sout_self", 0.0))
     has_p = o["partner_id"] is not None
     art = r2(o["partner_share"] + o["pf"] - o["pb"]) if has_p else 0.0
     shares = r2(o["owner_paid"] + o["partner_paid"])
@@ -394,6 +409,11 @@ def balance_lines(b: dict, lang: str) -> list[str]:
         issues.append(f"⚠️ {unassigned} {w('unassigned', lang)}")
     if o["unknown_zp"]:
         issues.append(f"⚠️ {w('unknown_zp', lang)}: {h(', '.join(o['unknown_zp']))}")
+    if o.get("no_opct"):
+        pp = pct(o["no_opct_pp"]) if o.get("no_opct_pp") is not None else ""
+        issues.append(f"⚠️ {h(', '.join(o['no_opct']))}: " + (
+            f"не указан «Вы %» — посчитано по-старому (Артур {pp}, вам остаток). Укажите в «🧮 Зп за неделю»" if ru else
+            f"«Siz %» yozilmagan — eski usulda hisoblandi (Artur {pp}, sizga qolgani). «🧮 Haftalik zp» da yozing"))
     if abs(tot - o["K"]) >= 0.05:
         issues.append(f"⚠️ {'разница' if ru else 'farq'} {money(o['K'] - tot)} $")
     mark = "⚠️" if issues else "✅"

@@ -413,6 +413,7 @@ async def finalize(ctx, rid: int) -> None:
     if r is None or r["status"] == "done":
         return
     await ctx.notifier.resolve(f"qr:{rid}")                 # savol nusxalari chatlardan ketadi
+    K.inherit_pay(db, rid)                                  # kun «🔁 Kim ishladi» bilan belgilangan — yangi cheklar ham
     K.set_report_status(db, rid, "done")
     if r["chat_id"] and r["chat_id"] < 0 and r["msg_id"]:     # guruhda: 👀 → 👌 (hisobga olindi)
         try:

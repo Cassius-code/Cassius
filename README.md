@@ -114,7 +114,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     = Daromadingiz. Xodim akkauntida o'zingiz ham ishlagan bo'lsangiz — o'sha qismdan sizga o'z foizingiz (masalan
     50%), qolgani Arturga; «siz %» (masalan 14%) faqat xodimning o'zi ishlagan qismidan olinadi. Masalan: Bayzed
     621 $, siz ishlagan 372 $ → 372 × 50% + (621 − 372) × 14% = 186 + 34.86 = 220.86 $. «Akkauntlar bo'yicha»da
-    shunday ko'rinadi: «sizga 220.86 $ (siz ishlagan 372 $ → 186 + ulush 34.86)».
+    shunday ko'rinadi: «sizga 220.86 $ (siz ishlagan 372 $ → 186 + ulush 34.86)». Akkauntda o'rniga boshqa xodim
+    ishlagan bo'lsa — o'sha qismdan «siz %» ishlagan xodimning o'z foizi: Adam o'rniga Cred ishlasa — 125 × 20%
+    (Credniki) = 25 $, Adamning 14% i emas; qolgani Arturga. Ro'yxat oxirida o'z bonusingiz (siz ishlagan kungi,
+    uni Artur to'laydi), jarimangiz, sizga yozilgan ulush va o'tkazmalar alohida qatorda («+ ваш бонус 10 $») —
+    ro'yxat yig'indisi «Daromadingiz» bilan teng.
   - **Xodim zp si (kartada, hisobotda, PDF da, xodimga xabarda)** — qisqa va tartibli:
     `RD 3: 119 $ × 41% = 48.79 $` (boshqa akkauntda ishlagan bo'lsa — `RD 1 · Bayzed akk: 372 $ × 50% = 186 $`,
     keyin `Zp jami`); `+ Bonuslar: 116 $` va `− Jarimalar: 15 $` — jami bilan, ostida kunma-kun
@@ -126,7 +130,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     «+ bonus 5 $ (28.10 · Adam akkauntida)»; xodimnikida: «↪ bonus 5 $ (28.10) → Cassius o'rniga ishlagan» (hisobga
     kirmaydi). Kech qolish jarimasi va avans — shaxsiy, o'tmaydi. Bir kunda ikkalasi ham ishlagan bo'lsa — kimniki
     ekanini bot bilmaydi, yozilgan odamda qoladi. Kassa hisobotiga javob qilib yozilgan bonus — o'sha hisobotni kim
-    ishlagan bo'lsa, o'shanga.
+    ishlagan bo'lsa, o'shanga. «🔁 Kim ishladi» belgisi o'sha kunda saqlanadi: hisobot xabari tahrirlansa, o'sha kunga
+    to'liqroq hisobot kelsa yoki chek qo'lda qo'shilsa ham zp belgilangan odamga (umumiy akkauntda har hisobot
+    avvalgidek alohida so'raladi).
   - Bosh menyuda — 💰 **Cash**: dushanbadan beri jami kassa ($, faqat egaga) va «Задержки сейчас» — har RD
     bitta qisqa qator (📌 doskadagi bilan bir xil: 🔴 задержка · 🟡 скоро задержка · ☕ перерыв · 🟢, «ждут N»).
     Hammasi bitta ramkada. Menyu o‘z joyida yangilanadi: 5 soniyada bir tekshiriladi, faqat raqam o'zgarsa
@@ -146,10 +152,14 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     ko'rsatadi: «Bayzed: Bayzed 41% · Siz 14% · Artur qolgani». O'zgarmagan bo'lsa — «✅ O'zgarmadi — hisoblash».
     O'zgargan bo'lsa — ismni bosib yangi sonni yozasiz (masalan `41 14`). Yangi xodim bo'lsa, bot o'zi so'raydi.
     O'zgarish faqat shu haftadan: o'tgan haftalar buzilmaydi. 2) **📋 To'lov ro'yxati** — kimga qancha,
-    «✅ To'landi». Keyingi hafta noldan.
+    «✅ To'landi». Keyingi hafta noldan. Akkauntda o'rniga boshqasi ishlagan bo'lsa — alohida qatorda:
+    «↳ Cred ishlagan: 125 $ — Cred 36% (45 $), sizga 20% (25 $), Artur — qolgani (55 $)». «Siz %» yozilmagan
+    akkaunt (masalan yangi xodim) eski usulda hisoblanadi (Artur 50%, sizga qolgani) — hisobotdagi 🧮 Tekshiruvda
+    «⚠️ … «Siz %» yozilmagan» chiqadi.
   - **👥 Xodimlar** (kassa ichida) — shu / o'tgan hafta har xodim bir qatorda: kassa · Кол-во рд · $ · zp
     («≈» — hafta hali hisoblanmagan). Ismni bosing — xodim kartasi (jarima, bonus, cheklar, PDF).
   - **🤝 Ulushlar** (⚙️ Sozlamalar). Masalan «Baxa oyligidan 5% → Bayzed». Kim to'laydi: xodimdan ushlanadi, siz yoki Artur.
+    Sizga yozilgan ulush — «Daromadingiz»ga, Arturga yozilgani — Arturga qo'shiladi.
   - **✅ Kunni yopish.** Hamma hisobot tushgach bosasiz. Ro'yxatda faqat cheki bor kunlar: «⏳ 29.10 — 5 chek ·
     10 550». Yopilgan kunni faqat siz o'zgartira olasiz. Yopilgan kunga yangi hisobot kelsa, sizga xabar keladi.
   - **📜 Tarix** (⚙️ Sozlamalar). Kim, qachon, nimani o'zgartirgani (eski → yangi).
