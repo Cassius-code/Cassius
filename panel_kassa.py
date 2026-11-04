@@ -476,8 +476,8 @@ def bonus_rule(ctx, r: Req) -> str:
     """Qoida (sozlamadan): «kassa 20 000 — 20 $, 27 000 — 30 $; 11+ rd — yana 15 $» — har RD × kun alohida."""
     kas = ", ".join(f"{num(int(a))} — {money(u)} $" for a, u in K._limits(ctx.db.get("kbonus_kassa")))
     chk = ", ".join(f"{int(a)}+ {r.L('rd', 'рд')} — {money(u)} $" for a, u in K._limits(ctx.db.get("kbonus_checks")))
-    return r.L(f"Har RD × kun alohida: kassa {kas}; {chk} (yana). Bonus Arturga, xodimlarga daxli yo'q.",
-               f"Каждый RD × день отдельно: касса {kas}; {chk} (ещё). Бонус Артуру, сотрудникам не идёт.")
+    return r.L(f"Har RD × kun alohida: kassa {kas}; {chk} (yana).",
+               f"Каждый RD × день отдельно: касса {kas}; {chk} (ещё).")
 
 
 @screen("kbn", "owner")
