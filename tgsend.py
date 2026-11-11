@@ -45,6 +45,10 @@ class PushSender:
                       "UserBannedInChannelError", "TopicClosedError", "TopicDeletedError",
                       "ChatSendMediaForbiddenError", "ChatSendVoicesForbiddenError", "ChatSendGifsForbiddenError")
         skip_errs = tuple(getattr(errors, n) for n in skip_names if hasattr(errors, n))
+        # Telegram fayl havolasi eskirgan (egasi, 2026-11-11: Push 0/100 — FileReferenceExpiredError): saqlangan havola
+        # tashlanadi, fayl qayta yuklanib shu lidga yana yuboriladi
+        ref_errs = tuple(getattr(errors, n) for n in ("FileReferenceExpiredError", "FileReferenceInvalidError",
+                                                      "FileReferenceEmptyError") if hasattr(errors, n))
         ids: list[int] = []
         for attempt in (1, 2):
             try:
@@ -81,6 +85,13 @@ class PushSender:
                 if ids:
                     return ids
                 raise SendAbort("PeerFlood: Telegram akkauntni chekladi") from exc
+            except ref_errs:
+                cache.pop(key, None)                     # eskirgan havola — keyingi urinishda fayl qayta yuklanadi
+                if attempt == 1:
+                    continue
+                if ids:
+                    return ids
+                raise
             except skip_errs as exc:
                 if ids:                                  # matn ketdi, kruzhok taqiqlangan — Push «olgan»
                     return ids

@@ -255,6 +255,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Telegram akkauntga «kuting» desa (FloodWait) — o'sha papka kutadi (30 daqiqagacha), ekranda «⏳ RD 9 → 12:44»,
   keyin o'zi davom etadi (sekinroq); boshqa papkalar to'xtamaydi. Kutish uzoqroq bo'lsa — papka to'xtaydi va Push
   ekranida «▶️ Davom ettirish — qolgan N ta» chiqadi: faqat yetmay qolgan papkalar o'z sonigacha yuboriladi.
+  Rasm/video/ovozli fayl Telegram'ga bir marta yuklanadi; Telegram uning havolasini eskirgan desa
+  (`FileReferenceExpiredError`) — bot faylni qayta yuklab shu lidga yana yuboradi, Push to'xtamaydi.
 - **📊 Hisobotlar.** Faqat buyruq bilan: shaxsiy chatda `/hisobot`, guruhda `/statistika` (🥇🥈🥉 bilan).
 - **📊 Lid bazasi** (📊 Hisobotlar → 📊 Lid bazasi). Har RD: 📦 jami (baza sanasidan keyin o'zi yozganlar), 🆕 bugun va
   shu hafta yangi; 💬 bugun va 7 kunda yozganlar, 💤 qotib qolgan, 📉 soviyotgan; ⏱ javob kutyapti (🔴 zaderjka),
