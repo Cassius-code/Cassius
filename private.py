@@ -176,6 +176,10 @@ async def on_worker_cb(ctx, cb, data: str) -> None:
         from . import wchecks
         await wchecks.on_day_cb(ctx, cb, data)
         return
+    if data.startswith("wg:"):                             # /gaz: bugun yuborilgan cheklar qaysi kunniki
+        from . import wchecks
+        await wchecks.on_gaz_day_cb(ctx, cb, data, p)
+        return
     text, markup = worker_screen(ctx, user)
     await ui.show(ctx.bot, chat_id, text, markup, edit_id=cb.message.message_id)
 

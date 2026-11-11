@@ -191,8 +191,14 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     bot bitta tayyor achot beradi, har chekda RD raqami: `10.09 1818` / `Rd3 11.10` (bo'sh qator, keyingi chek;
     `10.09` — lid kelgan kun, `Rd3` — havola qaysi RD dan, `11.10` — chek kuni). Xodim uni «Проёб»ga tashlaydi —
     kassa o'sha yerda hozirgidek hisoblanadi. Havola qaysi RD dan bo'lishidan qat'i nazar, kassa ham, zp ham
-    achotni tashlagan xodimniki. Ikkinchi `/gaz` — kunning hammasi (yangi qo'shilgani bilan); kechagi `/gaz`
-    qilinmagan cheklar — o'z kuni bilan. `/gaz` dan keyin 3 soat ichida yangi chek kelsa — bot so'raydi:
+    achotni tashlagan xodimniki. Har `/gaz` — faqat hali achotga kirmagan cheklar (achotga kirgani qayta kirmaydi —
+    kassada ikki marta sanalmaydi); cheklar bir necha kunniki bo'lsa (kecha `/gaz` qilinmagan) — har kun alohida
+    achot xabari (eskisi oldin), xodim har birini «Проёб»ga tashlaydi — kunlar aralashmaydi. Bunday achot «Проёб»da
+    eski hisobotni almashtirmaydi (summalar mos kelsa ham); o'sha achot ikki marta tashlansa — «takrormi?» so'raladi.
+    Kecha `/gaz` qilinmagan bo'lsa (masalan kechagi cheklar ertalab yuborildi) — `/gaz` bosilganda bot avval bir marta
+    so'raydi: «📅 Отчёта за 10.11 не было. Чеки, отправленные сегодня (2), — за какой день?» [10.11] [11.11]; tanlangan
+    kunga achot beradi. Keyingi `/gaz` (bugungi cheklar) — savolsiz, faqat yangilari: ertalabkisi bilan qo'shilmaydi.
+    `/gaz` dan keyin 3 soat ichida yangi chek kelsa — bot so'raydi:
     «📅 Отчёт за 04.11 уже был. Этот чек за какой день?» [04.11] [05.11]. Kechagi (yoki oldingi) chekni tahrirlasa
     yoki `/delete` qilsa — kuni o'zgarmaydi; achot «Проёб»da qabul qilingan bo'lsa kassadagi chek ham o'zgaradi/
     o'chadi («✅ Касса за 03.11 исправлена»); hali tashlanmagan bo'lsa — o'sha kun keyingi `/gaz` ga to'liq kiradi;

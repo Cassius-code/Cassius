@@ -14,6 +14,9 @@
   Xodim uni «Проёб»ga tashlaydi — kassa o'sha yerda hozirgidek hisoblanadi. Havola qaysi RD dan bo'lishidan qat'i
   nazar kassa ham, zp ham achotni tashlagan xodimniki (egasi, 2026-11-04). Bu yerda kassaga hech narsa yozilmaydi.
 * Summa 3 xonali ham bo'ladi («39)290» — egasi, 2026-11-04).
+* /gaz — faqat hali achotga kirmagan cheklar, har kun alohida xabar (egasi, 2026-11-11: kechagi achotni ertalab
+  tashlab /gaz qildi, keyin bugungisini — bot ertalabkisi bilan hozirgisini qo'shib yubordi). Kecha /gaz qilinmagan
+  bo'lsa — /gaz da bir marta so'raladi: bugun yuborilgan cheklar qaysi kunniki [kecha] [bugun].
 * Ega chatiga pereslat qilingan chek — asl yozgan xodimniki va o'sha yozilgan vaqt bilan (Credning cheki — Credga).
 Xabar matni saqlanmaydi: faqat summa, topik raqami, RD va vaqt."""
 from __future__ import annotations
@@ -346,7 +349,7 @@ async def on_day_cb(ctx, cb, data: str) -> None:
     except Exception:
         pass
     if n:
-        await note(ctx, chat_id, f"✅ Чек за {day[8:10]}.{day[5:7]}. Отправьте /gaz ещё раз — он войдёт в отчёт.",
+        await note(ctx, chat_id, f"✅ Чек за {day[8:10]}.{day[5:7]} — войдёт в отчёт за этот день при /gaz.",
                    reply_to=mid)
 
 
@@ -363,8 +366,10 @@ async def kassa_sync(ctx, p, chat_id: int, mid: int, day: str, before: list[int]
             add.remove(a)
     if not rem and not add:
         return
-    rows = db.all("SELECT ch.id, ch.amount FROM checks ch JOIN reports r ON r.id=ch.report_id WHERE r.status='done' "
-                  "AND ch.rd=? AND ch.skip=0 AND (r.person_id=? OR ch.pay=?) ORDER BY ch.id", (day, p["id"], p["id"]))
+    # «Проёб»ga tashlangan achot — qabul qilingan yoki savol kutayotgan (pending ham: qayta /gaz ikki marta sanamasin)
+    rows = db.all("SELECT ch.id, ch.amount FROM checks ch JOIN reports r ON r.id=ch.report_id "
+                  "WHERE r.status IN ('done','pending') AND ch.rd=? AND ch.skip=0 AND (r.person_id=? OR ch.pay=?) "
+                  "ORDER BY ch.id", (day, p["id"], p["id"]))
     dm = f"{day[8:10]}.{day[5:7]}"
     what = f"{' '.join(map(str, before)) or '—'} → {' '.join(map(str, after)) or '—'}"
     if not rows:                                           # achot hali tashlanmagan — kun keyingi /gaz ga to'liq
@@ -557,9 +562,10 @@ async def on_edit(ctx, message, p, links_only: bool = False) -> None:
 
 
 def report_rows(db, pid: int, today: str):
-    """/gaz: bugungi cheklar va hali achotga kirmagan eskilari (o'chirilganlarsiz)."""
-    return db.all("SELECT * FROM wchecks WHERE person_id=? AND deleted=0 AND (day=? OR (reported_ts IS NULL AND day<?)) "
-                  "ORDER BY ts, msg_id, pos", (pid, today, today))
+    """/gaz: hali achotga kirmagan cheklar — bugungi va oldingi kunlar (o'chirilganlarsiz). Achotga kirgani qayta
+    kirmaydi (egasi, 2026-11-11: ertalabki /gaz kechasi achotga kirgan chekni yana berdi — ikki marta sanaldi)."""
+    return db.all("SELECT * FROM wchecks WHERE person_id=? AND deleted=0 AND reported_ts IS NULL AND day<=? "
+                  "ORDER BY day, ts, msg_id, pos", (pid, today))
 
 
 def report_text(ctx, rows) -> str:
@@ -575,20 +581,69 @@ def report_text(ctx, rows) -> str:
     return "\n".join(lines)
 
 
-async def send_report(ctx, chat_id: int, p) -> None:
+def yesterday_closed(db, pid: int, today: str) -> bool:
+    """Kechagi kun /gaz bilan yopilganmi: oxirgi /gaz achoti kechagi (yoki undan keyingi) kun uchun bo'lgan."""
+    day_s = (db.get(f"gaz:{pid}") or "").partition(":")[2]
+    return bool(day_s) and day_s >= (dt.date.fromisoformat(today) - dt.timedelta(days=1)).isoformat()
+
+
+async def on_gaz_day_cb(ctx, cb, data: str, p) -> None:
+    """«wg:<bugun>:<tanlangan kun>» — /gaz savoli: bugun yuborilgan (hali achotga kirmagan) cheklar o'sha kunga,
+    keyin achot (savolsiz)."""
+    try:
+        _w, src, dst = data.split(":")
+        a = dt.date(int(src[:4]), int(src[4:6]), int(src[6:8])).isoformat()
+        b = dt.date(int(dst[:4]), int(dst[4:6]), int(dst[6:8])).isoformat()
+    except (ValueError, IndexError):
+        return
+    chat_id = cb.message.chat.id
+    if a != b:
+        ctx.db.run("UPDATE wchecks SET day=? WHERE person_id=? AND deleted=0 AND reported_ts IS NULL AND day=?",
+                   (b, p["id"], a))
+    try:
+        await ctx.bot.delete_message(chat_id=chat_id, message_id=cb.message.message_id)
+    except Exception:
+        pass
+    await send_report(ctx, chat_id, p, asked=True)
+
+
+async def send_report(ctx, chat_id: int, p, asked: bool = False) -> None:
+    """/gaz: har kun alohida achot xabari (eskisi oldin) — «Проёб»da har biri o'z kuni, kunlar aralashmaydi.
+    Kecha /gaz qilinmagan bo'lsa (egasi, 2026-11-11: «kechagi achotni ertalab tashlab /gaz qildim») — avval bir marta
+    so'raladi: bugun yuborilgan cheklar qaysi kunniki [kecha] [bugun]; javobdan keyin achot."""
     db = ctx.db
     today = local_date(ctx.clock(), ctx.tz).isoformat()
     rows = report_rows(db, p["id"], today)
     if not rows:
-        await note(ctx, chat_id, "Сегодня чеков нет.")
+        was = db.one("SELECT 1 FROM wchecks WHERE person_id=? AND deleted=0 AND day=? AND reported_ts IS NOT NULL",
+                     (p["id"], today))
+        await note(ctx, chat_id, "Новых чеков нет — они уже в отчёте выше." if was else "Сегодня чеков нет.")
         return
-    try:
-        await ctx.bot.send_message(chat_id=chat_id, text=report_text(ctx, rows))
-    except Exception as exc:
-        log.info("Achot yuborilmadi: %s", exc)
+    n_today = sum(1 for x in rows if x["day"] == today)
+    if not asked and n_today and not yesterday_closed(db, p["id"], today):
+        t = dt.date.fromisoformat(today)
+        y = t - dt.timedelta(days=1)
+        from .ui import kb
+        markup = kb([(f"📅 {y:%d.%m}", f"wg:{t:%Y%m%d}:{y:%Y%m%d}"), (f"📅 {t:%d.%m}", f"wg:{t:%Y%m%d}:{t:%Y%m%d}")])
+        try:
+            await ctx.bot.send_message(chat_id=chat_id, reply_markup=markup,
+                                       text=f"📅 Отчёта за {y:%d.%m} не было. Чеки, отправленные сегодня ({n_today}), "
+                                            "— за какой день?")
+        except Exception as exc:
+            log.info("Achot kuni savoli yuborilmadi: %s", exc)
+        return
+    days = sorted({x["day"] for x in rows})
+    if len(days) > 1:
+        await note(ctx, chat_id, f"📋 Отчётов: {len(days)} (" + ", ".join(f"{d[8:10]}.{d[5:7]}" for d in days)
+                   + ") — отправьте каждый в «Проёб».")
+    for d in days:
+        try:
+            await ctx.bot.send_message(chat_id=chat_id, text=report_text(ctx, [x for x in rows if x["day"] == d]))
+        except Exception as exc:
+            log.info("Achot yuborilmadi: %s", exc)
     miss = sum(1 for x in rows if not (x["topic_ts"] or x["lead_ts"]))
     if miss:
-        await note(ctx, chat_id, f"⚠️ Без даты лида: {miss} — ответьте датой на вопрос «Когда пришёл лид?» и снова /gaz.")
+        await note(ctx, chat_id, f"⚠️ Без даты лида: {miss} — в отчёте они без даты (касса считается верно).")
     now = int(ctx.clock())
     for x in rows:
         if not x["reported_ts"]:

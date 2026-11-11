@@ -392,6 +392,13 @@ def build_router(ctx) -> Router:
             from . import wchecks
             await wchecks.on_day_cb(ctx, cb, data)
             return
+        if data.startswith("wg:"):                         # ega/admin /gaz i: bugun yuborilgan cheklar qaysi kunniki
+            from . import wchecks
+            me = wchecks.admin_person(ctx, uid, req.owner)
+            if me is not None:
+                await wchecks.on_gaz_day_cb(ctx, cb, data, me)
+                await render(req, await main_menu(ctx, req), fresh=True)    # menyu achotlardan pastda
+            return
         chat = cb.message.chat.id
         ui.touch(chat)
         before, shown = ui.VIEW.get(chat), ui.SHOW_N.get(chat, 0)

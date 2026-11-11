@@ -650,14 +650,48 @@ def report_days(db: Database, rid: int) -> list[str]:
                                     (rid,))]
 
 
+def gaz_batches(db: Database, pids, day: str) -> list[list[int]]:
+    """🔗 Xodimning shu kun uchun /gaz achotlari: har /gaz chaqiruvi — o'z cheklari (wchecks.reported_ts bo'yicha)."""
+    out = []
+    for pid in {x for x in pids if x}:
+        by: dict = {}
+        for x in db.all("SELECT reported_ts, amount FROM wchecks WHERE person_id=? AND day=? AND deleted=0 "
+                        "AND reported_ts IS NOT NULL", (pid, day)):
+            by.setdefault(x["reported_ts"], []).append(int(x["amount"]))
+        out += [sorted(v) for v in by.values()]
+    return out
+
+
 def supersede(db: Database, rid: int) -> list[dict]:
-    """Yangi hisobot eskisini to'liq o'z ichiga olsa (>=2 chek) — eskisi hisobdan chiqadi."""
+    """Yangi hisobot eskisini to'liq o'z ichiga olsa (>=2 chek) — eskisi hisobdan chiqadi.
+    🔗 /gaz achoti (bitta kun, summalari xodimning bitta /gaz idagi bilan aynan bir xil) — yangi cheklar: eski
+    hisobotlar almashtirilmaydi, summalar tasodifan mos kelsa ham (egasi, 2026-11-11: kunlar aralashib, ikki marta
+    sanaldi). Faqat o'sha achot ikkinchi marta tashlansa (shunday hisobotlar /gaz lardan ko'p) — takror."""
     r = report(db, rid)
     new = amounts_of(db, rid)
+    days = report_days(db, rid)
+    gaz = None
+    if len(days) == 1 and new:
+        sender = P.by_tg(db, r["sender_id"]) if r["sender_id"] else None
+        batches = gaz_batches(db, (r["person_id"], sender["id"] if sender else None), days[0])
+        if sorted(new) in batches:
+            gaz = (sorted(new), batches.count(sorted(new)))
     out = []
-    for d in report_days(db, rid):
-        for o in db.all("SELECT DISTINCT r.id FROM reports r JOIN checks c ON c.report_id=r.id "
-                        "WHERE r.person_id=? AND r.status='done' AND r.id<>? AND c.rd=?", (r["person_id"], rid, d)):
+    for d in days:
+        olds = db.all("SELECT DISTINCT r.id FROM reports r JOIN checks c ON c.report_id=r.id "
+                      "WHERE r.person_id=? AND r.status='done' AND r.id<>? AND c.rd=? ORDER BY r.id",
+                      (r["person_id"], rid, d))
+        if gaz is not None:
+            sig, nb = gaz
+            same = [o["id"] for o in olds if sorted(amounts_of(db, o["id"])) == sig]
+            if len(same) >= nb:                             # shu /gaz achoti oldin ham tashlangan — takror
+                if len(sig) >= 2:
+                    set_report_status(db, same[-1], "replaced")
+                    out.append({"old": same[-1], "amounts": sig, "kind": "replace"})
+                else:
+                    out.append({"old": same[-1], "amounts": sig, "kind": "dup"})
+            continue
+        for o in olds:
             old = amounts_of(db, o["id"])
             pool, ok = list(new), len(old) >= 2
             for a in old:
