@@ -171,7 +171,9 @@ async def fines_toggle(ctx, r: Req):
 
 @screen("so", "owner")
 async def bot_toggle(ctx, r: Req):
-    ctx.db.toggle("bot_enabled")
+    if ctx.db.toggle("bot_enabled"):                       # qayta yoqildi — to'xtagan paytdagi kutishlar bekor
+        from .panel_control import control_resumed
+        control_resumed(ctx)
     return await settings(ctx, r)
 
 
@@ -637,9 +639,13 @@ async def admins(ctx, r: Req):
             order = ["zp", "view", "full", "owner"]
             cur = row["level"] if row["level"] in order else "view"
             P.set_admin(db, uid, order[(order.index(cur) + 1) % len(order)])
+            from .panel import set_commands
+            await set_commands(ctx, uid)
         ui.view(r, "sd")
     if a and a[0] == "x" and r.owner:
         P.del_admin(db, int(a[1]))
+        from .panel import set_commands
+        await set_commands(ctx, int(a[1]))                 # endi admin emas — xodim menyusi (/gaz)
         ui.view(r, "sd")
     lines = [f"👑 <code>{u}</code> · Railway" for u in ctx.cfg.owner_ids]
     rows = []
@@ -714,10 +720,34 @@ async def recovery_set(ctx, r: Req):
 async def admin_add_ask(ctx, r: Req):
     ui.ask(r, "admin_add", "sd")
     return title("➕", r.L("YANGI ADMIN", "НОВЫЙ АДМИН")) + "\n\n" + card(
-        [r.L("Uning kontaktini yuboring (📎 → Kontakt) yoki Telegram ID sini yozing. Boshida «🛠 to'liq». "
-             "Bot begonaga ID ni aytmaydi — faqat «Бот сейчас не работает.».",
-             "Пришлите его контакт (📎 → Контакт) или Telegram ID. По умолчанию «🛠 полный». "
+        [r.L("Uning kontaktini yuboring (📎 → Kontakt), @username ini yoki Telegram ID sini yozing. Boshida "
+             "«🛠 to'liq». Bot begonaga ID ni aytmaydi — faqat «Бот сейчас не работает.».",
+             "Пришлите его контакт (📎 → Контакт), @username или Telegram ID. По умолчанию «🛠 полный». "
              "Посторонним бот ID не показывает — только «Бот сейчас не работает.».")]), ui.cancel_kb(r, "sd")
+
+
+async def resolve_username(ctx, username: str) -> tuple[int | None, str]:
+    """@username → (Telegram ID, ism): avval xodimlar ro'yxatidan, bo'lmasa asosiy akkaunt orqali (egasi, 2026-11-11:
+    «Arturni @username bilan yozsam»). Xodim yozuvida shu @username bo'lsa-yu ID bo'lmasa — ID bog'lanadi."""
+    db = ctx.db
+    p = P.by_username(db, username)
+    if p is not None and p["tg_id"]:
+        return int(p["tg_id"]), p["name"]
+    ub = getattr(ctx, "userbot", None)
+    client = getattr(ub, "client", None) if ub is not None and getattr(ub, "state", "") == "online" else None
+    if client is None:
+        return None, ""
+    try:
+        ent = await client.get_entity(username)
+    except Exception as exc:
+        log.info("@%s topilmadi: %s", username, type(exc).__name__)
+        return None, ""
+    if type(ent).__name__ != "User" or getattr(ent, "bot", False):
+        return None, ""
+    if p is not None and not p["tg_id"]:
+        P.update_person(db, p["id"], tg_id=int(ent.id))
+    name = " ".join(x for x in (getattr(ent, "first_name", None), getattr(ent, "last_name", None)) if x)
+    return int(ent.id), (p["name"] if p is not None else name)
 
 
 @on_input("admin_add", "owner")
@@ -727,10 +757,19 @@ async def admin_add(ctx, r: Req):
         uid, name = int(contact.user_id), " ".join(x for x in (contact.first_name, contact.last_name) if x)
     else:
         m = re.search(r"\d{5,}", r.text or "")
-        if not m:
-            return r.L("⚠️ Kontakt yoki ID (son) yuboring", "⚠️ Пришлите контакт или ID (число)")
-        uid, name = int(m.group(0)), ""
+        u = None if m else re.search(r"@?([A-Za-z][A-Za-z0-9_]{3,31})", (r.text or "").strip())
+        if m:
+            uid, name = int(m.group(0)), ""
+        elif u:                                            # @username (egasi, 2026-11-11)
+            uid, name = await resolve_username(ctx, u.group(1))
+            if not uid:
+                return r.L(f"⚠️ @{u.group(1)} topilmadi — kontaktini yoki ID sini yuboring",
+                           f"⚠️ @{u.group(1)} не найден — пришлите контакт или ID")
+        else:
+            return r.L("⚠️ Kontakt, @username yoki ID (son) yuboring", "⚠️ Пришлите контакт, @username или ID (число)")
     P.set_admin(ctx.db, uid, "full", name)
+    from .panel import set_commands
+    await set_commands(ctx, uid)                           # «/» menyusi — admin buyruqlari
     try:
         await ctx.bot.send_message(uid, "👮 /menu")
     except Exception:
@@ -810,9 +849,9 @@ async def breaks(ctx, r: Req):
              f"🔁 {r.L('Kuniga', 'В день')} — <b>{db.get('breaks_per_day')}</b>",
              "",
              r.L("<b>Boshlash</b> — bot o'zi taniydi: отойду / отойди / атайду / otaydu / ataydim / перерыв / tanaffus / "
-                 "obedga / perekur / namozga … (har xil yozilsa ham). Bot javob beradi: «☕ @xodim — перерыв до 14:30».",
+                 "obedga / perekur / namozga … (har xil yozilsa ham). Bot javob beradi: «☕ @xodim — перерыв до 14:30 (1)» — (1) bugungi nechanchi tanaffus.",
                  "<b>Начало</b> — бот узнаёт сам: отойду / отойди / атайду / otaydu / ataydim / перерыв / tanaffus / "
-                 "obedga / perekur / namozga … (как бы ни написали). Бот отвечает: «☕ @сотрудник — перерыв до 14:30»."),
+                 "obedga / perekur / namozga … (как бы ни написали). Бот отвечает: «☕ @сотрудник — перерыв до 14:30 (1)» — (1) который перерыв за день."),
              r.L("<b>Qaytish</b> — «тут» / «keldim» / «qaytdim» — istalgan payt. Tanaffus vaqtida lidga yozsa — tanaffus "
                  "davom etadi; vaqti tugagach lidga yoki «Проёб»ga yozsa — qaytdi. Vaqt tugab jim bo'lsa — eslatma.",
                  "<b>Возврат</b> — «тут» / «keldim» / «вернулся» — в любой момент. Пишет лиду во время перерыва — перерыв "
@@ -822,13 +861,11 @@ async def breaks(ctx, r: Req):
                  "chiqmaydi (vaqt to'xtab turadi).",
                  "Если сегодняшний сотрудник папки на перерыве — задержка не считается: «задержка», напоминание и "
                  "штраф не приходят (время стоит)."),
-             (r.L(f"⚡ Qaytgach <b>{sp} daqiqa</b> beriladi. Shunda ham tanaffusda kutgan chatlar javobsiz bo'lsa — "
-                  "«Проёб»da «⚡ @xodim, ускорьтесь — 2 чата ждут ответа» (jarimasiz). Tanaffusdan oldin chiqqan "
-                  "«задержка»ning eslatmasi ham shu vaqtgacha suriladi.",
-                  f"⚡ После возврата даётся <b>{sp} мин</b>. Если чаты, ждавшие во время перерыва, всё ещё без ответа — "
-                  "в «Проёб»: «⚡ @сотрудник, ускорьтесь — 2 чата ждут ответа» (без штрафа). Напоминание по «задержке» "
-                  "до перерыва тоже сдвигается на это время.") if sp else
-              r.L("⚡ Qaytgach «ускорьтесь» — o'chiq.", "⚡ «Ускорьтесь» после перерыва — выкл.")),
+             (r.L(f"⚡ Qaytgach <b>{sp} daqiqa</b> beriladi: tanaffusdan oldin chiqqan «задержка»ning eslatmasi "
+                  "shu vaqtgacha suriladi. Xodimga «ускорьтесь» xabari yuborilmaydi.",
+                  f"⚡ После возврата даётся <b>{sp} мин</b>: напоминание по «задержке» до перерыва сдвигается на это "
+                  "время. Сообщение «ускорьтесь» сотруднику не отправляется.") if sp else
+              r.L("⚡ Qaytgach qo'shimcha vaqt — o'chiq.", "⚡ Доп. время после перерыва — выкл.")),
              "",
              f"➕ {r.L('Qo‘shimcha boshlash so‘zlari', 'Доп. слова начала')}: <b>{h(extra_b) or '—'}</b>",
              f"➕ {r.L('Qo‘shimcha qaytish so‘zlari', 'Доп. слова возврата')}: <b>{h(extra_k) or '—'}</b>"]

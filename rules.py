@@ -26,7 +26,7 @@ from . import people as P
 from . import roster as R
 from .db import Database
 from .links import message_link
-from .gtext import esc, head, link, mentions, small, tag
+from .gtext import esc, head, link, small, tag
 from .timeutil import minutes_up, parse_hhmm, work_seconds, local_date, is_work_time
 
 log = logging.getLogger("rules")
@@ -601,6 +601,28 @@ class Tracker:
     def overdue_now(self, now: int) -> dict[int, int]:
         return self.live_counts(now)["overdue"]
 
+    def reset_waits(self, now: int, folder_ids: set | None = None) -> int:
+        """Nazorat qayta yoqildi (egasi, 2026-11-11: bir hafta o'chiq turdi — yoqqach o'sha haftadagi eski chatlar
+        «задержка» bo'lib chiqdi, doska noto'g'ri, Push ham ketdi): o'chiq paytda boshlangan kutishlar bekor — zaderjka,
+        eslatma va jarima bo'lmaydi. Ochiq «задержка» havolasi 24 soatdan yangi bo'lsa — o'z holicha (javob bilan
+        yopiladi), eskisi yopiladi. folder_ids — faqat shu papkalar (papka nazorati yoqilganda). -> nechta bekor."""
+        n = 0
+        for th in self.db.all("SELECT chat_id, topic_id, alert_id FROM threads WHERE wait_since IS NOT NULL"):
+            if folder_ids is not None and self.chat_folder.get(th["chat_id"]) not in folder_ids:
+                continue
+            if th["alert_id"]:
+                a = self.db.one("SELECT status, created_ts FROM alerts WHERE id=?", (th["alert_id"],))
+                if a is not None and a["status"] == "open":
+                    if a["created_ts"] >= now - 86400:
+                        continue                           # yangi zaderjka — javob bilan yopiladi
+                    self.db.run("UPDATE alerts SET status='done', closed_ts=?, closed_by=? WHERE id=?",
+                                (now, "контроль включён заново", th["alert_id"]))
+            self._set(th["chat_id"], th["topic_id"], wait_since=None, wait_msg_id=None, wait_first=None, alert_id=None)
+            n += 1
+        if n:
+            log.info("Nazorat qayta yoqildi: %s ta eski kutish bekor qilindi", n)
+        return n
+
     async def status_changed(self, chat_id: int, topic_id: int) -> bool:
         """Lid statusi (topik belgisi) ⚡/💊 ga o'zgardi: bunday lid zaderjka emas — kutish bekor, ochiq
         «задержка» havolasi yopiladi va hisobga kirmaydi (void). -> bekor qilindimi."""
@@ -705,7 +727,8 @@ class Tracker:
             out["alerts"] = await self._delays(now)
             out["eod"] = await self.end_of_day(now)
             out["reminded"] = await self._remind_alerts(now)
-            out["speedup"] = await self._speedup(now)
+            # ☕ tanaffusdan qaytgach «⚡ ускорьтесь» xabari endi yo'q (egasi, 2026-11-11: «xodimga kelishi shart emas»);
+            # qaytgach beriladigan N daqiqa (speedup_min) — «задержка» eslatmasi uchun muhlat sifatida qoladi
         return out
 
     def _stavka_timeouts(self, now: int) -> int:
@@ -1058,46 +1081,6 @@ class Tracker:
         if back is not None:
             due = max(due, back + self.speedup_sec())
         return due
-
-    async def _speedup(self, now: int) -> int:
-        """☕ Xodim tanaffusdan qaytdi, N daqiqa (8) o'tdi, tanaffusda kutib qolgan chatlar hali javobsiz —
-        «Проёб»ga «⚡ @baxa, ускорьтесь — 2 чата ждут ответа» (jarimasiz). «задержка»si bor chatlar kirmaydi (ularga
-        o'z eslatmasi keladi). Har tanaffusga bir marta. -> nechta xabar."""
-        wait = self.speedup_sec()
-        if not wait:
-            return 0
-        ws, we = self.work_window()
-        skip = skip_list(self.db)
-        sent = 0
-        for p in self.db.all("SELECT * FROM pauses WHERE end_ts IS NOT NULL AND nudged=0 AND end_ts>=? AND end_ts<=?",
-                             (now - 6 * 3600, now - wait)):
-            self.db.run("UPDATE pauses SET nudged=1 WHERE id=?", (p["id"],))
-            f = P.folder(self.db, p["folder_id"])
-            if f is None or not f["delay_on"] or now - (p["end_ts"] + wait) > 30 * 60 \
-                    or not is_work_time(now, self.tz, ws, we):
-                continue                                  # juda kech (bot o'chib turgan) yoki ish vaqti emas
-            items = [th for th in self.db.all("SELECT * FROM threads WHERE wait_since IS NOT NULL AND wait_since<=? "
-                                              "AND alert_id IS NULL AND stavka<>'on' ORDER BY wait_since",
-                                              (p["end_ts"],))
-                     if self.chat_folder.get(th["chat_id"]) == f["id"]
-                     and not label_excluded(self.label(th["chat_id"], th["topic_id"]), skip)]
-            if not items:
-                continue
-            n = len(items)
-            chats = (f"{n} чат ждёт" if n % 10 == 1 and n % 100 != 11 else
-                     f"{n} чата ждут" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else f"{n} чатов ждут")
-            who = mentions(self.workers(f["id"], now)) or "сотрудник"
-            text = "\n".join([head(f["name"], "после перерыва")]
-                             + [link(message_link(th["chat_id"], th["wait_msg_id"] or th["topic_id"], th["topic_id"]))
-                                for th in items[:MAX_LINKS]]
-                             + ([small(f"… и ещё {n - MAX_LINKS}")] if n > MAX_LINKS else [])
-                             + [f"⚡ {who}, ускорьтесь — {chats} ответа"])
-            try:
-                await self.notifier.send_group(text, trash="info")
-                sent += 1
-            except Exception as exc:
-                log.warning("«ускорьтесь» yuborilmadi: %s", exc)
-        return sent
 
     async def _missed(self, r, f, now: int) -> None:
         """Eslatmadan keyin ham javob yo'q: RD ning o'sha kungi xodimiga 1 ta zaderjka (zinapoya bo'yicha jarima)."""

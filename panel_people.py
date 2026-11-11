@@ -16,13 +16,16 @@ DAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 
 def kind_name(r: Req, kind: str) -> str:
-    return {"self": r.L("ega (siz)", "владелец (вы)"), "partner": r.L("hamkor", "партнёр"),
+    return {"self": r.L("ega (siz)", "владелец (вы)") if r.owner else r.L("ega", "владелец"),
+            "partner": r.L("hamkor", "партнёр"),
             "pool": r.L("umumiy akkaunt", "общий аккаунт"), "worker": r.L("kassa xodimi", "обработчик"),
             "": r.L("faqat nazorat", "только контроль")}[kind]
 
 
 def visible(r: Req, p) -> bool:
-    return r.owner or p["kassa_kind"] not in ("self", "partner")
+    """Egasi va Artur (hamkor) — adminlarga ko'rinmaydi; Artur o'zi (r.partner) — egasini (xodim sifatida) va o'zini
+    ko'radi."""
+    return r.owner or r.partner or p["kassa_kind"] not in ("self", "partner")
 
 
 def today(ctx) -> dt.date:
@@ -259,7 +262,7 @@ async def person_card(ctx, r: Req):
     rows = []
     if r.owner and not zst["ready"] and zst["weeks"] and p["kassa_kind"] in ("worker", "partner", "self"):
         rows += grid([(f"🧮 {plabel(x, x + dt.timedelta(days=6))}", f"kz:{x.isoformat()}") for x in zst["weeks"]], 2)
-    if r.can("full"):
+    if r.can("full") and (r.owner or p["kassa_kind"] not in ("self", "partner")):   # ega/Artur kartasi — faqat ko'rish
         if p["kassa_kind"] != "pool":                     # ochiq turgan davr bilan — kun shu davrdan tanlanadi
             rows += [[(r.L("⚠️ Jarima", "⚠️ Штраф"), f"paf:{pid}:{key}"),
                       (r.L("🎁 Bonus", "🎁 Бонус"), f"pab:{pid}:{key}"),
@@ -298,7 +301,7 @@ async def person_is_me(ctx, r: Req):
         if old is not None:
             P.update_person(db, old["id"], kassa_kind="worker")
         P.update_person(db, pid, kassa_kind="self")
-        r.args = [str(pid)]
+        r.args = ui.last_args(r, "po", str(pid)) or [str(pid)]
         return await person_card(ctx, r)
     nm = h(p["name"])
     lines = [r.L(f"Bot <b>{nm}</b> ni siz deb biladi:", f"Бот будет знать, что <b>{nm}</b> — это вы:"),
@@ -549,7 +552,7 @@ async def paid_do(ctx, r: Req):
     ready = K.zp_state(db, s, upto, today(ctx))["ready"]
     K.mark_paid(db, pid, upto, row["total"] if row and ready else None)
     await ui.toast(ctx.bot, r.chat_id, r.L("✅ Belgilandi. Hisob noldan boshlandi.", "✅ Отмечено. Расчёт с нуля."))
-    r.args = [str(pid)]
+    r.args = ui.last_args(r, "po", str(pid)) or [str(pid)]
     return await person_card(ctx, r)
 
 

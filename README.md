@@ -8,6 +8,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «✅ Выполнено» tugmasi boradi. Faqat ish vaqtida hisoblanadi: kechasi kelgan xabarlar sanalmaydi.
   Javob — har qanday xodim xabari, papka akkauntidan yozilgani ham (Push yuborgan xabarlar sanalmaydi).
   Xodim yozgandan keyin bot yozsa — bu mijozning yangi xabari, unga ham javob kerak.
+  Nazorat (🚨 → ⛔/✅), papka nazorati yoki botning o'zi o'chirib qo'yilib, keyin yoqilsa — o'chiq paytdagi javobsiz
+  chatlar «задержка» bo'lmaydi, eslatma va jarima ham yo'q, doska ham ularni ko'rsatmaydi; 24 soatdan yangi ochiq
+  «задержка» o'z holicha qoladi (javob bilan yopiladi). Yoqilishi bilan topik belgilari (⚡/💊) darhol yangilanadi.
   Ish vaqtida guruhlar har 2 soniyada tekshiriladi (akkaunt «online» qilinmaydi): bot jonli kelgan har xabar
   raqamini eslab qoladi, guruhda tushib qolgan raqam bo'lsa — faqat o'sha xabarlarni olib, tartib bilan ishlaydi.
   Xodim javobi kech topilsa — kutish javob vaqtida yopiladi (noto'g'ri «задержка» va jarima bo'lmaydi).
@@ -74,15 +77,15 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «Ishga kelish» nazorati o'chiq bo'lsa ham bot kim ishdaligini jim belgilaydi — bosh menyuda «🙋 Ishda» va
   «👥 Hozir ishda» to'g'ri ko'rsatadi; lekin kech qolish xabari, eslatma va jarima bo'lmaydi.
 - **☕ Tanaffus.** «атайду», «отойду 30», «перерыв», «obedga», «perekur» va h.k. (o'z so'zlaringizni ham qo'shasiz:
-  ⚙️ → ☕ Tanaffus → ➕ Boshlash so'zlari / ➕ Qaytish so'zlari) — bot javob beradi: «☕ @xodim — перерыв до 14:30». Zaderjka xabarida:
+  ⚙️ → ☕ Tanaffus → ➕ Boshlash so'zlari / ➕ Qaytish so'zlari) — bot javob beradi: «☕ @xodim — перерыв до 14:30 (1)» ((1) — bugungi nechanchi tanaffus). Zaderjka xabarida:
   «☕ Baxa на перерыве до 14:30». Tanaffus vaqtida lidga yozsa — tanaffus davom etadi; vaqt tugagach lidga yoki
   «Проёб»ga yozsa — qaytdi; «тут» / «keldim» — istalgan payt qaytdi (bot 👍 bosadi). Vaqt tugab 3 daqiqa
   hech qayerga yozmasa — «☕ перерыв · @xodim — время перерыва вышло!» (tanaffus oxirida lidga yozib turgan bo'lsa —
   eslatma yo'q, u allaqachon ishlayapti).
   Xodim tanaffusda bo'lsa — uning RD si bo'yicha «задержка», eslatma va jarima chiqmaydi (vaqt to'xtab turadi).
-  Qaytgach 8 daqiqa beriladi (⚙️ → ☕ Tanaffus → ⚡): tanaffusda kutib qolgan chatlar shunda ham javobsiz bo'lsa —
-  «⚡ @xodim, ускорьтесь — 2 чата ждут ответа» (jarimasiz). Tanaffusdan oldin chiqqan «задержка»ning eslatmasi ham
-  shu vaqtgacha suriladi, keyin odatdagidek: 5 daqiqada javob bo'lmasa — jarima.
+  Qaytgach 8 daqiqa beriladi (⚙️ → ☕ Tanaffus → ⚡): tanaffusdan oldin chiqqan «задержка»ning eslatmasi shu
+  vaqtgacha suriladi, keyin odatdagidek: 5 daqiqada javob bo'lmasa — jarima. Qaytgan xodimga «ускорьтесь» xabari
+  yuborilmaydi (egasi, 2026-11-11).
 - **👥 Hozir ishda** (bosh menyu). Har 3 soniyada tekshiriladi, nimadir o'zgarsa — o'z joyida yangilanadi. Har xodim: 🟢 ishda · ☕ tanaffus (qachongacha) ·
   ⚪ hali kelmagan · 🛌 dam olishda; ⏱ uning RD sida javob kutayotgan lidlar (🔴 — zaderjka); ✍️ lidga oxirgi
   yozgani; 🚨 bugungi «задержка»lar.
@@ -110,6 +113,10 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     Artur — o'z ulushi (50%, yoki 🧮 Haftalik zp dagi «qolgani») + jarimalar − bonuslar (bonusni Artur to'laydi,
     jarimalar unga). Belgilanmagan bo'lsa,
     «💼 Siz» kartasida «⚠️ Artur (hamkor) botda belgilanmagan» chiqadi va 🧮 Tekshiruv ⚠️ bo'ladi.
+    Artur admin bo'lsa (⚙️ → 👮 Adminlar → ➕ → @username) va Artur yozuviga uning Telegram akkaunti bog'langan
+    bo'lsa — u sizni ham xodim sifatida ko'radi: kassangiz, cheklaringiz va xodim sifatidagi zp ingiz (👥 Xodimlar,
+    📊 Hisobot, 💵 zp ro'yxati). Daromadingiz va pul amallari — faqat sizda; sizning kartangiz unga faqat ko'rish
+    uchun. Boshqa adminlar sizni ko'rmaydi.
   - **💼 Siz kartasi:** Kassa − Artur (ulushi + jarimalar − bonuslar) − Xodimlar zp si (zp + bonuslar − jarimalar)
     = Daromadingiz. Xodim akkauntida o'zingiz ham ishlagan bo'lsangiz — o'sha qismdan sizga o'z foizingiz (masalan
     50%), qolgani Arturga; «siz %» (masalan 14%) faqat xodimning o'zi ishlagan qismidan olinadi. Masalan: Bayzed
@@ -205,7 +212,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     kun yopilgan bo'lsa — kassaga tegilmaydi, sizga xabar keladi. «RD 3.1» papkasi ham achotda `Rd3`. Topik bizning RD larda topilmasa (xodim
     bizga aloqasi yo'q RD da ishlagan) — chek qabul qilinadi va bot chek ostida so'raydi «Когда пришёл лид?»; xodim
     sanani yozadi (`10.09` — savolga javob qilib yoki shunchaki) — achotda `10.09 4000` / `Rd 11.10` (RD raqamisiz).
-    Javob bo'lmasa — sanasiz, `/gaz` da «⚠️ Без даты лида». Asosiy akkaunt ko'rmaydigan RD da xodim havolasiz
+    Javob bo'lmasa — sanasiz, `/gaz` da «⚠️ Без даты лида». Botga yuborilgan chek kassaga faqat «Проёб»ga tashlangan
+    achot orqali tushadi; achotdan keyin xabarga yangi summa qo'shilsa — kassaga emas, keyingi `/gaz` ga
+    («➕ 2600 — новый чек: войдёт в отчёт при /gaz»). Asosiy akkaunt ko'rmaydigan RD da xodim havolasiz
     yozadi — summa va lid kelgan kun: `1950 10.09`, `1950` / `10.09` (pastida), `1950. 10.09`; bot 👍 bosadi va
     so'ramaydi (faqat `1950` — sanani so'raydi). Guruhimizdan, lekin lid topigidan emas («General» yoki topiksiz
     xabar) havola — bot 🧐 bosadi (Telegram bermasa — 🤨), chek hisobga kirmaydi. Pereslat qilingan xabar — ichida havola
@@ -287,7 +296,9 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «🆕 Yangi lidlar» — shu kuni ochilgan topiklar (eski lid bugun yozsa, yangi hisoblanmaydi).
 - **🌐 Til.** Har admin o'z tilini tanlaydi (bosh menyuning pastida). Savol va ogohlantirishlar ham har kimga
   o'z tilida boradi.
-- **🧼 Toza chat.** Chatda doim bitta panel. «‹ Orqaga» — oldingi ekranga. Savol bir nechta egaga borsa —
+- **🧼 Toza chat.** Chatda doim bitta panel. «‹ Orqaga» — oldingi ekranga. Amaldan keyin (masalan 🔁 Kim ishladi →
+  kun → kim) bot kabinetga qaytadi va «‹ Orqaga» endi kabinetdan oldingi ekranga boradi — kun tanlash qaytib chiqmaydi.
+  Savol bir nechta egaga borsa —
   biringiz javob bersangiz, boshqalardagi nusxa o'chadi. Har hisobotga alohida xabar kelmaydi (guruhda 👌).
 - **👥 Xodimlar.** Bot xodimni @username bo'yicha taniydi (guruh a'zolaridan ham), topikda ham, «Проёб»da ham.
   Bitta odamning 2 yozuvi bo'lsa (kassadagi «Baxa» va nazoratdagi «@baxa») — bot so'raydi, «🔗 Birlashtirish» tugmasi bilan.
@@ -348,7 +359,7 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 
 - **Zaxira ega.** Railway → Variables → `ADMIN_IDS` ga ikkinchi akkauntingiz ID sini vergul bilan qo'shing:
   `111111111,222222222`. Ikkalasi ham to'liq ega.
-- **Botning o'zidan:** ⚙️ → 👮 Adminlar → ➕ ID bo'yicha admin → kontaktini (📎 → Kontakt) yoki ID sini yuboring →
+- **Botning o'zidan:** ⚙️ → 👮 Adminlar → ➕ ID bo'yicha admin → kontaktini (📎 → Kontakt), @username ini yoki ID sini yuboring →
   nomini bosib 👑 ega darajasiga o'tkazing.
 - **🔒 Begona akkaunt (xavfsizlik).** Bot tanimaydigan akkaunt /start bossa yoki nima yozsa ham — faqat
   «Бот сейчас не работает.» (tugmasiz; ID ham, «Запросить доступ» ham yo'q). Shu chatga 🔒 qulf kodini (yoki 🔐 tiklash
@@ -363,7 +374,8 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 ## Buyruqlar
 
 - Shaxsiy chat: `/menu` — panel, `/hisobot` — bugungi hisobot, `/id` — Telegram ID (faqat adminlarga; xodim /start
-  bossa — faqat cheklar yo'riqnomasi, tugmasiz).
+  bossa — faqat cheklar yo'riqnomasi, tugmasiz). Xodimning «/» menyusida faqat `/gaz` (menyu va ID yo'q); ega va
+  adminlarda — `/menu`, `/hisobot`, `/id` (o'zi ham RD da ishlasa — `/gaz` ham).
 - «Проёб» guruhi:
   - `/proyob` — shu guruhni «Проёб» qilish
   - `/statistika` — hafta xulosasi va eng yaxshilar

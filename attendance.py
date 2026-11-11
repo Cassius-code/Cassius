@@ -371,12 +371,15 @@ class Attendance:
         return "break_end_late" if ts > cur["start_ts"] + self.length(cur) else "break_end"
 
     def break_text(self, person, ts: int) -> str:
-        """«☕ @baxa — перерыв до 14:30» (javob sifatida)."""
+        """«☕ @baxa — перерыв до 14:30 (1)» (javob sifatida); (1) — bugungi nechanchi tanaffus (egasi, 2026-11-11)."""
         from .gtext import esc
         from .timeutil import fmt
         cur = open_break(self.db, person["id"])
         until = self.break_end_ts(cur) if cur is not None else ts + self.break_len
-        return f"☕ {esc(P.mention(person))} — перерыв до {fmt(until, self.tz, '%H:%M')}"
+        upto = cur["start_ts"] if cur is not None else ts
+        n = self.db.scalar("SELECT COUNT(*) FROM breaks WHERE person_id=? AND start_ts>=? AND start_ts<=?",
+                           (person["id"], day_start(upto, self.tz), upto))
+        return f"☕ {esc(P.mention(person))} — перерыв до {fmt(until, self.tz, '%H:%M')}" + (f" ({n})" if n else "")
 
     def _eff_end(self, br) -> int:
         limit = br["start_ts"] + self.length(br)

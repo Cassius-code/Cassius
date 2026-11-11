@@ -534,11 +534,24 @@ async def slide(ctx, r: Req):
         kb(*grid(opts, 3), nav(r, "c"))
 
 
+def control_resumed(ctx, folder_ids: set | None = None) -> None:
+    """Nazorat (yoki bot, yoki papka nazorati) qayta yoqildi: o'chiq paytdagi kutishlar bekor va topik belgilari
+    (⚡/💊) darhol yangilanadi — eski chatlar «задержка» bo'lmaydi, Push belgilanganlarga bormaydi (egasi, 2026-11-11)."""
+    now = int(ctx.clock())
+    if folder_ids is None:
+        ctx.db.set("delay_from", str(now))                  # yoqilgan paytdan: eski javobsizlar xabar chiqarmaydi
+    if ctx.tracker is not None:
+        ctx.tracker.reset_waits(now, folder_ids)
+    ub = getattr(ctx, "userbot", None)
+    if ub is not None and getattr(ub, "state", "") == "online" and hasattr(ub, "_start_sync"):
+        ub._start_sync()
+
+
 @screen("ct", "full")
 async def toggle_delay(ctx, r: Req):
     on = ctx.db.toggle("delay_enabled")
     if on:
-        ctx.db.set("delay_from", str(int(ctx.clock())))     # yoqilgan paytdan: eski javobsizlar xabar chiqarmaydi
+        control_resumed(ctx)
     return await control(ctx, r)
 
 
@@ -933,6 +946,8 @@ async def folder_card(ctx, r: Req):
 async def folder_delay(ctx, r: Req):
     f = must(P.folder(ctx.db, int(r.args[0])))
     P.set_folder(ctx.db, f["id"], delay_on=0 if f["delay_on"] else 1)
+    if not f["delay_on"]:                                  # yoqildi — o'chiq paytdagi kutishlar bekor
+        control_resumed(ctx, {f["id"]})
     return await folder_card(ctx, r)
 
 

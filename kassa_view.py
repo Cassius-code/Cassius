@@ -269,9 +269,10 @@ def zp_note(zst: dict | None, lang: str, owner: bool = True) -> str | None:
 
 
 def overall(b: dict, s: dt.date, e: dt.date, lang: str, owner: bool, cmp: dict | None = None,
-            zst: dict | None = None) -> str:
+            zst: dict | None = None, show_self: bool = False) -> str:
+    """show_self — 🤝 Artur ko'ryapti: egasi ham xodim sifatida (kassa va zp, daromadsiz)."""
     rows = [b["rows"][i] for i in b["order"] if i in b["rows"]]
-    vis = [r for r in rows if owner or r["kind"] in ("worker", "pool")]
+    vis = [r for r in rows if owner or r["kind"] in ("worker", "pool") or (show_self and r["kind"] == "self")]
     parts = [f"<b>📊 {w('report', lang)}</b>", f"<i>{label(s, e)}</i>", ""]
     kl = []
     tn = traw = 0

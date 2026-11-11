@@ -52,7 +52,7 @@ def locked(ctx, r: Req, *days) -> str | None:
 
 
 def visible_acct(r: Req, row: dict) -> bool:
-    return r.owner or row["kind"] in ("worker", "pool")
+    return r.owner or row["kind"] in ("worker", "pool") or (r.partner and row["kind"] == "self")
 
 
 @screen("k", "full")
@@ -161,11 +161,11 @@ def report_show(ctx, r: Req, key: str):
     b = K.calc(ctx.db, s, e)
     cmp = K.compare(ctx.db, s, e, today(ctx)) if s != e or s < today(ctx) else None
     zst = K.zp_state(ctx.db, s, e, today(ctx))
-    text = overall(b, s, e, r.lang, r.owner, cmp, zst)
+    text = overall(b, s, e, r.lang, r.owner, cmp, zst, show_self=r.partner)
     pkey = key if key != "td" else s.isoformat()
     people_btn = [(f"👤 {b['rows'][i]['p']['name']}", f"po:{i}:{pkey}")
                   for i in b["order"] if i in b["rows"] and K.has_data(b["rows"][i])
-                  and (r.owner or b["rows"][i]["kind"] in ("worker", "pool"))]
+                  and visible_acct(r, b["rows"][i])]
     rows = grid(people_btn, 3)
     if r.owner:
         rows += grid([(f"🧮 {r.L('Haftalik zp', 'Зп за неделю')} · {wlabel(x)}", f"kz:{x.isoformat()}")
@@ -1370,7 +1370,7 @@ async def who_worked(ctx, r: Req):
         K.set_pay_day(db, pid, day, who or None)
         await ui.toast(ctx.bot, r.chat_id, f"✅ {day[8:10]}.{day[5:7]}: " +
                        (h(P.person(db, who)["name"]) if who else r.L("akkaunt egasi", "владелец аккаунта")))
-        r.args = [str(pid)]
+        r.args = ui.last_args(r, "po", str(pid)) or [str(pid)]      # kabinetga — «Orqaga» kun tanlashga qaytmaydi
         from .panel_people import person_card
         return await person_card(ctx, r)
     btn = [(o["name"], f"kw:{pid}:{day}:{o['id']}") for o in K.kassa_people(db, kinds=("worker", "self"))

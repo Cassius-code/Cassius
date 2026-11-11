@@ -176,6 +176,7 @@ class Req:
     view: str | None = None           # ko'rsatilgan ekranning manzili (Orqaga uchun)
     view_set: bool = False
     calls: int = 0
+    partner: bool = False             # 🤝 Artur (hamkor) o'zi — egasining xodim sifatidagi zp sini ham ko'radi
 
     def L(self, uz: str, ru: str) -> str:
         return ru if self.lang == "ru" else uz
@@ -398,6 +399,17 @@ def remember(uid: int, data: str, text: str, markup, safe: bool, ask: bool) -> N
             break
     st.append({"data": data, "text": text, "markup": markup, "safe": safe, "ask": ask})
     del st[:-40]
+
+
+def last_args(r: Req, prefix: str, first: str) -> list | None:
+    """Tarixda shu ekranning (prefix:first…) oxirgi ochilgan ko'rinishi argumentlari. Amal tugagach o'sha ekranga
+    aynan shu manzil bilan qaytilsa, tarix o'sha joyda kesiladi — «‹ Orqaga» endi undan oldingi ekranga boradi,
+    oraliq qadamlar (kun tanlash va h.k.) qaytib chiqmaydi (egasi, 2026-11-11)."""
+    for e in reversed(HIST.get(r.uid) or []):
+        parts = e["data"].split(":")
+        if parts[0] == prefix and len(parts) > 1 and parts[1] == first:
+            return parts[1:]
+    return None
 
 
 def previous(uid: int) -> dict | None:

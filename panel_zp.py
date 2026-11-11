@@ -11,7 +11,11 @@ from .kassa_view import adj_lines, label, money, num, total_formula, zp_part_lin
 from .timeutil import local_date
 from .ui import Req, card, grid, h, kb, screen, title
 
-SHOW = ("worker", "pool")          # egasi (self) va hamkor (partner) — ko'rinmaydi
+SHOW = ("worker", "pool")          # egasi (self) va hamkor (partner) — ko'rinmaydi (🤝 Artur o'zi — egasini ko'radi)
+
+
+def _show(r: Req) -> tuple:
+    return SHOW + (("self",) if r.partner else ())
 
 
 def _today(ctx) -> dt.date:
@@ -47,8 +51,9 @@ async def zp_home(ctx, r: Req):
     ui.view(r, f"zh:{key}")
     b = K.calc(db, s, e)
     ready = K.zp_state(db, s, e, _today(ctx))["ready"]
-    rows = [b["rows"][i] for i in b["order"] if i in b["rows"] and b["rows"][i]["kind"] in SHOW and K.has_data(b["rows"][i])]
-    zp_total = sum(x["total"] or 0 for x in rows if x["kind"] == "worker" and x["total"] is not None)
+    rows = [b["rows"][i] for i in b["order"] if i in b["rows"] and b["rows"][i]["kind"] in _show(r)
+            and K.has_data(b["rows"][i])]
+    zp_total = sum(x["total"] or 0 for x in rows if x["kind"] in ("worker", "self") and x["total"] is not None)
     est = "" if ready else r.L(" ≈ <i>(taxminiy — 🧮 hafta hali hisoblanmagan)</i>",
                                " ≈ <i>(примерно — 🧮 неделя ещё не рассчитана)</i>")
     head = [r.L(f"💵 Jami kassa: <b>{num(b['raw'])}</b> · <b>{money(b['K'])} $</b>",
@@ -57,7 +62,7 @@ async def zp_home(ctx, r: Req):
     lines, btn = [], []
     for x in rows:
         bits = [f"{num(x['raw'])}", f"{money(x['usd'])} $"] if x["n"] else []
-        if x["kind"] == "worker" and x["total"] is not None:
+        if x["kind"] in ("worker", "self") and x["total"] is not None:
             bits.append(r.L(f"zp <b>{money(x['total'])} $</b>", f"зп <b>{money(x['total'])} $</b>"))
         extra = []
         if x["bonus"]:
@@ -84,7 +89,7 @@ async def zp_person(ctx, r: Req):
     db = ctx.db
     pid = int(r.args[0])
     p = ui.must(P.person(db, pid))
-    if p["kassa_kind"] not in SHOW:
+    if p["kassa_kind"] not in _show(r):
         raise ui.Gone()
     s, e, key = _period(ctx, r.args[1] if len(r.args) > 1 else None)
     b = K.calc(db, s, e)
@@ -105,11 +110,11 @@ async def zp_person(ctx, r: Req):
         if days:
             parts.append(card([f"<b>{r.L('Kunma-kun', 'По дням')}</b>"] + days))
         zl = []
-        if x["kind"] == "worker" and x["zp_on"]:
+        if x["kind"] in ("worker", "self") and x["zp_on"]:
             zl.append(r.L(f"Zp: <b>{money(x['zp'])} $</b>", f"Зп: <b>{money(x['zp'])} $</b>"))
             zl += zp_part_lines(x, r.lang)                 # bir nechta RD dan bo'lsa — har biri
         zl += adj_lines(x, r.lang)
-        if x["total"] is not None and x["kind"] == "worker":
+        if x["total"] is not None and x["kind"] in ("worker", "self"):
             zl.append(total_formula(x, r.lang))
         if zl:
             est = "" if ready else r.L(" · <i>≈ taxminiy</i>", " · <i>≈ примерно</i>")

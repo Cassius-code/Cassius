@@ -84,6 +84,8 @@ async def try_code(ctx, user, chat_id: int, text: str) -> bool:
         return False
     name = _name(user)
     P.set_admin(db, user.id, "owner", name)
+    from .panel import set_commands
+    await set_commands(ctx, user.id)                       # «/» menyusi — ega buyruqlari
     others = [o for o in ctx.notifier.owner_ids() if o != user.id]
     await ctx.notifier._send_many(others, f"🔐 <b>Yangi 👑 ega</b>: {h(name)} · <code>{user.id}</code> — {how} bilan "
                                           "kirdi. Bu siz bo'lmasangiz: ⚙️ → 👮 Adminlar → 🗑.")
@@ -284,6 +286,8 @@ async def _request_screen(ctx, r: Req):
     # kirish so'rovi
     if op in ("av", "af", "az"):
         P.set_admin(db, q["tg_id"], {"av": "view", "af": "full", "az": "zp"}[op], q["name"])
+        from .panel import set_commands
+        await set_commands(ctx, q["tg_id"])                # «/» menyusi — admin buyruqlari
         close()
         await _tell(ctx, q["tg_id"], "✅ Доступ выдан. Нажмите /menu")
         return ui.join(title("👮", r.L("ADMIN QO'SHILDI", "АДМИН ДОБАВЛЕН"), h(q["name"]))), kb(ui.nav(r))

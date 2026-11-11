@@ -371,11 +371,24 @@ async def kassa_sync(ctx, p, chat_id: int, mid: int, day: str, before: list[int]
                   "WHERE r.status IN ('done','pending') AND ch.rd=? AND ch.skip=0 AND (r.person_id=? OR ch.pay=?) "
                   "ORDER BY ch.id", (day, p["id"], p["id"]))
     dm = f"{day[8:10]}.{day[5:7]}"
-    what = f"{' '.join(map(str, before)) or '—'} → {' '.join(map(str, after)) or '—'}"
     if not rows:                                           # achot hali tashlanmagan — kun keyingi /gaz ga to'liq
         db.run("UPDATE wchecks SET reported_ts=NULL WHERE person_id=? AND day=?", (p["id"], day))
         await note(ctx, chat_id, f"↻ Чек за {dm} изменён. Отправьте /gaz — в отчёт войдёт весь день {dm}.", reply_to=mid)
         return
+    # yangi qo'shilgan summa — kassaga to'g'ridan-to'g'ri emas: keyingi /gaz achotiga, kassaga faqat «Проёб» orqali
+    # (egasi, 2026-11-11: «botga silka tashlasa jami achotga qo'shilmasin — «Проёб»ga tashlasa qo'shilsin»)
+    extra, add = add[len(rem):], add[:len(rem)]
+    if extra:
+        left = list(extra)
+        for x in db.all("SELECT id, amount FROM wchecks WHERE chat_id=? AND msg_id=? AND deleted=0 ORDER BY pos DESC",
+                        (chat_id, mid)):
+            if x["amount"] in left:
+                left.remove(x["amount"])
+                db.run("UPDATE wchecks SET reported_ts=NULL WHERE id=?", (x["id"],))
+        await note(ctx, chat_id, f"➕ {' '.join(map(str, extra))} — новый чек: войдёт в отчёт при /gaz.", reply_to=mid)
+        if not rem:
+            return
+    what = f"{' '.join(map(str, rem))} → {' '.join(map(str, add)) or '—'}"
     if K.is_closed(db, day):
         from .kassa_view import h
         msg = (f"⚠️ <b>{h(p['name'])}</b>: {dm} — chek o'zgardi ({h(what)}), kun yopilgan. Kassani o'zingiz "
@@ -394,8 +407,6 @@ async def kassa_sync(ctx, p, chat_id: int, mid: int, day: str, before: list[int]
         if hit is not None:
             K.delete_check(db, hit["id"])
             pool.remove(hit)
-    for new_a in add[len(rem):]:                           # qo'shildi
-        K.add_check(db, p["id"], day, new_a)
     await note(ctx, chat_id, f"✅ Касса за {dm} исправлена: {what}", reply_to=mid)
 
 

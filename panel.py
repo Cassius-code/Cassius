@@ -48,8 +48,12 @@ def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", messag
     from .context import LANG
     lang = ctx.lang(uid)
     LANG.set(lang)                  # shu so'rov davomida chiqadigan hamma matn (savollar ham) — shu admin tilida
-    return Req(uid=uid, chat_id=chat_id, level=level_of(ctx, uid), data=data, args=data.split(":")[1:] if data else [],
-               text=text, message=message, lang=lang)
+    level = level_of(ctx, uid)
+    # 🤝 Artur (hamkor yozuviga Telegram akkaunti bog'langan admin) — egasining xodim sifatidagi kassa va zp sini ham
+    # ko'radi (egasi, 2026-11-11: «Arturga hammasi, hatto mening zp im ham ko'rinsin — men ham u yerda xodimman»)
+    me = P.by_tg(ctx.db, uid) if level and level != "owner" else None
+    return Req(uid=uid, chat_id=chat_id, level=level, data=data, args=data.split(":")[1:] if data else [],
+               text=text, message=message, lang=lang, partner=me is not None and me["kassa_kind"] == "partner")
 
 
 # ───────────────────────── bosh menyu
@@ -269,14 +273,34 @@ async def refresh_panels(ctx, note: str = "") -> None:
             log.info("Panel yangilanmadi %s: %s", chat, exc)
 
 
-async def set_commands(ctx, uid: int | None = None) -> None:
-    """«/» menyusi: shaxsiy chatda — panel buyruqlari, guruhda — faqat guruhda ishlaydiganlar (chalkashmasin).
-    uid berilsa — faqat shu admin chatiga, uning tilida."""
-    from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeChat
+def _admin_commands(ctx, uid: int) -> list:
+    """Ega/admin chatidagi «/» menyusi: panel buyruqlari; o'zi ham RD da ishlasa — /gaz ham."""
+    from aiogram.types import BotCommand
     ru = ctx.lang(uid) == "ru"
-    private = [BotCommand(command="menu", description="◆ Меню" if ru else "◆ Menyu"),
-               BotCommand(command="hisobot", description="📊 Отчёт за сегодня" if ru else "📊 Bugungi hisobot"),
-               BotCommand(command="id", description="🆔 Мой ID" if ru else "🆔 Mening ID")]
+    out = [BotCommand(command="menu", description="◆ Меню" if ru else "◆ Menyu"),
+           BotCommand(command="hisobot", description="📊 Отчёт за сегодня" if ru else "📊 Bugungi hisobot"),
+           BotCommand(command="id", description="🆔 Мой ID" if ru else "🆔 Mening ID")]
+    from .wchecks import admin_person
+    if admin_person(ctx, uid, P.admin_level(ctx.db, ctx.cfg.owner_ids, uid) == "owner") is not None:
+        out.append(BotCommand(command="gaz", description="📋 Отчёт за день" if ru else "📋 Kunlik achot"))
+    return out
+
+
+async def set_commands(ctx, uid: int | None = None) -> None:
+    """«/» menyusi: xodimga (hamma shaxsiy chatda) — faqat /gaz (egasi, 2026-11-11: xodimga menyu, ID kerak emas);
+    ega/adminga — o'z chatida panel buyruqlari; guruhda — faqat guruhda ishlaydiganlar (chalkashmasin).
+    uid berilsa — faqat shu chatga (admin bo'lmasa — xodim menyusi), uning tilida."""
+    from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeChat
+    worker = [BotCommand(command="gaz", description="📋 Отчёт за день")]
+    if uid:
+        try:
+            if P.admin_level(ctx.db, ctx.cfg.owner_ids, uid):
+                await ctx.bot.set_my_commands(_admin_commands(ctx, uid), scope=BotCommandScopeChat(chat_id=uid))
+            else:                                          # admin emas (olib tashlandi) — umumiy (xodim) menyusi
+                await ctx.bot.delete_my_commands(scope=BotCommandScopeChat(chat_id=uid))
+        except Exception:
+            log.info("Buyruqlar (chat) o'rnatilmadi")
+        return
     group = [BotCommand(command="statistika", description="📅 Итоги недели"),
              BotCommand(command="topweek", description="🏆 Касса — эта неделя"),
              BotCommand(command="toplast", description="🏆 Касса — прошлая неделя"),
@@ -284,18 +308,17 @@ async def set_commands(ctx, uid: int | None = None) -> None:
              BotCommand(command="frozen", description="💤 Застывшие лиды (каждая RD отдельно)"),
              BotCommand(command="cooling", description="📉 Остывающие лиды (каждая RD отдельно)"),
              BotCommand(command="clean", description="🧹 Удалить задержки, на которые уже ответили")]
-    if uid:
-        try:
-            await ctx.bot.set_my_commands(private, scope=BotCommandScopeChat(chat_id=uid))
-        except Exception:
-            log.info("Buyruqlar (chat) o'rnatilmadi")
-        return
     try:
         await ctx.bot.delete_my_commands()                 # umumiy (hamma chat) menyu — eski botdan qolmasin
-        await ctx.bot.set_my_commands(private, scope=BotCommandScopeAllPrivateChats())
+        await ctx.bot.set_my_commands(worker, scope=BotCommandScopeAllPrivateChats())
         await ctx.bot.set_my_commands(group, scope=BotCommandScopeAllGroupChats())
     except Exception:
         log.info("Buyruqlar o'rnatilmadi")
+    for u in dict.fromkeys(list(ctx.notifier.owner_ids()) + [a["user_id"] for a in P.admins(ctx.db)]):
+        try:
+            await ctx.bot.set_my_commands(_admin_commands(ctx, u), scope=BotCommandScopeChat(chat_id=u))
+        except Exception:
+            log.info("Buyruqlar (admin %s) o'rnatilmadi", u)
 
 
 # ───────────────────────── yo'naltirish
