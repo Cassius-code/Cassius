@@ -18,8 +18,9 @@ log = logging.getLogger("panel_push")
 MAX_MEDIA = 20 * 1024 * 1024
 SLOT_BTN = {"morning": ("🌅 Ertalabkiga o'tish", "🌅 Переключить на утренний"),
             "day": ("☀️ Kunduzgiga o'tish", "☀️ Переключить на дневной"),
-            "evening": ("🌙 Kechkiga o'tish", "🌙 Переключить на вечерний")}
-SLOT_ICON = {"morning": "🌅", "day": "☀️", "evening": "🌙"}
+            "evening": ("🌙 Kechkiga o'tish", "🌙 Переключить на вечерний"),
+            "lupa": ("🔎 Lupaga o'tish", "🔎 Переключить на лупу")}
+SLOT_ICON = {"morning": "🌅", "day": "☀️", "evening": "🌙", "lupa": "🔎"}
 SPEED_UZ = {"fast": "tez 1–2 s", "normal": "oddiy 2–3 s", "slow": "ehtiyot 3–5 s"}
 SPEED_RU = {"fast": "быстро 1–2 с", "normal": "обычно 2–3 с", "slow": "осторожно 3–5 с"}
 KIND_UZ = {"voice": "🎤 ovozli", "video_note": "⭕ dumaloq video", "video": "🎬 video", "photo": "🖼 rasm",
@@ -67,6 +68,12 @@ def slot_info(ctx, r: Req, slot: str) -> tuple[str, str]:
                     "bo'yicha, yangisi oldin).",
                     "Тем, с кем сегодня не общались: со вчерашних — к более старым (по последнему сообщению лида, "
                     "новые раньше)."))
+    if slot == "lupa":                                     # 🔎 egasi, 2026-11-12: «lupalarga alohida push»
+        return (r.L("🔎 Lupa push", "🔎 Пуш лупе"),
+                r.L("Faqat 🔎 belgili lidlarga (oddiy 🌅 ☀️ 🌙 Push ularga bormaydi). Tartib: bugun gaplashganlar, keyin "
+                    "kechagi va eskiroqlar. Hozir gaplashayotganlarga yuborilmaydi.",
+                    "Только лидам с 🔎 (обычный 🌅 ☀️ 🌙 Пуш им не идёт). Порядок: сегодняшние, потом вчерашние и "
+                    "старше. Тем, кто сейчас в переписке, — не отправляется."))
     head = r.L("🌙 Kechki push", "🌙 Вечерний push") if slot == "evening" else r.L("☀️ Kunduzgi push", "☀️ Дневной push")
     return (head,
             r.L(f"Avval bugun gaplashganlar: 1) ertalab gaplashganlar, 2) {idle} daq dan beri jim turganlar; ular "
@@ -132,6 +139,7 @@ async def push_menu(ctx, r: Req):
                           "uc")])
         rows.append([(r.L("🌅 Ertalabki", "🌅 Утренний"), "us:morning"), (r.L("☀️ Kunduzgi", "☀️ Дневной"), "us:day"),
                      (r.L("🌙 Kechki", "🌙 Вечерний"), "us:evening")])
+        rows.append([(r.L("🔎 Lupa push (faqat 🔎 belgililarga)", "🔎 Пуш лупе (только с 🔎)"), "us:lupa")])
         rows.append([(r.L("🧪 Test (o'zimga)", "🧪 Тест (себе)"), "ut")])
     rows += grid([(r.L("✏️ Matn", "✏️ Текст"), "ue"), (r.L("📎 Media", "📎 Медиа"), "um"),
                   (r.L("📚 Kutubxona", "📚 Библиотека"), "ul"), (r.L("🆕 Yangi Push", "🆕 Новый Пуш"), "un"),
@@ -156,7 +164,7 @@ async def start_preview(ctx, r: Req):
     order = {"morning": [(r.L("kecha yozganlar", "вчерашние"), g["yesterday"]), (r.L("eskiroqlar", "старше"), g["older"])],
              "day": [(r.L("ertalab gaplashganlar", "утренние"), g["morning"]), (r.L("jim turganlar", "молчат"), g["quiet"]),
                      (r.L("kechagilar", "вчерашние"), g["yesterday"]), (r.L("eskiroqlar", "старше"), g["older"])]}
-    order["evening"] = order["day"]
+    order["evening"] = order["lupa"] = order["day"]
     steps = [f"{i + 1}) {a} — <b>{b}</b>" for i, (a, b) in enumerate(order[slot])]
     lines = [f"📁 {h(folders[fid]['name'])} → <b>{q}</b>" for fid, q in aud["by_folder"].items() if q]
     skipped = [(r.L("shu Push'ni oldin olgan", "уже получали этот Пуш"), aud["got_before"]),
@@ -166,8 +174,12 @@ async def start_preview(ctx, r: Req):
     sk = ", ".join(f"{a} — {b}" for a, b in skipped if b)
     cur = pu.current()
     info = [f"<b>{name}</b> · 📚 {h(L.label(cur, r.lang, ctx.tz))}", f"<i>{rule}</i>", ""] + steps + [
-        "", (r.L(f"Jami: <b>{n}</b> · ≈ {pu.estimate_minutes(n)} daq", f"Всего: <b>{n}</b> · ≈ {pu.estimate_minutes(n)} мин")
+        "", (r.L(f"Jami: <b>{n}</b> · ≈ {pu.estimate_minutes(n, list(aud['by_folder'].values()))} daq",
+                 f"Всего: <b>{n}</b> · ≈ {pu.estimate_minutes(n, list(aud['by_folder'].values()))} мин")
              if n else r.L("Hozir yuboriladigan lid yo'q.", "Сейчас некому отправлять."))]
+    dn, dm_ = pu.drip()
+    if n and dn:
+        info.append(r.L(f"⏱ Bo'lib: har papkaga {dm_} daqiqada {dn} tadan", f"⏱ Частями: на папку по {dn} каждые {dm_} мин"))
     if sk:
         info.append(r.L("O'tkazildi: ", "Пропущено: ") + sk)
     if ctx.db.flag("push_control"):
@@ -178,7 +190,7 @@ async def start_preview(ctx, r: Req):
                     h(", ".join(folders[f]["name"] for f in aud["no_account"])))
     text = ui.join(title("🚀", r.L("PUSHNI TASDIQLANG", "ПОДТВЕРДИТЕ ПУШ")), "", card(info), card(lines) if lines else "")
     rows = [[(r.L("✅ Boshlash", "✅ Начать"), f"usy:{slot}")]] if n else []
-    rows.append([(r.L(uz, ru), f"us:{k}") for k, (uz, ru) in SLOT_BTN.items() if k != slot])
+    rows += grid([(r.L(uz, ru), f"us:{k}") for k, (uz, ru) in SLOT_BTN.items() if k != slot], 2)
     rows.append(nav(r, "u"))
     return text, kb(*rows)
 
@@ -599,6 +611,9 @@ async def settings(ctx, r: Req):
              f"🔁 {r.L('Qayta yubormaslik', 'Не повторять')} — {db.get('push_repeat_minutes')} {mins}",
              f"🔥 {r.L('Faqat shu belgili', 'Только с иконкой')} — {h(db.get('push_emojis') or r.L('hammasi', 'все'))}",
              f"🚫 {r.L('Chiqarilgan', 'Исключены')} — {h(db.get('skip_emojis'))}",
+             f"🔎 {r.L('Push bormaydi', 'Пуш не идёт')} — {h(' '.join(ctx.pusher.push_skip()) or r.L('yo‘q', 'нет'))} "
+             f"<i>({r.L('ularga — «🔎 Lupa push»', 'им — «🔎 Пуш лупе»')})</i>",
+             f"⏱ {r.L('Bo‘lib yuborish', 'Частями')} — {drip_text(ctx, r)}",
              f"👥 {r.L('«Проёб»da Push paneli', 'Панель Пуша в «Проёб»')} — "
              f"{r.L('🟢 yoqiq', '🟢 вкл') if db.flag('push_group') else r.L('⚪ o‘chiq', '⚪ выкл')}",
              f"🧪 {r.L('Haqiqiy ta‘sir', 'Истинный эффект')} — "
@@ -616,9 +631,63 @@ async def settings(ctx, r: Req):
            (f"📅 {r.L('Baza', 'База')}", "uoi:push_base_from"), (f"🆕 {r.L('Yangi lid', 'Новый лид')}", "uoi:push_newlead_minutes"),
            (f"🔁 {r.L('Takror', 'Повтор')}", "uoi:push_repeat_minutes"), (f"🔥 {r.L('Belgilar', 'Иконки')}", "uoi:push_emojis"),
            (f"🚫 {r.L('Chiqarilgan', 'Исключены')}", "uoi:skip_emojis"),
+           (f"🔎 {r.L('Push bormaydi', 'Пуш не идёт')}", "upk"), (f"⏱ {r.L('Bo‘lib yuborish', 'Частями')}", "udr"),
            (f"🔍 {r.L('Bazani tekshirish', 'Проверить базу')}", "uob"),
            (f"👥 {r.L('Guruhda panel', 'Панель в группе')}", "uo:grp")]
     return ui.join(title("⚙️", r.L("PUSH SOZLAMALARI", "НАСТРОЙКИ ПУША")), "", card(lines)), kb(*grid(btn), nav(r, "u"))
+
+
+DRIPS = (("", "Hammasi birdan", "Всё сразу"), ("5/5", "5 daqiqada 5 ta", "5 шт. за 5 мин"),
+         ("7/10", "10 daqiqada 7 ta", "7 шт. за 10 мин"), ("8/10", "10 daqiqada 8 ta", "8 шт. за 10 мин"))
+
+
+def drip_text(ctx, r: Req) -> str:
+    n, m = ctx.pusher.drip()
+    return r.L(f"har papkaga {m} daqiqada {n} tadan", f"на папку по {n} каждые {m} мин") if n else \
+        r.L("o'chiq (hammasi birdan)", "выкл (всё сразу)")
+
+
+@screen("udr", "full")
+async def drip_screen(ctx, r: Req):
+    """⏱ Bo'lib yuborish (egasi, 2026-11-12: «har 5 daqiqada 5 tadan yoki 10 daqiqada 7–8 tadan»)."""
+    db = ctx.db
+    if r.args and r.args[0] in {k or "0" for k, _u, _r in DRIPS}:
+        db.set("push_drip", "" if r.args[0] == "0" else r.args[0])
+        ui.view(r, "udr")
+    cur = db.get("push_drip") or ""
+    btn = [(("✅ " if k == cur else "") + r.L(uz, ru), f"udr:{k or '0'}") for k, uz, ru in DRIPS]
+    lines = [r.L("Push lidlarga bir yo'la emas, bo'lib-bo'lib ketadi: har papkaga N ta, keyin tanaffus. Telegram "
+                 "akkauntni kamroq cheklaydi; lidlar javob yozishga ulguradi.",
+                 "Пуш идёт не разом, а частями: на каждую папку N штук, потом пауза. Telegram реже ограничивает "
+                 "аккаунт; лиды успевают ответить."),
+             f"{r.L('Hozir', 'Сейчас')}: <b>{drip_text(ctx, r)}</b>"]
+    return ui.join(title("⏱", r.L("BO'LIB YUBORISH", "ЧАСТЯМИ")), "", card(lines)), kb(*grid(btn, 2), nav(r, "uo"))
+
+
+@screen("upk", "full")
+async def push_skip_screen(ctx, r: Req):
+    """🔎 Push bormaydigan belgilar — tugma bilan (belgini yozish shart emas; egasi, 2026-11-12: «lupa belgisini
+    topa olmadim»). Ro'yxatda — topiklarda haqiqatda bor belgilar; 🔎 doim bor."""
+    from .push import lupa_norm
+    db = ctx.db
+    cur = ctx.pusher.push_skip()
+    if r.args and r.args[0] == "t" and len(r.args) > 1:
+        ic = lupa_norm(r.args[1])
+        cur = [x for x in cur if x != ic] if ic in cur else cur + [ic]
+        db.set("push_skip_emojis", " ".join(cur))
+        ui.view(r, "upk")
+    seen: dict[str, int] = {"🔎": 0}
+    for row in db.all("SELECT icon, COUNT(*) n FROM topics WHERE icon<>'' GROUP BY icon ORDER BY n DESC LIMIT 30"):
+        ic = lupa_norm(row["icon"]).replace("️", "")
+        seen[ic] = seen.get(ic, 0) + row["n"]
+    for ic in cur:
+        seen.setdefault(ic, 0)
+    btn = [(f"{'✅' if ic in cur else '▫️'} {ic} · {n}", f"upk:t:{ic}") for ic, n in seen.items()]
+    lines = [r.L("Belgilangan (✅) belgili lidlarga oddiy 🌅 ☀️ 🌙 Push bormaydi. 🔎 lupalarga — 📣 menyudagi «🔎 Lupa "
+                 "push» tugmasi bilan alohida. Raqam — shu belgili lidlar soni. Zaderjka nazoratiga ta'sir qilmaydi.",
+                 "Лидам с отмеченными (✅) иконками обычный 🌅 ☀️ 🌙 Пуш не идёт. Лупе 🔎 — отдельно кнопкой «🔎 Пуш "
+                 "лупе» в 📣 меню. Число — сколько таких лидов. На контроль задержек не влияет.")]
+    return ui.join(title("🔎", r.L("PUSH BORMAYDI", "ПУШ НЕ ИДЁТ")), "", card(lines)), kb(*grid(btn, 3), nav(r, "uo"))
 
 
 def base_state(ctx, r: Req) -> str:

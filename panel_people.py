@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from . import kassa as K
 from . import people as P
@@ -43,6 +44,11 @@ async def people_list(ctx, r: Req):
         tag = f" · {folders}" if folders else ""
         btn.append((f"{KIND_ICON.get(p['kassa_kind'], '👤')} {p['name']}{tag}"[:40], f"po:{p['id']}"))
     rows = grid(btn)
+    if r.owner and not archived:                       # 🤝 Artur — botga ulash: alohida tugma (egasi, 2026-11-12)
+        pr = partner_rec(db)
+        rows.append([(f"🤝 {pr['name']} · ✅ {r.L('botda', 'в боте')}" if pr is not None and pr["tg_id"] else
+                      f"🤝 {pr['name'] if pr is not None else 'Artur'} — {r.L('botga ulash', 'подключить к боту')}",
+                      "pal")])
     tw = P.twins(db) if not archived and r.can("full") else []
     if tw:
         rows.insert(0, [(r.L(f"🔗 Bitta odamning 2 yozuvi: {len(tw)}", f"🔗 Две записи одного человека: {len(tw)}"),
@@ -58,6 +64,89 @@ async def people_list(ctx, r: Req):
     head = title("👥", r.L("XODIMLAR", "СОТРУДНИКИ") + (r.L(" · ARXIV", " · АРХИВ") if archived else ""))
     body = card([legend]) if ps else r.L("<i>Hozircha hech kim yo'q.</i>", "<i>Пока никого нет.</i>")
     return ui.join(head, "", body), kb(*rows)
+
+
+# ───────────────────────── 🤝 Artur — botga ulash (alohida tugma; egasi, 2026-11-12)
+def partner_rec(db):
+    return db.one("SELECT * FROM people WHERE kassa_kind='partner' AND active=1 ORDER BY id LIMIT 1")
+
+
+def _partner_about(r: Req) -> str:
+    return r.L("Artur botda faqat ko'radi: kassa, hamma zp (foizlari bilan), kunma-kun, zaderjka doskasi, lidlar. Hech "
+               "narsani o'zgartira olmaydi. Xodimlarning kunlik xulosalari va kunlik 📊 hisobot unga ham boradi.",
+               "Артур в боте только смотрит: касса, все зп (с процентами), по дням, доска задержек, лиды. Ничего не "
+               "меняет. Дневные сводки сотрудников и дневной 📊 отчёт приходят и ему.")
+
+
+@screen("pal", "owner")
+async def partner_link(ctx, r: Req):
+    """🤝 Artur botga: @username yoziladi → Artur /start bossa, bot uni o'zi taniydi (faqat ko'radi). Hamkor yozuvi
+    hali yo'q bo'lsa — shu yerda qo'shiladi (ism + @username)."""
+    db = ctx.db
+    p = partner_rec(db)
+    if p is None:
+        ui.ask(r, "pal_new", "p")
+        return ui.join(title("🤝", r.L("ARTUR QO'SHISH", "ДОБАВИТЬ АРТУРА")), "", card([
+            r.L("Ismi va @username ini yozing, masalan: <code>Artur @artur</code>",
+                "Напишите имя и @username, например: <code>Artur @artur</code>"), _partner_about(r)])), \
+            ui.cancel_kb(r, "p")
+    if (not p["username"] and not p["tg_id"]) or (r.args and r.args[0] == "e"):
+        ui.ask(r, "pal_user", "pal", pid=p["id"])
+        return ui.join(title("🤝", h(p["name"]), r.L("botga ulash", "подключить к боту")), "", card([
+            r.L(f"{h(p['name'])}ning @username ini yozing, masalan <code>@artur</code>. Keyin u botga /start bossin.",
+                f"Напишите @username {h(p['name'])}, например <code>@artur</code>. Потом пусть нажмёт /start у бота."),
+            _partner_about(r)])), ui.cancel_kb(r, "pal" if (p["username"] or p["tg_id"]) else "p")
+    head = r.L("botda", "в боте") if p["tg_id"] else r.L("botga ulash", "подключить к боту")
+    return ui.join(title("🤝", h(p["name"]), head), "", card([tg_line(r, p) or "", _partner_about(r)])), \
+        kb([(r.L("✏️ @username o'zgartirish", "✏️ Изменить @username"), "pal:e")],
+           [(f"🤝 {p['name']} — {r.L('kabinet', 'кабинет')}", f"po:{p['id']}")], nav(r, "p"))
+
+
+@on_input("pal_user", "owner")
+async def partner_user(ctx, r: Req, pid: int):
+    db = ctx.db
+    u = P.norm_username((r.text or "").strip())
+    if not u or not P.valid_username(u):
+        return r.L("⚠️ @username noto'g'ri — masalan @artur", "⚠️ Неверный @username — например @artur")
+    other = P.by_username(db, u)
+    if other is not None and other["id"] != pid:        # Artur nazoratda alohida yozuv bo'lib turgan bo'lsa
+        ui.WAIT.pop(r.uid, None)
+        me = must(P.person(db, pid))
+        return ui.join(title("🔗", r.L("BU @USERNAME BOSHQA YOZUVDA", "ЭТОТ @USERNAME В ДРУГОЙ ЗАПИСИ")), "", card(
+            [r.L(f"@{h(u)} — «{h(other['name'])}» yozuvida. Bitta odam bo'lsa — birlashtiring: «{h(other['name'])}» "
+                 f"«{h(me['name'])}»ga qo'shiladi.",
+                 f"@{h(u)} — в записи «{h(other['name'])}». Если это один человек — объедините: «{h(other['name'])}» "
+                 f"войдёт в «{h(me['name'])}».")])), \
+            kb([(r.L("🔗 Birlashtirish", "🔗 Объединить"), f"psmy:{pid}:{other['id']}")], nav(r, "pal"))
+    P.update_person(db, pid, username=u)
+    if ctx.userbot is not None and getattr(ctx.userbot, "state", "") == "online":
+        ui.bg(ctx.userbot.resolve_people())
+    ui.WAIT.pop(r.uid, None)
+    await ui.toast(ctx.bot, r.chat_id, f"✅ @{u}")
+    r.args = []
+    return await partner_link(ctx, r)
+
+
+@on_input("pal_new", "owner")
+async def partner_new(ctx, r: Req):
+    db = ctx.db
+    text = (r.text or "").strip()
+    m = re.search(r"@([A-Za-z][A-Za-z0-9_]{3,31})", text)
+    name = re.sub(r"@\S+", "", text).strip() or "Artur"
+    if m is None or not P.valid_username(P.norm_username(m.group(1))):
+        return r.L("⚠️ Ism va @username yozing, masalan: Artur @artur", "⚠️ Имя и @username, например: Artur @artur")
+    u = P.norm_username(m.group(1))
+    other = P.by_username(db, u)
+    if other is not None:                              # shu @username bilan yozuv bor — o'sha hamkor bo'ladi
+        P.update_person(db, other["id"], kassa_kind="partner")
+        pid = other["id"]
+    else:
+        pid = P.add_person(db, name[:40], u, None, "partner")
+    if not db.one("SELECT 1 FROM pct WHERE person_id=?", (pid,)):
+        K.set_percent(db, pid, 50, "2000-01-01")
+    ui.WAIT.pop(r.uid, None)
+    r.args = []
+    return await partner_link(ctx, r)
 
 
 @screen("ptw", "full")
@@ -703,6 +792,9 @@ async def person_kind(ctx, r: Req):
         kind = r.args[1] if r.args[1] != "none" else ""
         if kind == "self" and not r.owner:
             return r.L("⛔ Faqat ega", "⛔ Только владелец")
+        if kind == "self":                             # 👑 Ega — shu akkaunt botda to'liq ega (egasi, 2026-11-12)
+            r.args = [str(pid)]
+            return await make_owner(ctx, r)
         if kind and not db.one("SELECT 1 FROM pct WHERE person_id=?", (pid,)):
             K.set_percent(db, pid, 50 if kind in ("self", "partner") else 30, "2000-01-01")
         P.update_person(db, pid, kassa_kind=kind)
@@ -712,11 +804,83 @@ async def person_kind(ctx, r: Req):
             ("pool", r.L("🔁 Umumiy akkaunt", "🔁 Общий аккаунт"))]
     if r.owner:
         opts += [("partner", r.L("🤝 Hamkor (kassadan %)", "🤝 Партнёр (% от кассы)")),
-                 ("self", r.L("👑 Ega (siz)", "👑 Владелец (вы)"))]
+                 ("self", r.L("👑 Ega (siz) — botda to'liq", "👑 Владелец (вы) — полный доступ"))]
     cur = p["kassa_kind"] or "none"
     rows = [[(("● " if k == cur else "○ ") + t, f"psk:{pid}:{k}")] for k, t in opts]
     rows.append(nav(r, f"ps:{pid}"))
     return title("🏷", h(p["name"]), r.L("turi", "тип")), kb(*rows)
+
+
+@screen("psko", "owner")
+async def make_owner(ctx, r: Req):
+    """👑 Ega (egasi, 2026-11-12: «egani bossam — u botda 100% foydalana olsin, yo'qolgan akkauntim qanday bo'lsa —
+    xuddi shunday»): shu Telegram akkaunt botda to'liq ega bo'ladi. Kassadagi «👑 siz» yozuvi boshqa bo'lsa — bu yozuv
+    unga qo'shiladi va «siz» yozuvi shu (yangi) akkauntga o'tadi: kassa va zp tarixi o'sha yerda qoladi."""
+    db = ctx.db
+    pid = int(r.args[0])
+    x = must(P.person(db, pid))
+    me = db.one("SELECT * FROM people WHERE kassa_kind='self' AND active=1 AND id<>? ORDER BY id LIMIT 1", (pid,))
+    nm = h(x["name"])
+    who = f"@{h(x['username'])}" if x["username"] else (f"🆔 {x['tg_id']}" if x["tg_id"] else "")
+    if not x["username"] and not x["tg_id"]:
+        return ui.join(title("👑", nm, r.L("ega", "владелец")), "", card([r.L(
+            "Avval shu akkauntning @username ini yozing — bot uni ega qiladi.",
+            "Сначала укажите @username этого аккаунта — бот сделает его владельцем.")])), \
+            kb([("✈️ @username", f"pse:{pid}:user")], nav(r, f"psk:{pid}"))
+    if len(r.args) < 2 or r.args[1] != "y":
+        lines = [r.L(f"<b>{nm}</b> ({who}) botda to'liq ega bo'ladi — eski akkauntingiz kabi: hamma narsani ko'radi "
+                     f"va o'zgartiradi (kassa, zp, Push, sozlamalar).",
+                     f"<b>{nm}</b> ({who}) станет полным владельцем в боте — как ваш старый аккаунт: видит и меняет "
+                     f"всё (касса, зп, Пуш, настройки).")]
+        if me is not None:
+            lines.append(r.L(f"Kassadagi «{h(me['name'])}» (siz) yozuvi shu akkauntga o'tadi — kassa va zp "
+                             f"tarixingiz o'sha yerda qoladi. «{nm}» yozuvi unga qo'shiladi.",
+                             f"Запись «{h(me['name'])}» (вы) в кассе перейдёт на этот аккаунт — история кассы и зп "
+                             f"остаётся там. Запись «{nm}» войдёт в неё."))
+        if not x["tg_id"]:
+            lines.append(r.L(f"{who} botga /start bossin — shunda ega bo'ladi (7 kun ichida).",
+                             f"Пусть {who} нажмёт /start у бота — тогда станет владельцем (в течение 7 дней)."))
+        return ui.join(title("👑", nm, r.L("yangi akkauntingiz", "ваш новый аккаунт")), "", card(lines)), \
+            kb([(r.L("✅ Ha, bu mening yangi akkauntim", "✅ Да, это мой новый аккаунт"), f"psko:{pid}:y")],
+               nav(r, f"psk:{pid}"))
+    tg, u = x["tg_id"], x["username"]
+    old_tg, target = None, pid
+    if me is not None:
+        old_tg = me["tg_id"]
+        db.run("UPDATE people SET tg_id=NULL, username='' WHERE id=?", (me["id"],))   # eski akkaunt uziladi
+        P.merge_people(db, me["id"], pid)              # yozuv «siz»ga qo'shiladi; Telegram — yangi akkaunt
+        target = me["id"]
+    else:
+        P.update_person(db, pid, kassa_kind="self")
+        if not db.one("SELECT 1 FROM pct WHERE person_id=?", (pid,)):
+            K.set_percent(db, pid, 50, "2000-01-01")
+    name = (P.person(db, target) or x)["name"]
+    if tg:
+        P.set_admin(db, int(tg), "owner", name)
+        from .panel import set_commands
+        await set_commands(ctx, int(tg))
+        try:
+            await ctx.bot.send_message(int(tg), "👮 /menu")
+        except Exception:
+            pass
+        lines = [r.L(f"✅ {who} — endi botda to'liq ega.", f"✅ {who} — теперь полный владелец в боте.")]
+    else:
+        P.add_pending_admin(db, u, "owner", name, pid=target)
+        lines = [r.L(f"⏳ {who} botga /start bossin — shu zahoti to'liq ega bo'ladi (sizga xabar keladi).",
+                     f"⏳ Пусть {who} нажмёт /start у бота — сразу станет владельцем (вам придёт сообщение).")]
+    rows = []
+    if old_tg and old_tg != tg:
+        lines.append(r.L(f"Eski akkaunt (🆔 {old_tg}) «{h(name)}» yozuvidan uzildi.",
+                         f"Старый аккаунт (🆔 {old_tg}) отвязан от записи «{h(name)}»."))
+        if old_tg in ctx.cfg.owner_ids:
+            lines.append(r.L("U Railway → ADMIN_IDS da turibdi — kerak bo'lmasa, o'sha yerdan olib tashlang.",
+                             "Он в Railway → ADMIN_IDS — если не нужен, уберите его оттуда."))
+        elif old_tg != r.uid and db.one("SELECT 1 FROM admins WHERE user_id=?", (old_tg,)):
+            rows.append([(r.L("🗑 Eski akkauntni adminlikdan olib tashlash", "🗑 Убрать старый аккаунт из админов"),
+                          f"sd:x:{old_tg}")])
+    rows.append([(f"👑 {name} — {r.L('kabinet', 'кабинет')}", f"po:{target}")])
+    rows.append(nav(r, "p"))
+    return ui.join(title("👑", h(name), r.L("ega", "владелец")), "", card(lines)), kb(*rows)
 
 
 @screen("pse", "full")

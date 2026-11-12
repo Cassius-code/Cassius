@@ -18,7 +18,7 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   Bir-biriga yaqin kechikkan lidlar — 40 soniya kutib (yana 10 soniyada kechikadiganlar ham), ko'pi bilan ~1 daqiqada
   bitta xabarda; keyingisi — pastga yangi xabar.
   Mijoz ketma-ket yozsa (birinchi xabaridan 5 daqiqa ichida) — zaderjka oxirgi xabaridan hisoblanadi
-  (🚨 Nazorat → 🔁 Ketma-ket: 3/4/5/7/10 daqiqa yoki o'chiq).
+  (🚨 Nazorat → 🔁 Ketma-ket: 3/4/5/7/10/15/20 daqiqa yoki o'chiq).
   «Проёб»ga kim yozadi: 🤖 bot yoki 🔑 asosiy akkaunt (⚙️ → ✍️). Asosiy akkaunt guruhda anonim admin bo'lsa —
   xabarlar «Проёб» nomidan. Bunda «✅ Выполнено» tugmasi bo'lmaydi (zaderjka javob bilan o'zi yopiladi).
   Lid statusi ⚡/💊 (Клоун, Мариновка) — zaderjka emas: status qo'yilsa kutish bekor, ochiq zaderjka yopiladi.
@@ -113,17 +113,19 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     Artur — o'z ulushi (50%, yoki 🧮 Haftalik zp dagi «qolgani») + jarimalar − bonuslar (bonusni Artur to'laydi,
     jarimalar unga). Belgilanmagan bo'lsa,
     «💼 Siz» kartasida «⚠️ Artur (hamkor) botda belgilanmagan» chiqadi va 🧮 Tekshiruv ⚠️ bo'ladi.
-    **Artur botga qanday kiradi (oddiy yo'l):** 👥 Xodimlar → Artur → ⚙️ → ✈️ @username → uning @username ini
-    yozing; keyin Artur botda /start bossin — bot uni o'zi taniydi (admin qilish shart emas). Kartada holati
-    ko'rinadi: «✈️ @artur · ✅ botda» yoki «⏳ botga /start bossin». Artur faqat ko'radi: 💵 Kassa (📊 Hisobot —
+    **Artur botga qanday kiradi (oddiy yo'l):** 👥 Xodimlar → alohida **«🤝 Artur — botga ulash»** tugmasi → uning
+    @username ini yozing; keyin Artur botda /start bossin — bot uni o'zi taniydi (admin qilish shart emas). Ulangach
+    tugma «🤝 Artur · ✅ botda» bo'ladi. Botda hamkor yozuvi hali yo'q bo'lsa — shu tugma «Artur @artur» deb yozganda
+    uni qo'shadi. Artur faqat ko'radi: 💵 Kassa (📊 Hisobot —
     hamma zp lar foizlari bilan, 📅 Kunma-kun, 👥 Xodimlar), 🚨 zaderjka doskasi, lidlar (📊 Hisobotlar). Foiz
     o'zgartirish, 🧮 Haftalik zp, Push, sozlamalar, pul amallari va PDF — unda yo'q. Xodim hisobot tashlaganda sizga
     keladigan kunlik xulosa (Дата · Касса · Кол-во рд, 🎯 bonus bilan) va kunlik 📊 hisobot (daromadingizsiz) unga
-    ham boradi. Artur sizni ham xodim sifatida ko'radi: kassangiz, cheklaringiz va xodim sifatidagi zp ingiz.
+    ham boradi. Artur sizni ham xodim sifatida ko'radi: kassangiz, cheklaringiz va zp ingiz (har xodimdan ulushingiz
+    bilan — egasi, 2026-11-12: «ha, ko'rinsin»).
     Daromadingiz va pul amallari — faqat sizda. Boshqa adminlar sizni ko'rmaydi. (Artur admin bo'lsa ham —
     ⚙️ → 👮 Adminlar — avvalgidek ishlaydi.)
-  - **🤝 Artur o'zi ishlagan kun** — 🔁 Kim ishladi → kun → «Artur» (faqat sizga) → foiz (30 / 36 / 40 / 50 yoki
-    o'zingiz yozasiz). O'sha kungi cheklar × shu foiz Artur jamisiga qo'shiladi: «− Artur: … + o'zi ishlagan 8 $».
+  - **🤝 Artur o'zi ishlagan kun** — 🔁 Kim ishladi → kun → pastdagi alohida **«🤝 Artur ishladi (foiz bilan)»**
+    tugmasi (xodimlar orasida emas; faqat sizga) → foiz (30 / 36 / 40 / 50 yoki o'zingiz yozasiz). O'sha kungi cheklar × shu foiz Artur jamisiga qo'shiladi: «− Artur: … + o'zi ishlagan 8 $».
     🧮 Tekshiruv ✅ bo'lib qoladi (pul yo'qolmaydi).
   - **💼 Siz kartasi:** Kassa − Artur (ulushi + jarimalar − bonuslar) − Xodimlar zp si (zp + bonuslar − jarimalar)
     = Daromadingiz. Xodim akkauntida o'zingiz ham ishlagan bo'lsangiz — o'sha qismdan sizga o'z foizingiz (masalan
@@ -131,12 +133,13 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     621 $, siz ishlagan 372 $ → 372 × 50% + (621 − 372) × 14% = 186 + 34.86 = 220.86 $. Akkauntda o'rniga boshqa
     xodim ishlagan bo'lsa — o'sha qismdan «siz %» ishlagan xodimning o'z foizi: Adam o'rniga Cred ishlasa — 125 × 20%
     (Credniki) = 25 $, Adamning 14% i emas; qolgani Arturga.
-  - **📈 Ulushingiz — kimdan qancha** («💼 Siz» kartasi ostida, tanlangan davr uchun — masalan hafta boshidan):
-    har xodimdan foiz bilan, bitta qatorda:
-    `Cred · RD 9: 288 $ × 20% = 57.60 $` · `Bayzed · siz ishlagan: 372 $ × 50% = 186 $` ·
-    `Adam · RD 3 · Cred ishlagan: 125 $ × 20% = 25 $`. «Siz %» yozilmagan akkaunt — `Lazarus: sizga 39.20 $`.
-    Qatorlar yig'indisi — kassadan sizning qismingiz; o'tkazma, sizga yozilgan ulush, o'z bonusingiz va jarimangiz
-    kartaning tepasida alohida qatorda. (Eski «Akkauntlar bo'yicha» bloki olib tashlandi.)
+  - **👑 Sizning zp ingiz — o'z ishingiz + har xodimdan ulushingiz, bitta joyda** (💰 Zp ichida, tepada; egasi,
+    2026-11-12: «faqat o'zimning 50% im turibdi, ulushim eng pastida — bunday demagandim»):
+    `o'z akkaunti: 24 $ × 50% = 12 $` · `Cred · RD 9: 288 $ × 20% = 57.60 $` ·
+    `Adam · RD 3 · Cred ishlagan: 125 $ × 20% = 25 $` (o'rniga ishlagan — uning foizi) · «siz %» yozilmagan akkaunt —
+    `Lazarus: sizga 39.20 $`; oxirida `= 12 + ulush 121.80 + 10 = 143.80 $` — bu «Daromadingiz» bilan teng.
+    Shunday — 📊 Hisobotda, 👑 kabinetingizda, 📅 Kunma-kunda, 👥 Xodimlar kassasi ro'yxatida («zp 12 $ + ulush … =
+    …») va PDF da. «💼 Siz» kartasining pastidagi alohida «📈 Ulushingiz» bloki olib tashlandi.
   - **Xodim zp si (kartada, hisobotda, PDF da, xodimga xabarda)** — qisqa va tartibli:
     `RD 3: 119 $ × 41% = 48.79 $` (boshqa akkauntda ishlagan bo'lsa — `RD 1 · Bayzed akk: 372 $ × 50% = 186 $`,
     keyin `Zp jami`); `+ Bonuslar: 116 $` va `− Jarimalar: 15 $` — jami bilan, ostida kunma-kun
@@ -166,12 +169,13 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     ostidan olib tashlandi);
     💲 Prays, 🤝 Ulushlar, 📜 Tarix, ⚙️ Zp hisoblash usuli — ⚙️ Sozlamalar ichida.
   - **📅 Kunma-kun** (💵 Kassa → 📅 Kunma-kun; 📊 Hisobot ostidagi kun qatori va ✅ Kunni yopish dan ham): bugundan
-    boshlanadi, tepada «◀ 11.11» — oldingi kun, «12.11 ▶» — keyingi kun (ertangi kun hali yo'q — ▶ ko'rinmaydi).
+    boshlanadi; eng pastda («‹ Orqaga» ustida) `◀ 11.11 · 📅 12.11 · 13.11 ▶` — 📊 Hisobotdagi bilan aynan bir joyda
+    (tugma pastdan tepaga sakramaydi); ertangi kun hali yo'q — ▶ ko'rinmaydi.
     Har kim alohida: kassa, Кол-во рд, $ (faqat sizga), zp, bonus, jarima, avans va jami; pastda jami kassa va
     xodimlarga jami (hafta hisoblanmagan bo'lsa — «≈ taxminiy»); sizga — 🤝 Artur ulushi va 🎯 kassa bonusi (qaysi RD,
     nima uchun). Cheklar (🧾), 📜 Tarix va 🔒 Kunni yopish — avvalgidek. ◀ ▶ bilan kun almashtirilsa ham «‹ Orqaga» —
     kirgan joyingizga (kunlar birma-bir qaytib chiqmaydi).
-  - **📊 Hisobot.** Davr (bugun / kecha / hafta / oy / sana) → kassa; ostida bitta kun qatori:
+  - **📊 Hisobot.** Davr (bugun / kecha / hafta / oy / sana) → kassa; eng pastda («‹ Orqaga» ustida) kun qatori:
     `◀ 11.11` · `📅 12.11` · `13.11 ▶` — o'rtadagisi davrning oxirgi kunini (bugundan keyin emas) ochadi, chetlari —
     oldingi va keyingi kun (ertangi kun hali yo'q bo'lsa ▶ chiqmaydi). Keyin 🏆 Reyting, 📄 PDF, oy tanlansa —
     🗓 Oy yakuni. «📋 To'lov ro'yxati» va «📅 Kunlar bo'yicha» bu yerdan olib tashlandi. O'tgan hafta bilan
@@ -272,6 +276,12 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     Foizlar, PDF, o'zgartirish, sizning va Arturning ulushi — ko'rinmaydi.
 - **📣 Push.** Har papka o'z akkauntidan, faqat qo'lda: «🌅 Ertalabki» yoki «☀️ Kunduzgi» tugmasi (soatga
   qaramaydi — 15:00 da ham ertalabki bo'lishi mumkin).
+  **🔎 Lupa:** oddiy 🌅 ☀️ 🌙 Push 🔎 belgili lidlarga bormaydi; ularga — 📣 menyudagi alohida **«🔎 Lupa push»**
+  tugmasi (xuddi shu Push, faqat 🔎 lidlarga; 🔍 ham lupa hisoblanadi). Qaysi belgilarga Push bormasligi —
+  ⚙️ Sozlamalar → **🔎 Push bormaydi**: belgilar tugma bo'lib turadi (topiklarda bor belgilar va soni), yozish shart
+  emas; zaderjka nazoratiga ta'sir qilmaydi.
+  **⏱ Bo'lib yuborish** (⚙️ Sozlamalar): Hammasi birdan · 5 daqiqada 5 ta · 10 daqiqada 7 ta · 10 daqiqada 8 ta — har
+  papkaga N ta, keyin tanaffus (panelda «⏳ RD 1 → 12:45»); tasdiqlashda taxminiy vaqt shunga qarab.
   🌅 ertalabki — bugun gaplashmaganlar: kecha yozganlar → eskiroqlar (lidning oxirgi yozgani, yangisi oldin);
   ☀️ kunduzgi — avval bugungilar, tugasa — kecha → eskiroqlar. Har papkaga aynan siz yozgan son.
   **📚 Kutubxona:** har Push — raqam (nomini bot beradi: «№7 · 🎤 ovozli · 29.10 14:30»), mazmuni o'qilmaydi.
@@ -318,7 +328,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   «seans o'chgan — 🔑 Qayta kirish» / «akkaunt bloklangan — boshqa akkaunt ulang». O'chgan va bloklangan seansga bot
   qayta-qayta urinmaydi. Asosiy akkaunt 3 daqiqa, Push akkaunt 10 daqiqa ulanmasa — sizga xabar; ulansa — xabar
   o'chadi. 🔑 Qayta kirish — Push akkauntda ham (papkaga bog'langani saqlanadi).
-  «🆕 Yangi lidlar» — shu kuni ochilgan topiklar (eski lid bugun yozsa, yangi hisoblanmaydi).
+  «🆕 Yangi lidlar» — shu kuni ochilgan topiklar (eski lid bugun yozsa, yangi hisoblanmaydi). Bosh menyuda «Bugun»
+  ostida ham: «🆕 Yangi lidlar — N» (hisobotdagi bilan bir xil hisob).
 - **🌐 Til.** Har admin o'z tilini tanlaydi (bosh menyuning pastida). Savol va ogohlantirishlar ham har kimga
   o'z tilida boradi.
 - **🧼 Toza chat.** Chatda doim bitta panel. «‹ Orqaga» — oldingi ekranga. Amaldan keyin (masalan 🔁 Kim ishladi →
@@ -390,9 +401,15 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
 
 - **Zaxira ega.** Railway → Variables → `ADMIN_IDS` ga ikkinchi akkauntingiz ID sini vergul bilan qo'shing:
   `111111111,222222222`. Ikkalasi ham to'liq ega.
-- **Yangi ega qo'shish (eng oson):** ⚙️ → 👮 Adminlar → ➕ → yangi akkauntning kontaktini (📎 → Kontakt), @username ini
-  yoki ID sini yuboring → **👑 Ega** tugmasini bosing. Tamom: unga «👮 /menu» xabari boradi, u /menu bossa panel ochiladi.
-  (@username bilan qo'shilsa — u botga /start bosgan bo'lishi kerak.)
+- **Yangi ega — xodimlar ro'yxatidan (eng oson; egasi, 2026-11-12):** 👥 Xodimlar → yangi akkaunt yozuvi (yo'q bo'lsa
+  ➕ Yangi xodim: `Ism @username`) → ⚙️ → 🏷 Turi → **«👑 Ega (siz) — botda to'liq»** → «✅ Ha, bu mening yangi
+  akkauntim». Shu akkaunt botda to'liq ega bo'ladi (yo'qolgan akkauntingiz kabi), kassadagi «👑 siz» yozuvi unga o'tadi
+  (kassa va zp tarixi o'sha yerda qoladi). Bot uni hali tanimasa — u botga /start bosishi bilan ega bo'ladi, sizga
+  «🔐 @… botga kirdi — 👑 Ega» xabari keladi. Eski akkaunt yozuvdan uziladi; adminlarda bo'lsa — «🗑 Eski akkauntni
+  adminlikdan olib tashlash» tugmasi chiqadi.
+- **Yoki ⚙️ → 👮 Adminlar → ➕:** kontakt (📎 → Kontakt), @username yoki ID → **👑 Ega**. Bot @username ni hali
+  tanimasa ham bo'ladi: daraja saqlanadi va u botga /start bosishi bilan beriladi (7 kun ichida; ro'yxatda «⏳ @… —
+  botga /start bosishi kutilmoqda», ✖️ — bekor qilish).
 - **Yo'qolgan ega akkauntini olib tashlash:** ⚙️ → 👮 Adminlar → eski akkaunt → 🗑. Ro'yxatda «Railway» deb turgan bo'lsa —
   u Railway → Variables → `ADMIN_IDS` dan olib tashlanadi (ma'lumot o'chmaydi).
 - **🔒 Begona akkaunt (xavfsizlik).** Bot tanimaydigan akkaunt /start bossa yoki nima yozsa ham — faqat

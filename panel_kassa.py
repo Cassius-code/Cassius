@@ -120,6 +120,10 @@ async def people_kassa(ctx, r: Req):
                 f"{money(row['usd'])} $")
         if row["total"] is not None and zst["mode"] != "off":
             line += f" · zp {'' if zst['ready'] else '≈ '}{money(row['total'])} $"
+            if row["kind"] == "self":                      # 👑 egasi: + har xodimdan ulushi (egasi, 2026-11-12)
+                _sh, ssum = V.share_lines(b, r.lang)
+                if ssum:
+                    line += f" + {r.L('ulush', 'доля')} {money(ssum)} $ = <b>{money(row['total'] + ssum)} $</b>"
         lines.append(line)
         btn.append((f"👤 {name}", f"po:{i}:{key}"))
     other = (r.L("🗓 O'tgan hafta", "🗓 Прошлая неделя"), "kpl:lw") if key == "tw" else \
@@ -175,20 +179,23 @@ def report_show(ctx, r: Req, key: str):
                       for x in zst["weeks"]], 1)
         if s.weekday() == 0 and (e - s).days == 6 and zst["ready"]:
             rows.append([(r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), f"kz:{s.isoformat()}")])
-    # 📅 kun: o'rtada — shu kun, chekkalarda — oldingi / keyingi kun (egasi, 2026-11-12; «📅 Kunlar bo'yicha» va
-    # «📋 To'lov ro'yxati» o'rniga). Keyingi kun hali bo'lmasa — tugma yo'q
-    d = min(e, today(ctx))
-    nd = d + dt.timedelta(days=1)
-    rows.append([(f"◀ {dm(d - dt.timedelta(days=1))}", f"kdd:{(d - dt.timedelta(days=1)).isoformat()}"),
-                 (f"📅 {dm(d)}", f"kdd:{d.isoformat()}")]
-                + ([(f"{dm(nd)} ▶", f"kdd:{nd.isoformat()}")] if nd <= today(ctx) else []))
     rows.append([(r.L("🏆 Reyting", "🏆 Рейтинг"), f"kg:{key}")] + ([("📄 PDF", f"kf:{key}")] if r.can("full") else []))
     if r.owner:                                              # 🎯 kassa bonuslari — alohida panel (egasi, 2026-11-04)
         rows.append([(r.L("🎯 Kassa bonuslari", "🎯 Бонусы за кассу"), f"kbn:{key}")])
     if key in ("tm", "lm"):                                  # 🗓 oy yakuni — oy tanlansa
         rows.append([(r.L("🗓 Oy yakuni", "🗓 Итоги месяца"), f"km:{s.year}-{s.month:02d}")])
+    # 📅 kun qatori (o'rtada — davrning oxirgi kuni) — eng pastda, 📅 Kun ekranidagi bilan bir joyda
+    rows.append(day_row(ctx, min(e, today(ctx))))
     rows.append(nav(r, "kr"))
     return clip(text), kb(*rows)
+
+
+def day_row(ctx, d: dt.date) -> list:
+    """◀ oldingi kun · 📅 shu kun · keyingi kun ▶ — 📊 Hisobot va 📅 Kun ekranida bir xil: eng pastda, «‹ Orqaga»
+    ustida (egasi, 2026-11-12: «tugma pastda turib, keyin tepaga chiqib qolyapti»). Ertangi kun hali yo'q — ▶ yo'q."""
+    p, n = d - dt.timedelta(days=1), d + dt.timedelta(days=1)
+    return ([(f"◀ {dm(p)}", f"kdd:{p.isoformat()}"), (f"📅 {dm(d)}", f"kdd:{d.isoformat()}")]
+            + ([(f"{dm(n)} ▶", f"kdd:{n.isoformat()}")] if n <= today(ctx) else []))
 
 
 # ───────────────────────── kunlar → akkauntlar → cheklar
@@ -248,6 +255,8 @@ def day_text(ctx, r: Req, day: str) -> tuple[str, list]:
             lines.append(f"⚠️ {row['noprice']} {r.L('chek narxsiz', 'чек(ов) без цены')}")
         if row["kind"] == "partner":                       # 🤝 Artur — ulushi (faqat egaga)
             lines += V.zp_lines(b, row, r.lang, True)
+        elif row["kind"] == "self":                        # 👑 egasi: o'z ishi + har xodimdan ulushi (foizi bilan)
+            lines += V.zp_lines(b, row, r.lang, True)
         else:
             lines += V.zp_amount_lines(row, r.lang)        # zp, bonus, jarima, avans, jami — foizsiz
         blocks.append("\n".join(lines))
@@ -300,10 +309,7 @@ async def day_show(ctx, r: Req):
     day = r.args[0]
     d = dt.date.fromisoformat(day)
     text, btn = day_text(ctx, r, day)
-    prev_d, next_d = d - dt.timedelta(days=1), d + dt.timedelta(days=1)
-    rows = [[(f"◀ {dm(prev_d)}", f"kdd:{prev_d.isoformat()}")]
-            + ([(f"{dm(next_d)} ▶", f"kdd:{next_d.isoformat()}")] if next_d <= today(ctx) else [])]
-    rows += grid(btn if r.can("full") else [], 2)
+    rows = grid(btn if r.can("full") else [], 2)
     extra = [(r.L("📜 Tarix", "📜 История"), f"kh:0:{day}")] if r.can("full") else []
     if r.owner:
         if K.is_closed(ctx.db, day):
@@ -311,8 +317,8 @@ async def day_show(ctx, r: Req):
         else:
             extra.append((r.L("🔒 Kunni yopish", "🔒 Закрыть день"), f"kcy:{day}"))
     rows += grid(extra, 2)
+    rows.append(day_row(ctx, d))                     # ◀ 📅 ▶ — hisobotdagi bilan bir joyda (eng pastda)
     rows.append(nav(r, "kc"))
-    d = dt.date.fromisoformat(day)
     wd = [r.L(x, y) for x, y in (("Du", "Пн"), ("Se", "Вт"), ("Ch", "Ср"), ("Pa", "Чт"), ("Ju", "Пт"), ("Sh", "Сб"),
                                   ("Ya", "Вс"))][d.weekday()]
     return ui.join(title("📅", f"{dm(day)} · {wd}"), "", text), kb(*rows)
@@ -1414,12 +1420,16 @@ async def who_worked(ctx, r: Req):
                          r.L("necha foiz? (yoki sonni yozing)", "сколько процентов? (или напишите число)")), \
                 kb(*grid(btn, 4), nav(r, f"kw:{pid}:{day}"))
         return await _who_set(ctx, r, pid, day, who, float(r.args[3]) if len(r.args) > 3 else None)
-    btn = [(o["name"], f"kw:{pid}:{day}:{o['id']}") for o in K.kassa_people(db, kinds=("worker", "self", "partner"))
-           if o["id"] != pid and (o["kassa_kind"] != "partner" or r.owner)]
+    btn = [(o["name"], f"kw:{pid}:{day}:{o['id']}") for o in K.kassa_people(db, kinds=("worker", "self"))
+           if o["id"] != pid]
     if p["kassa_kind"] != "pool":
         btn.append((r.L("↩️ Akkaunt egasi", "↩️ Владелец аккаунта"), f"kw:{pid}:{day}:0"))
+    rows = grid(btn)
+    if r.owner:                                        # 🤝 Artur — alohida tugma, foizi bilan (egasi, 2026-11-12)
+        rows += [[(f"🤝 {o['name']} {r.L('ishladi (foiz bilan)', 'работал (с процентом)')}", f"kw:{pid}:{day}:{o['id']}")]
+                 for o in K.kassa_people(db, kinds=("partner",)) if o["id"] != pid]
     return title("🔁", f"{h(p['name'])} · {day[8:10]}.{day[5:7]}", r.L("kim ishladi?", "кто работал?")), \
-        kb(*grid(btn), nav(r, f"kw:{pid}"))
+        kb(*rows, nav(r, f"kw:{pid}"))
 
 
 async def _who_set(ctx, r: Req, pid: int, day: str, who: int, pct: float | None):

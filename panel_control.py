@@ -513,7 +513,7 @@ async def board_toggle(ctx, r: Req):
 @screen("cv", "full")
 async def slide(ctx, r: Req):
     """Mijoz bir necha xabarni ketma-ket yozsa: birinchisidan N daqiqa ichidagi oxirgi xabaridan hisoblanadi."""
-    if r.args and r.args[0].isdigit() and int(r.args[0]) in (0, 2, 3, 4, 5, 7, 10):
+    if r.args and r.args[0].isdigit() and int(r.args[0]) in (0, 2, 3, 4, 5, 7, 10, 15, 20):   # 15/20 (2026-11-12)
         ctx.db.set("wait_slide_min", r.args[0])
         r.args = []
         ui.view(r, "c")
@@ -529,7 +529,7 @@ async def slide(ctx, r: Req):
                  "Сколько минут от первого сообщения учитывать?")]
     d = r.L("daq", "мин")
     opts = [(("✅ " if cur == v else "") + (f"{v} {d}" if v else r.L("O'chiq", "Выкл")), f"cv:{v}")
-            for v in (0, 3, 4, 5, 7, 10)]
+            for v in (0, 3, 4, 5, 7, 10, 15, 20)]
     return ui.join(title("🔁", r.L("KETMA-KET XABARLAR", "СООБЩЕНИЯ ПОДРЯД")), "", card(lines)), \
         kb(*grid(opts, 3), nav(r, "c"))
 

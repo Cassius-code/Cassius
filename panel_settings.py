@@ -642,6 +642,9 @@ async def admins(ctx, r: Req):
             from .panel import set_commands
             await set_commands(ctx, uid)
         ui.view(r, "sd")
+    if a and a[0] == "px" and r.owner:                    # ⏳ kutilayotganini bekor qilish
+        P.drop_pending_admin(db, a[1])
+        ui.view(r, "sd")
     if a and a[0] == "x" and r.owner:
         P.del_admin(db, int(a[1]))
         from .panel import set_commands
@@ -654,6 +657,11 @@ async def admins(ctx, r: Req):
         if r.owner:
             rows.append([(f"🔁 {ad['name'] or ad['user_id']} · {names.get(ad['level'])}", f"sd:l:{ad['user_id']}"),
                          ("🗑", f"sd:x:{ad['user_id']}")])
+    for pa in P.pending_admins(db):                       # ⏳ @username — botga /start bosishi kutilmoqda
+        lines.append(f"⏳ @{h(pa['username'])} · {names.get(pa['level'], pa['level'])} · "
+                     + r.L("botga /start bosishi kutilmoqda", "ждём /start у бота"))
+        if r.owner:
+            rows.append([(f"✖️ @{pa['username']}", f"sd:px:{pa['username']}")])
     if r.owner:
         from . import recovery
         rows.append([(r.L("➕ ID bo'yicha admin", "➕ Админ по ID"), "sdn")])
@@ -762,9 +770,8 @@ async def admin_add(ctx, r: Req):
             uid, name = int(m.group(0)), ""
         elif u:                                            # @username (egasi, 2026-11-11)
             uid, name = await resolve_username(ctx, u.group(1))
-            if not uid:
-                return r.L(f"⚠️ @{u.group(1)} topilmadi — kontaktini yoki ID sini yuboring",
-                           f"⚠️ @{u.group(1)} не найден — пришлите контакт или ID")
+            if not uid:                                    # bot hali tanimaydi — u /start bosganda beriladi (2026-11-12)
+                return _pending_levels(r, P.norm_username(u.group(1)))
         else:
             return r.L("⚠️ Kontakt, @username yoki ID (son) yuboring", "⚠️ Пришлите контакт, @username или ID (число)")
     # darhol daraja tanlanadi (egasi, 2026-11-12: «yangi ega qo'shishni soddaroq qil») — 👑 Ega bir bosishda
@@ -779,6 +786,34 @@ async def admin_add(ctx, r: Req):
              "💵 Только зп — касса и список зп.")])), \
         kb(*grid([(names[lv].split(" ", 1)[0] + " " + names[lv].split(" ", 1)[1].capitalize(), f"sdl:{uid}:{lv}")
                   for lv in ("owner", "full", "view", "zp")], 2), [(r.L("✖️ Bekor qilish", "✖️ Отмена"), "sd")])
+
+
+def _pending_levels(r: Req, uname: str):
+    """@username hali botga yozmagan: daraja hozir tanlanadi, u botga /start bosishi bilan beriladi (7 kun ichida)."""
+    ui.WAIT.pop(r.uid, None)
+    names = LEVEL_RU if r.lang == "ru" else LEVEL_UZ
+    return ui.join(title("👮", r.L("QAYSI DARAJA?", "КАКОЙ УРОВЕНЬ?"), f"@{h(uname)}"), "", card(
+        [r.L(f"@{h(uname)} hali botga yozmagan. Darajani tanlang — u botga /start bosishi bilan shu daraja beriladi "
+             f"(7 kun ichida). Sizga xabar keladi.",
+             f"@{h(uname)} ещё не писал боту. Выберите уровень — он получит его, как только нажмёт /start у бота "
+             f"(в течение 7 дней). Вам придёт сообщение.")])), \
+        kb(*grid([(names[lv].split(" ", 1)[0] + " " + names[lv].split(" ", 1)[1].capitalize(), f"sdu:{uname}:{lv}")
+                  for lv in ("owner", "full", "view", "zp")], 2), [(r.L("✖️ Bekor qilish", "✖️ Отмена"), "sd")])
+
+
+@screen("sdu", "owner")
+async def admin_pending_set(ctx, r: Req):
+    """⏳ @username — /start bosishi bilan shu daraja (u hali botga yozmagan)."""
+    uname, lv = r.args[0], r.args[1]
+    if lv not in LEVEL_UZ or not P.valid_username(uname):
+        return r.L("⚠️ Noto'g'ri", "⚠️ Неверно")
+    P.add_pending_admin(ctx.db, uname, lv, "@" + uname)
+    names = LEVEL_RU if r.lang == "ru" else LEVEL_UZ
+    await ui.toast(ctx.bot, r.chat_id, r.L(f"⏳ @{uname} botga /start bossin — {names[lv]} bo'ladi",
+                                           f"⏳ Пусть @{uname} нажмёт /start — станет {names[lv]}"), 8)
+    r.args = []
+    ui.view(r, "sd")
+    return await admins(ctx, r)
 
 
 @screen("sdl", "owner")

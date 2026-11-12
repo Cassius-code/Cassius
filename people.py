@@ -47,6 +47,59 @@ def del_admin(db: Database, uid: int) -> None:
     db.run("DELETE FROM admins WHERE user_id=?", (uid,))
 
 
+# ───────────────────────── kutilayotgan admin (@username bilan; egasi, 2026-11-12: «yangi ega qo'shish ishlamayapti»)
+# Bot hali tanimaydigan akkaunt (botga yozmagan) — @username bilan yoziladi; u botga /start bosishi bilan daraja
+# beriladi. 7 kundan keyin o'z-o'zidan bekor.
+PENDING_DAYS = 7
+ADMIN_LEVELS = ("owner", "full", "view", "zp")
+
+
+def add_pending_admin(db: Database, username: str, level: str, name: str = "", pid: int | None = None) -> None:
+    u = norm_username(username)
+    if u and level in ADMIN_LEVELS:
+        db.set(f"padm:{u}", f"{level}|{int(time.time())}|{pid or ''}|{name or ''}")
+
+
+def drop_pending_admin(db: Database, username: str) -> None:
+    db.set(f"padm:{norm_username(username)}", "")
+
+
+def _pending_row(raw: str) -> tuple[str, int, int | None, str] | None:
+    lv, ts, pid, name = (raw.split("|", 3) + ["", "", "", ""])[:4]
+    if lv not in ADMIN_LEVELS or not ts.isdigit() or time.time() - int(ts) > PENDING_DAYS * 86400:
+        return None
+    return lv, int(ts), (int(pid) if pid.isdigit() else None), name
+
+
+def pending_admins(db: Database) -> list[dict]:
+    out = []
+    for row in db.all("SELECT key, value FROM settings WHERE key LIKE 'padm:%' AND value<>'' ORDER BY key"):
+        x = _pending_row(row["value"])
+        if x is not None:
+            out.append({"username": row["key"][5:], "level": x[0], "ts": x[1], "pid": x[2], "name": x[3]})
+    return out
+
+
+def take_pending_admin(db: Database, uid: int | None, username: str | None) -> str | None:
+    """Kutilgan akkaunt botga yozdi — darajasi beriladi (bir marta). «👑 Ega» yozuvdan belgilangan bo'lsa — o'sha
+    yozuvga (masalan «Cassius» — siz) Telegram ID si ham bog'lanadi."""
+    u = norm_username(username)
+    if not u or not uid:
+        return None
+    raw = db.get(f"padm:{u}")
+    if not raw:
+        return None
+    drop_pending_admin(db, u)
+    x = _pending_row(raw)
+    if x is None:
+        return None
+    lv, _ts, pid, name = x
+    set_admin(db, uid, lv, name or u)
+    if pid is not None and person(db, pid) is not None:
+        db.run("UPDATE people SET tg_id=?, username=? WHERE id=?", (uid, u, pid))
+    return lv
+
+
 # ───────────────────────── xodimlar
 def person(db: Database, pid: int | None):
     return db.one("SELECT * FROM people WHERE id=?", (pid,)) if pid else None

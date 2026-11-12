@@ -22,9 +22,10 @@ W = {
                                                                                           "Зарплаты"),
     "shares": ("Ulushlar (siz to'laysiz)", "Доли (платите вы)"), "share_s": ("ulush", "доля"), "income": ("Daromadingiz", "Ваш доход"),
     "by_acct": ("Akkauntlar bo'yicha", "По аккаунтам"), "to_you": ("sizga", "вам"),
-    "your_share": ("Ulushingiz — kimdan qancha", "Ваша доля — от кого сколько"),
     "worked_s": ("ishlagan", "работал"),
     "p_work": ("o'zi ishlagan", "сам работал"),
+    "rest_part": ("qolgan qismi", "остальное"),
+    "share_w": ("ulush", "доля"),
     "fines_pl": ("jarimalar", "штрафы"), "bonuses_pl": ("bonuslar", "бонусы"), "no_data": ("Ma'lumot yo'q",
                                                                                            "Данных нет"),
     "unassigned": ("chekda kim ishlagani belgilanmagan", "чек(ов) без исполнителя"),
@@ -144,15 +145,18 @@ def adj_lines(r: dict, lang: str) -> list[str]:
     return out
 
 
-def total_formula(r: dict, lang: str) -> str:
-    """«= 48.79 + 116 − 15 − 20 = 129.79 $» — zp, bonus, jarima, avans (va o'tkazma/ulush) qanchadan qancha."""
+def total_formula(r: dict, lang: str, share: float = 0.0) -> str:
+    """«= 48.79 + 116 − 15 − 20 = 129.79 $» — zp, bonus, jarima, avans (va o'tkazma/ulush) qanchadan qancha.
+    share — 👑 egasining har xodimdan ulushi («= 12 + ulush 11.40 = 23.40 $»)."""
     parts = [money(r["zp"])]
+    if share:
+        parts.append(f"{'+' if share > 0 else '−'} {w('share_w', lang)} {money(abs(share))}")
     for v, sign in ((r["bonus"], "+"), (r["fine"], "−"), (r["adv"], "−"), (r["tr_in"], "+"), (r["tr_out"], "−"),
                     (r["sin_sum"], "+"), (r["sout_sum"], "−")):
         if v:
             parts.append(f"{sign} {money(v)}")
     head = f"{' '.join(parts)} = " if len(parts) > 1 else ""
-    return f"= {head}<b>{money(r['total'])} $</b>"
+    return f"= {head}<b>{money((r['total'] or 0.0) + share)} $</b>"
 
 
 def zp_part_lines(r: dict, lang: str, html: bool = True) -> list[str]:
@@ -213,10 +217,12 @@ def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[
         earn = sorted(r["earn"].items(), key=lambda kv: kv[0][0] != me)
         for (acct, p), u in earn:
             out.append(f"{acct_label(b, acct, me, lang)}: {money(u)} $ × {pct(p)} = {money(u * p / 100)} $")
-        if len(earn) > 1:
+        if len(earn) > 1 and r["kind"] != "self":
             out.append(f"<b>{w('zp_total', lang)}: {money(r['zp'])} $</b>")
     else:
         out.append(f"<i>{w('zp_off', lang)}</i>")
+    shares, share_sum = (share_lines(b, lang) if r["kind"] == "self" else ([], 0.0))
+    out += shares                                      # 👑 egasi: o'z ishi + har xodimdan ulushi — bitta joyda
     out += adj_lines(r, lang)
     for o in r["outs"]:
         out.append(f"− {w('transfer_out', lang)} {h(names.get(o['other'], '?'))} ({dshort(o['day'])}, {pct(o['pct'])}) "
@@ -230,9 +236,36 @@ def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[
                    f"{money(i['amount'])} $")
     for i in r["sout"]:
         out.append(f"− {w('share_out', lang)} {h(names.get(i['other'], '?'))} {pct(i['pct'])} = {money(i['amount'])} $")
-    if r["total"] is not None:
+    if r["kind"] == "self" and shares:
+        out.append(total_formula(r, lang, share_sum))
+    elif r["total"] is not None:
         out.append(total_formula(r, lang) if r["kind"] != "partner" else f"= <b>{money(r['total'])} $</b>")
     return out
+
+
+def share_lines(b: dict, lang: str) -> tuple[list[str], float]:
+    """👑 Egasining ulushi har xodimdan (egasi, 2026-11-12: «Cred 288 × 20% = …» — o'z zp i ichida, tepada, «eng
+    pastida emas»): boshqalar ishlagan qismdan «siz %» (o'rniga boshqa xodim ishlagan bo'lsa — uning foizi);
+    «siz %» yozilmagan akkauntdan — qolgani («sizga»). Yig'indisi + o'z ishi = kassadan sizning qismingiz."""
+    o, names = b["owner"], b["names"]
+    out: list[str] = []
+    tot = 0.0
+    for a in o["per_acct"]:
+        nm = h(names.get(a["pid"], "?"))
+        rd = b.get("rds", {}).get(a["pid"])
+        where = f"{nm}{' · ' + h(rd) if rd else ''}"
+        got = 0.0
+        for op, usd, share, via in a["opp"]:
+            tag = f" · {h(names.get(via, '?'))} {w('worked_s', lang)}" if via else ""
+            out.append(f"{where}{tag}: {money(usd)} $ × {pct(op)} = {money(share)} $")
+            got += share
+        rest = round(a["mine"] - a["own"] - got, 2)    # «siz %» yozilmagan akkaunt (eski usul) yoki qolgan qismi
+        if abs(rest) >= 0.01:
+            out.append(f"{where}: {w('to_you', lang)} {money(rest)} $" if not a["opp"] else
+                       f"{where}: {w('rest_part', lang)} {money(rest)} $")
+            got += rest
+        tot += got
+    return out, round(tot, 2)
 
 
 def kassa_line(r: dict, lang: str) -> str:
@@ -376,25 +409,6 @@ def owner_card(b: dict, lang: str) -> str:
                      + f" · {w('partner_all', lang)} <b>{money(o['partner_total'])} $</b>")
     lines.append("")
     lines += balance_lines(b, lang)
-    if o["per_acct"]:                               # 📈 kimdan qancha (egasi, 2026-11-12: «Cred 288 × 20% = …»)
-        lines.append("")
-        lines.append(f"<b>📈 {w('your_share', lang)}</b>")
-        for a in o["per_acct"]:
-            nm = h(names.get(a["pid"], "?"))
-            rd = b.get("rds", {}).get(a["pid"])
-            where = f"{nm}{' · ' + h(rd) if rd else ''}"
-            got = False
-            if a["own_usd"]:                        # o'zingiz ishlagan qism — o'z foizingiz bilan
-                p_ = a["own"] / a["own_usd"] * 100 if a["own_usd"] else 0
-                lines.append(f"{where} · {w('own_work', lang)}: {money(a['own_usd'])} $ × {pct(round(p_, 2))} = "
-                             f"<b>{money(a['own'])} $</b>")
-                got = True
-            for op, usd, share, via in a["opp"]:    # boshqalar ishlagan qismdan — «siz %» (o'rniga ishlagan — uning %)
-                tag = f" · {h(names.get(via, '?'))} {w('worked_s', lang)}" if via else ""
-                lines.append(f"{where}{tag}: {money(usd)} $ × {pct(op)} = <b>{money(share)} $</b>")
-                got = True
-            if not got and a["mine"]:               # «siz %» yozilmagan (eski usul) — qolgani
-                lines.append(f"{where}: {w('to_you', lang)} <b>{money(a['mine'])} $</b>")
     return card(lines, expandable=len(lines) > 14)
 
 

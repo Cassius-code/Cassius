@@ -97,6 +97,8 @@ DEFAULTS: dict[str, str] = {
     "push_limit": "50",              # HAR papkaga nechta
     "push_speed": "normal",
     "push_emojis": "",               # bo'sh = hammasi (chiqarilganlardan tashqari)
+    "push_skip_emojis": "🔎",        # 🚫 Push bormaydi (faqat Push) — 🔎 lupalarga alohida «🔎 Lupa push» (2026-11-12)
+    "push_drip": "",                 # ⏱ bo'lib yuborish: «5/5» — har 5 daqiqada 5 tadan; bo'sh — hammasi birdan
     "push_from": "",
     "push_to": "",
     "push_newlead_minutes": "60",

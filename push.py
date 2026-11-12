@@ -18,6 +18,7 @@ import asyncio
 import os
 import logging
 import random
+import re
 import time
 from collections import deque
 from datetime import datetime, time as dtime
@@ -48,6 +49,17 @@ MAX_WAIT = 30 * 60           # Telegram «kuting» desa (FloodWait): shungacha p
 MAX_WAITS = 2                # bitta Push'da bir akkaunt necha marta kutadi (keyin — papka to'xtaydi)
 CONTINUE_HOURS = 12          # «▶️ Davom ettirish» — Push tugaganidan keyin shuncha soat ichida
 SPEEDS = {"fast": (1.0, 2.0), "normal": (2.0, 3.0), "slow": (3.0, 5.0)}
+LUPA = ("🔎", "🔍")                                   # lupa — ikkala ko'rinishi bir xil hisoblanadi
+
+
+def lupa_norm(text: str) -> str:
+    return (text or "").replace("🔍", "🔎")
+
+
+def is_lupa(label: str) -> bool:
+    """🔎 topik belgisi (yoki nomi lupa bilan boshlanadi)."""
+    t = "".join(ch for ch in (label or "").lstrip() if ch not in ("️", "‍"))
+    return t.startswith(LUPA)
 PROGRESS_EVERY = 5
 SLOTS = ("morning", "day")
 CONTROL_EVERY = 10           # 🧪 nazorat guruhi: har 10 lidning 1 tasi
@@ -189,11 +201,22 @@ class Pusher:
     def _push_emojis(self) -> list[str]:
         return [ch for ch in self.db.get("push_emojis") if not ch.isspace() and ch not in ",;️‍"]
 
+    def push_skip(self) -> list[str]:
+        """🚫 Push bormaydigan belgilar (faqat Push; zaderjka nazoratiga tegmaydi). Egasi, 2026-11-12: «🔎 lupadagilarga
+        Push bormasin» — ular uchun alohida «🔎 Lupa push»."""
+        return [lupa_norm(ch) for ch in self.db.get("push_skip_emojis") if not ch.isspace() and ch not in ",;️‍"]
+
+    def drip(self) -> tuple[int, int]:
+        """⏱ Bo'lib yuborish (egasi, 2026-11-12): (nechta, necha daqiqada) — masalan (5, 5); (0, 0) — hammasi birdan."""
+        m = re.fullmatch(r"(\d+)/(\d+)", self.db.get("push_drip") or "")
+        return (int(m.group(1)), int(m.group(2))) if m and int(m.group(1)) > 0 and int(m.group(2)) > 0 else (0, 0)
+
     # ------------------------------------------------------------ kimga
     def audience(self, slot: str | None = None, now: int | None = None, push_id: int | None = None) -> dict:
         now = int(self.clock() if now is None else now)
         evening = slot == "evening"                      # 🌙 kechki — tartib ☀️ dagidek (egasi, 2026-10-30)
-        slot = "morning" if slot == "morning" else ("day" if slot in ("day", "evening") else self.slot(now))
+        lupa = slot == "lupa"                            # 🔎 faqat lupa belgililarga (tartib ☀️ dagidek)
+        slot = "morning" if slot == "morning" else ("day" if slot in ("day", "evening", "lupa") else self.slot(now))
         if push_id is None:
             cur = self.current()
             push_id = cur["id"] if cur is not None else 0
@@ -210,8 +233,13 @@ class Pusher:
             "LEFT JOIN topics t ON t.chat_id=th.chat_id AND t.topic_id=th.topic_id "
             "WHERE th.first_seen IS NOT NULL AND " + BASE_SQL + " AND th.last_seen BETWEEN ? AND ?",
             (self.base_from(),) + self.window(now))
-        rows = [r for r in rows if cmap.get(r["chat_id"]) in allowed and not label_excluded(r["label"], skip)
-                and (not push_e or label_excluded(r["label"], push_e))]
+        if lupa:
+            rows = [r for r in rows if cmap.get(r["chat_id"]) in allowed and is_lupa(r["label"])]
+        else:
+            pskip = self.push_skip()
+            rows = [r for r in rows if cmap.get(r["chat_id"]) in allowed and not label_excluded(r["label"], skip)
+                    and not label_excluded(lupa_norm(r["label"]), pskip)
+                    and (not push_e or label_excluded(r["label"], push_e))]
         matched = len(rows)
         fresh_n = max(0, self.db.get_int("push_newlead_minutes"))
         border = now - fresh_n * 60
@@ -281,14 +309,19 @@ class Pusher:
         return {"items": [(r["chat_id"], r["topic_id"], fid) for r, fid in items], "by_folder": quota,
                 "pool": [(r["chat_id"], r["topic_id"], cmap[r["chat_id"]]) for r in rows],   # son chegarasisiz
                 "no_account": no_account, "quiet": [], "matched": matched, "fresh": fresh, "cooled": busy,
-                "repeated": repeated, "got_before": got_before, "slot": "evening" if evening else slot, "groups": groups, "limit": limit,
+                "repeated": repeated, "got_before": got_before,
+                "slot": "evening" if evening else ("lupa" if lupa else slot), "groups": groups, "limit": limit,
                 "push_id": push_id}
 
     def delays(self) -> tuple[float, float]:
         return SPEEDS.get(self.db.get("push_speed"), SPEEDS["normal"])
 
-    def estimate_minutes(self, n: int) -> int:
+    def estimate_minutes(self, n: int, per_folder: list[int] | None = None) -> int:
         lo, hi = self.delays()
+        k, mins = self.drip()
+        if k and n:                                     # ⏱ bo'lib: eng ko'p lidli papka — N tadan, har M daqiqada
+            most = max(per_folder or [n])
+            return max(1, (-(-most // k) - 1) * mins + round(min(k, most) * (lo + hi + 1.0) / 2 / 60))
         return max(1, round(n * (lo + hi + 1.0) / 2 / 60))
 
     def stop(self) -> None:
@@ -484,6 +517,8 @@ class Pusher:
                     return
                 first = True
                 slow, waits, errors = 1, 0, 0             # Telegram kuttirgandan keyin — sekinroq
+                drip_n, drip_m = self.drip()              # ⏱ bo'lib yuborish: N tadan, har M daqiqada
+                batch_start, batch_sent = self.clock(), 0
                 while not self._stop:
                     fid = pick()                          # son pauza paytida o'zgargan bo'lishi mumkin
                     if fid is None:
@@ -498,7 +533,19 @@ class Pusher:
                         stat["held"] += 1
                         continue
                     if not first:
-                        await self._sleep(random.uniform(*self.delays()) * slow)
+                        if drip_n and batch_sent >= drip_n:
+                            until = batch_start + drip_m * 60
+                            if until > self.clock():
+                                for f2 in mine:
+                                    waiting[f2] = int(until)
+                                try:
+                                    await self._sleep(until - self.clock())
+                                finally:
+                                    for f2 in mine:
+                                        waiting.pop(f2, None)
+                            batch_start, batch_sent = self.clock(), 0
+                        else:
+                            await self._sleep(random.uniform(*self.delays()) * slow)
                         if self._stop:
                             queues[fid].appendleft((idx, chat_id, topic_id))
                             return
@@ -531,6 +578,7 @@ class Pusher:
                         job.add_done_callback(lambda f: f.cancelled() or f.exception())
                         await asyncio.shield(job)
                         stat["sent"] += 1
+                        batch_sent += 1
                         ok[fid] = ok.get(fid, 0) + 1
                         per_folder.setdefault(fid, [0, 0])[0] += 1
                         errors = 0

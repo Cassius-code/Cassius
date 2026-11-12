@@ -55,12 +55,33 @@ def level_of(ctx, uid: int | None) -> str:
 
 
 def _link(ctx, user) -> None:
-    """Yozgan odam xodimlar ro'yxatida @username bilan bo'lsa — Telegram ID si bog'lanadi (Artur birinchi /start)."""
-    if user is not None and getattr(user, "username", None) and not P.admin_level(ctx.db, ctx.cfg.owner_ids, user.id):
-        try:
-            P.identify(ctx.db, user.id, user.username)
-        except Exception:
-            pass
+    """Yozgan odam xodimlar ro'yxatida @username bilan bo'lsa — Telegram ID si bog'lanadi (Artur birinchi /start).
+    @username bilan kutilayotgan admin (masalan yangi 👑 ega akkaunti) bo'lsa — darajasi shu yerda beriladi."""
+    if user is None or not getattr(user, "username", None) or P.admin_level(ctx.db, ctx.cfg.owner_ids, user.id):
+        return
+    try:
+        lv = P.take_pending_admin(ctx.db, user.id, user.username)
+    except Exception:
+        log.exception("Kutilayotgan admin")
+        lv = None
+    try:
+        P.identify(ctx.db, user.id, user.username)
+    except Exception:
+        pass
+    if lv:
+        ui.bg(_admin_joined(ctx, user, lv))
+
+
+async def _admin_joined(ctx, user, lv: str) -> None:
+    """Kutilgan admin botga kirdi: «/» menyusi va egalarga xabar («🔐 @x botga kirdi — 👑 Ega»)."""
+    await set_commands(ctx, user.id)
+    names = {"owner": "👑 Ega", "full": "🛠 To'liq", "view": "👁 Faqat ko'radi", "zp": "💵 Faqat zp"}
+    others = [u for u in ctx.notifier.owner_ids() if u != user.id]     # o'ziga emas — boshqa egalarga
+    try:
+        if others:
+            await ctx.notifier._send_many(others, f"🔐 @{user.username} botga kirdi — {names.get(lv, lv)}")
+    except Exception:
+        log.exception("Yangi admin xabari")
 
 
 def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", message=None) -> Req:
@@ -130,7 +151,10 @@ async def main_menu(ctx, r: Req):
     day = t.date().isoformat()
     came = sum(1 for p in staff if db.one("SELECT 1 FROM attendance WHERE day=? AND person_id=? AND arrived_ts IS NOT "
                                           "NULL", (day, p["id"])))   # bugun ishlaydiganlardan kelganlari
+    from .reports import new_leads                     # 🆕 bugun jami nechta lid keldi (egasi, 2026-11-12) — hisobotdagidek
+    fresh = sum(n for _, n in new_leads(db, d0, d0 + 86400))
     lines = [f"<b>{r.L('Bugun', 'Сегодня')}</b>",
+             f"🆕 {r.L('Yangi lidlar', 'Новые лиды')} — <b>{fresh}</b>",
              f"⏱ {r.L('Javob kutyapti', 'Ждут ответа')} — <b>{waiting}</b>",
              f"🚨 {r.L('Bugungi zaderjkalar', 'Задержек за сегодня')} — <b>{delays}</b>",
              f"🎬 {r.L('Stavkada', 'В ставке')} — <b>{stavka}</b>",
