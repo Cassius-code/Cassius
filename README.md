@@ -149,10 +149,16 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     sekinlatadi. «🙋 Ishda — 3 / 4» — bugun ishlaydigan 4 xodimdan 3 tasi kelgan; «🚨 Bugungi zaderjkalar» — bugun
     nechta lid zaderjkaga tushgan (👥 Hozir ishda va 📊 hisobotlarda ham shu hisob).
     Kassa bo'limida — cheklar yig'indisi, har birining $ i va jami, 🏆 top 3.
-  - **Kassa menyusi — 6 tugma** (ishlatilish tartibida): ❓ Savollar · ✅ Kunni yopish · 📊 Hisobot ·
+  - **Kassa menyusi — 7 tugma** (ishlatilish tartibida): ❓ Savollar · ✅ Kunni yopish · 📊 Hisobot · 📅 Kunma-kun ·
     🧮 Haftalik zp · 👥 Xodimlar · ⚙️ Sozlamalar. Hech qaysi funksiya o'chmagan — joyi o'zgargan:
     🗓 Oy yakuni, 🏆 Reyting, 📄 PDF — 📊 Hisobot ichida; 📋 To'lov ro'yxati — 🧮 Haftalik zp ichida;
     💲 Prays, 🤝 Ulushlar, 📜 Tarix, ⚙️ Zp hisoblash usuli — ⚙️ Sozlamalar ichida.
+  - **📅 Kunma-kun** (💵 Kassa → 📅 Kunma-kun; 📅 Kunlar va ✅ Kunni yopish dan kun bosilganda ham): bugundan
+    boshlanadi, tepada «◀ 11.11» — oldingi kun, «12.11 ▶» — keyingi kun (ertangi kun hali yo'q — ▶ ko'rinmaydi).
+    Har kim alohida: kassa, Кол-во рд, $ (faqat sizga), zp, bonus, jarima, avans va jami; pastda jami kassa va
+    xodimlarga jami (hafta hisoblanmagan bo'lsa — «≈ taxminiy»); sizga — 🤝 Artur ulushi va 🎯 kassa bonusi (qaysi RD,
+    nima uchun). Cheklar (🧾), 📜 Tarix va 🔒 Kunni yopish — avvalgidek. ◀ ▶ bilan kun almashtirilsa ham «‹ Orqaga» —
+    kirgan joyingizga (kunlar birma-bir qaytib chiqmaydi).
   - **📊 Hisobot.** Davr (bugun / kecha / hafta / oy / sana) → kassa; ichida 📅 Kunlar, 🏆 Reyting, 📄 PDF, oy
     tanlansa — 🗓 Oy yakuni. O'tgan hafta bilan solishtirish (↑ / ↓ %), kunlar → akkauntlar → cheklar.
   - **🏆 Umumiy reyting** — 📊 Hisobot → «🏆 Reyting — boshidan»: boshlang'ich (oldingi haftalar) kassa + 19.10 dan

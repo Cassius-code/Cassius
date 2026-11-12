@@ -387,12 +387,17 @@ def cancel_kb(r: Req, back: str):
 
 
 # ───────────────────────── tarix («‹ Orqaga»)
+SAME_PLACE = {"kdd"}                       # ◀ ▶ bilan kun almashtiriladigan ekran: tarixda bitta joy (Orqaga — kirgan joyga)
+
+
 def remember(uid: int, data: str, text: str, markup, safe: bool, ask: bool) -> None:
     st = HIST.setdefault(uid, [])
     if data == "m":
         st.clear()
     if st and st[-1]["ask"]:                     # kiritish so'rovi tarixda qolmaydi
         st.pop()
+    if st and data.split(":")[0] in SAME_PLACE and st[-1]["data"].split(":")[0] == data.split(":")[0]:
+        st.pop()                                 # 📅 kun ◀ ▶ — oldingi kun ko'rinishi o'rniga
     for i, e in enumerate(st):                   # avvalgi ekranga qaytildi — undan keyingilar kesiladi
         if e["data"] == data:
             del st[i:]

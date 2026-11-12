@@ -84,7 +84,8 @@ async def kassa_menu(ctx, r: Req):
     # 6 tugma, ishlatilish tartibida (egasi, 2026-10-30): Oy yakuni, Reyting, PDF — 📊 Hisobot ichida; To'lov ro'yxati —
     # 🧮 Haftalik zp ichida; Prays, Ulushlar, Tarix — ⚙️ Sozlamalar ichida
     items = [(r.L("❓ Savollar", "❓ Вопросы") + (f" ({pend})" if pend else ""), "kq"),
-             (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc"), (r.L("📊 Hisobot", "📊 Отчёт"), "kr")]
+             (r.L("✅ Kunni yopish", "✅ Закрыть день"), "kc"), (r.L("📊 Hisobot", "📊 Отчёт"), "kr"),
+             (r.L("📅 Kunma-kun", "📅 По дням"), f"kdd:{t.isoformat()}")]     # ◀ ▶ kunlar (egasi, 2026-11-12)
     if r.owner:
         items.append((r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), "kz"))
     items += [(r.L("👥 Xodimlar", "👥 Сотрудники"), "kpl"), (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "kset")]
@@ -211,33 +212,58 @@ async def days_list(ctx, r: Req):
 
 
 def day_text(ctx, r: Req, day: str) -> tuple[str, list]:
+    """📅 Bir kun: har kim alohida — kassa, Кол-во рд, $ (egaga), zp, bonus, jarima, avans va jami (egasi, 2026-11-12:
+    «shu kuni kimga qancha kassa va zp — hammasi alohida: kol-vo, zp, bonus qanday bo'lsa shunday»)."""
     db = ctx.db
     d = dt.date.fromisoformat(day)
     b = K.calc(db, d, d)
-    lines, btn = [], []
+    zst = K.zp_state(db, d, d, today(ctx))
+    blocks, btn = [], []
     tn = traw = 0
-    tusd = 0.0
+    tusd = tzp = 0.0
     for i in b["order"]:
         row = b["rows"].get(i)
-        if row is None or not row["n"] or not visible_acct(r, row):
+        if row is None or not visible_acct(r, row) or not (row["n"] or K.has_data(row)):
+            continue
+        if row["kind"] == "partner" and not r.owner:
             continue
         tag = f" <i>({r.L('umumiy', 'общий')})</i>" if row["kind"] == "pool" else ""
-        lines.append(f"{h(row['p']['name'])}{tag} · {num(row['n'])} {r.L('chek', 'чек.')} · <b>{num(row['raw'])}</b>")
+        lines = [f"<b>{h(row['p']['name'])}</b>{tag}"]
+        if row["n"]:
+            lines.append(f"{r.L('Kassa', 'Касса')}: <b>{num(row['raw'])}</b> · {r.L('Кол-во рд', 'Кол-во рд')}: "
+                         f"<b>{num(row['n'])}</b>" + (f" · {money(row['usd'])} $" if r.owner else ""))
+            btn.append((f"🧾 {row['p']['name']}", f"kxd:{i}:{day}"))
         for payee in row["paid_out"]:
-            lines.append(f"   🔁 {r.L('ishlagan', 'работал')}: {h(b['names'].get(payee, '?'))}")
+            lines.append(f"🔁 {r.L('ishlagan', 'работал')}: {h(b['names'].get(payee, '?'))}")
         if row["unassigned"]:
-            lines.append(f"   ⚠️ {row['unassigned']} {r.L('chekda kim ishlagani belgilanmagan', 'чек(ов) без исполнителя')}")
+            lines.append(f"⚠️ {row['unassigned']} {r.L('chekda kim ishlagani belgilanmagan', 'чек(ов) без исполнителя')}")
         if row["noprice"]:
-            lines.append(f"   ⚠️ {row['noprice']} {r.L('chek narxsiz', 'чек(ов) без цены')}")
+            lines.append(f"⚠️ {row['noprice']} {r.L('chek narxsiz', 'чек(ов) без цены')}")
+        if row["kind"] == "partner":                       # 🤝 Artur — ulushi (faqat egaga)
+            lines += V.zp_lines(b, row, r.lang, True)
+        else:
+            lines += V.zp_amount_lines(row, r.lang)        # zp, bonus, jarima, avans, jami — foizsiz
+        blocks.append("\n".join(lines))
         tn, traw, tusd = tn + row["n"], traw + row["raw"], tusd + row["usd"]
-        btn.append((f"🧾 {row['p']['name']}", f"kxd:{i}:{day}"))
+        if row["kind"] in ("worker", "self") and row["total"] is not None:
+            tzp += row["total"]
     parts = []
-    if lines:
-        lines.append(f"<b>{r.L('Jami', 'Итого')}</b> · {num(tn)} {r.L('chek', 'чек.')} · <b>{num(traw)}</b>")
-        parts.append(card([f"<b>💵 {r.L('Kassa', 'Касса')}</b>"] + lines))
+    if blocks:
+        est = "" if zst["ready"] else r.L(" · <i>≈ zp taxminiy — 🧮 hafta hali hisoblanmagan</i>",
+                                         " · <i>≈ зп примерно — 🧮 неделя ещё не рассчитана</i>")
+        parts.append(card(["\n\n".join(blocks)]))
+        parts.append(card([f"<b>{r.L('Jami', 'Итого')}</b> · {num(tn)} {r.L('chek', 'чек.')} · <b>{num(traw)}</b>"
+                           + (f" · <b>{money(tusd)} $</b>" if r.owner else ""),
+                           f"💰 {r.L('Xodimlarga jami (zp, bonus, jarima bilan)', 'Сотрудникам всего (зп, бонус, штраф)')}: "
+                           f"<b>{money(tzp)} $</b>{est}"]))
     else:
         parts.append(r.L("<i>Bu kunda chek yo'q.</i>", "<i>За этот день чеков нет.</i>"))
-    if r.owner and lines and K.zp_state(db, d, d, today(ctx))["ready"]:
+    if r.owner:                                            # 🎯 kassa bonusi (Arturga) — shu kun, har RD
+        names = b["names"]
+        kb_ = [V.bonus_line(x, names, r.lang) for x in K.bonus_groups(db, day, day) if x["kassa"] or x["checks"]]
+        if kb_:
+            parts.append(card([f"<b>🎯 {r.L('Kassa bonusi (Artur)', 'Бонус за кассу (Артур)')}</b>"] + kb_))
+    if r.owner and blocks and zst["ready"]:
         parts.append(card(balance_lines(b, r.lang)))
     info = []
     c = K.closed(db, day)
@@ -263,9 +289,14 @@ def day_text(ctx, r: Req, day: str) -> tuple[str, list]:
 
 @screen("kdd", "full")
 async def day_show(ctx, r: Req):
+    """📅 Kun: ◀ oldingi kun · keyingi kun ▶ (ertangi kun hali yo'q bo'lsa — ▶ ko'rinmaydi; egasi, 2026-11-12)."""
     day = r.args[0]
+    d = dt.date.fromisoformat(day)
     text, btn = day_text(ctx, r, day)
-    rows = grid(btn, 2)
+    prev_d, next_d = d - dt.timedelta(days=1), d + dt.timedelta(days=1)
+    rows = [[(f"◀ {dm(prev_d)}", f"kdd:{prev_d.isoformat()}")]
+            + ([(f"{dm(next_d)} ▶", f"kdd:{next_d.isoformat()}")] if next_d <= today(ctx) else [])]
+    rows += grid(btn, 2)
     extra = [(r.L("📜 Tarix", "📜 История"), f"kh:0:{day}")]
     if r.owner:
         if K.is_closed(ctx.db, day):
