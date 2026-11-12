@@ -720,10 +720,10 @@ async def recovery_set(ctx, r: Req):
 async def admin_add_ask(ctx, r: Req):
     ui.ask(r, "admin_add", "sd")
     return title("➕", r.L("YANGI ADMIN", "НОВЫЙ АДМИН")) + "\n\n" + card(
-        [r.L("Uning kontaktini yuboring (📎 → Kontakt), @username ini yoki Telegram ID sini yozing. Boshida "
-             "«🛠 to'liq». Bot begonaga ID ni aytmaydi — faqat «Бот сейчас не работает.».",
-             "Пришлите его контакт (📎 → Контакт), @username или Telegram ID. По умолчанию «🛠 полный». "
-             "Посторонним бот ID не показывает — только «Бот сейчас не работает.».")]), ui.cancel_kb(r, "sd")
+        [r.L("Uning kontaktini yuboring (📎 → Kontakt), @username ini yoki Telegram ID sini yozing — keyin "
+             "darajasini bitta tugma bilan tanlaysiz (👑 Ega ham). Bot begonaga ID ni aytmaydi.",
+             "Пришлите его контакт (📎 → Контакт), @username или Telegram ID — затем выберете уровень одной "
+             "кнопкой (и 👑 Владелец). Посторонним бот ID не показывает.")]), ui.cancel_kb(r, "sd")
 
 
 async def resolve_username(ctx, username: str) -> tuple[int | None, str]:
@@ -767,14 +767,37 @@ async def admin_add(ctx, r: Req):
                            f"⚠️ @{u.group(1)} не найден — пришлите контакт или ID")
         else:
             return r.L("⚠️ Kontakt, @username yoki ID (son) yuboring", "⚠️ Пришлите контакт, @username или ID (число)")
-    P.set_admin(ctx.db, uid, "full", name)
+    # darhol daraja tanlanadi (egasi, 2026-11-12: «yangi ega qo'shishni soddaroq qil») — 👑 Ega bir bosishda
+    ctx.db.set(f"adm_name:{uid}", name)
+    ui.WAIT.pop(r.uid, None)
+    names = LEVEL_RU if r.lang == "ru" else LEVEL_UZ
+    who = h(name) if name else f"<code>{uid}</code>"
+    return ui.join(title("👮", r.L("QAYSI DARAJA?", "КАКОЙ УРОВЕНЬ?"), who), "", card(
+        [r.L("👑 Ega — hammasi (pul amallari ham). 🛠 To'liq — kassa, nazorat, Push. 👁 Ko'rish — faqat ko'radi. "
+             "💵 Faqat zp — kassa va zp ro'yxati.",
+             "👑 Владелец — всё (и деньги). 🛠 Полный — касса, контроль, Пуш. 👁 Просмотр — только смотрит. "
+             "💵 Только зп — касса и список зп.")])), \
+        kb(*grid([(names[lv].split(" ", 1)[0] + " " + names[lv].split(" ", 1)[1].capitalize(), f"sdl:{uid}:{lv}")
+                  for lv in ("owner", "full", "view", "zp")], 2), [(r.L("✖️ Bekor qilish", "✖️ Отмена"), "sd")])
+
+
+@screen("sdl", "owner")
+async def admin_level_set(ctx, r: Req):
+    """➕ Admin: tanlangan daraja bilan qo'shiladi (👑 Ega — darhol to'liq ega)."""
+    uid, lv = int(r.args[0]), r.args[1]
+    if lv not in LEVEL_UZ:
+        return r.L("⚠️ Daraja noto'g'ri", "⚠️ Неверный уровень")
+    P.set_admin(ctx.db, uid, lv, ctx.db.get(f"adm_name:{uid}"))
     from .panel import set_commands
     await set_commands(ctx, uid)                           # «/» menyusi — admin buyruqlari
     try:
         await ctx.bot.send_message(uid, "👮 /menu")
     except Exception:
         pass
+    names = LEVEL_RU if r.lang == "ru" else LEVEL_UZ
+    await ui.toast(ctx.bot, r.chat_id, f"✅ {names[lv]}")
     r.args = []
+    ui.view(r, "sd")
     return await admins(ctx, r)
 
 

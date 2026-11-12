@@ -240,7 +240,8 @@ CREATE INDEX IF NOT EXISTS idx_reports_person ON reports(person_id, status);
 CREATE TABLE IF NOT EXISTS checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT, report_id INTEGER NOT NULL, rd TEXT, amount INTEGER NOT NULL,
     usd REAL, skip INTEGER NOT NULL DEFAULT 0, pay INTEGER,
-    rd_no TEXT                                -- hisobotdagi RD raqami («Rd3 04.11» → 3): 🎯 bonus har RD uchun alohida
+    rd_no TEXT,                               -- hisobotdagi RD raqami («Rd3 04.11» → 3): 🎯 bonus har RD uchun alohida
+    pay_pct REAL                              -- 🤝 Artur o'zi ishlagan kun: uning foizi («🔁 Kim ishladi», 2026-11-12)
 );
 CREATE INDEX IF NOT EXISTS idx_checks_report ON checks(report_id);
 CREATE INDEX IF NOT EXISTS idx_checks_rd ON checks(rd);

@@ -64,13 +64,13 @@ def first_run(db, now: int, tz) -> None:
 def make_backup(ctx) -> tuple[bytes, str]:
     """Butun bazaning izchil nusxasi (ish to'xtamaydi). 45 MB dan katta bo'lsa — gzip."""
     tmp = os.path.join(str(ctx.cfg.data_dir), f".backup_{int(time.time())}.sqlite3")
-    src = ctx.db.conn
+    src = sqlite3.connect(ctx.db.path)                 # alohida ulanish: nusxa olinayotganda bot to'xtamaydi (WAL)
     dst = sqlite3.connect(tmp)
     try:
-        with ctx.db._lock:
-            src.backup(dst)
+        src.backup(dst)
     finally:
         dst.close()
+        src.close()
     try:
         with open(tmp, "rb") as f:
             data = f.read()
@@ -189,6 +189,10 @@ class Scheduler:
         d = t.date()
         await ctx.notifier._send_many(owners, lambda: (summary(ctx, d, d, ctx.lang(), owner=True), None))
         others = [u for u in ctx.notifier.staff_ids() if u not in owners]
+        from . import people as P
+        art = P.partner_tg(db)                             # 🤝 Arturga ham (egasi, 2026-11-12: lidlar, kassa — unga ham)
+        if art is not None and art not in owners and art not in others:
+            others.append(art)
         if others:
             await ctx.notifier._send_many(others, lambda: (summary(ctx, d, d, ctx.lang(), owner=False), None))
 

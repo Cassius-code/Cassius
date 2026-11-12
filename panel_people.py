@@ -185,7 +185,17 @@ async def new_person(ctx, r: Req, fid: int = 0):
 # ───────────────────────── kabinet
 def tg_line(r: Req, p) -> str | None:
     """Bot bu xodimni Telegram'da taniydimi: ✅ — ID bog'langan; ⏳ — hali yozmagan (yozsa — o'zi taniydi)."""
-    if p["kassa_kind"] in ("self", "partner", "pool"):
+    if p["kassa_kind"] == "partner":                     # 🤝 Artur — @username bilan botda faqat ko'rish (2026-11-12)
+        user = f"@{h(p['username'])}" if p["username"] else ""
+        if p["tg_id"]:
+            return f"✈️ {user} · ✅ " + r.L("botda: kassa, zp (foizlari bilan), lidlar, doska — faqat ko'radi",
+                                           "в боте: касса, зп (с процентами), лиды, доска — только просмотр")
+        if p["username"]:
+            return f"✈️ {user} · ⏳ " + r.L("botga /start bossin — kassa, zp, lidlar va doskani ko'radi",
+                                           "пусть нажмёт /start у бота — увидит кассу, зп, лидов и доску")
+        return "✈️ " + r.L("⚙️ Sozlamalar → ✈️ @username yozing — Artur botda kassa, zp va doskani ko'radi",
+                           "⚙️ Настройки → ✈️ укажите @username — Артур увидит в боте кассу, зп и доску")
+    if p["kassa_kind"] in ("self", "pool"):
         return f"✈️ @{h(p['username'])}" if p["username"] else None
     user = f"@{h(p['username'])}" if p["username"] else r.L("@username yo'q", "нет @username")
     if p["tg_id"]:
@@ -198,7 +208,9 @@ def tg_line(r: Req, p) -> str | None:
 
 def period_of(ctx, r: Req, pid: int, key: str | None):
     t = today(ctx)
-    if not key or key == "o":
+    if not key:                                          # kabinet — hafta boshidan (egasi, 2026-11-12: «nega 02 dan
+        key = "tw"                                       # 12 gacha? hafta boshidan emas?»); oxirgi oylikdan — 📅 Davr
+    if key == "o":
         s, e = K.open_period(ctx.db, pid, t)
         return s, e, "o"
     s, e = K.period_range(key, t)
@@ -493,8 +505,8 @@ async def send_preview(ctx, r: Req):
     row = K.calc(db, s, e)["rows"].get(pid)
     if row is None:
         return r.L("Ma'lumot yo'q", "Данных нет")
-    from .score import person_line
-    msg = worker_message(row, s, e, person_line(ctx, pid, s, e))
+    from .score import worker_stats
+    msg = worker_message(row, s, e, worker_stats(ctx, pid, s, e))
     if not p["tg_id"]:
         return r.L("⚠️ Xodim Telegram'ga ulanmagan: u botga /start bosishi kerak",
                    "⚠️ Сотрудник не подключён: пусть нажмёт /start у бота")
@@ -516,8 +528,8 @@ async def send_do(ctx, r: Req):
     if row is None or not p["tg_id"]:
         return r.L("⚠️ Yuborib bo'lmadi", "⚠️ Не отправлено")
     try:
-        from .score import person_line
-        await ctx.bot.send_message(p["tg_id"], worker_message(row, s, e, person_line(ctx, pid, s, e)))
+        from .score import worker_stats
+        await ctx.bot.send_message(p["tg_id"], worker_message(row, s, e, worker_stats(ctx, pid, s, e)))
     except Exception:
         return r.L("⚠️ Yuborilmadi: xodim botni bloklagan yoki /start bosmagan",
                    "⚠️ Не отправлено: сотрудник заблокировал бота или не нажал /start")
@@ -530,7 +542,9 @@ async def send_do(ctx, r: Req):
 async def paid_ask(ctx, r: Req):
     pid, key = int(r.args[0]), (r.args[1] if len(r.args) > 1 else "o")
     p = must(P.person(ctx.db, pid))
-    s, e, key = period_of(ctx, r, pid, key)
+    _s, e, key = period_of(ctx, r, pid, key)
+    e = min(e, today(ctx))                                 # kelajak kunlar «berildi» bo'lmaydi
+    s, _e = K.open_period(ctx.db, pid, e)                  # belgilanadigan hisob — oxirgi oylikdan (ppy bilan bir xil)
     row = K.calc(ctx.db, s, e)["rows"].get(pid)
     total = row["total"] if row and K.zp_state(ctx.db, s, e, today(ctx))["ready"] else None
     lines = [r.L(f"Davr: <b>{plabel(s, e)}</b>", f"Период: <b>{plabel(s, e)}</b>")]

@@ -89,6 +89,13 @@ def by_tg(db: Database, tg_id: int | None):
     return db.one("SELECT * FROM people WHERE tg_id=? ORDER BY active DESC, id LIMIT 1", (tg_id,)) if tg_id else None
 
 
+def partner_tg(db: Database) -> int | None:
+    """🤝 Artur (hamkor) Telegram ID si — yozuvida @username bo'lib, botga /start bosgan bo'lsa."""
+    r = db.one("SELECT tg_id FROM people WHERE kassa_kind='partner' AND active=1 AND tg_id IS NOT NULL "
+               "ORDER BY id LIMIT 1")
+    return r["tg_id"] if r is not None else None
+
+
 def by_username(db: Database, username: str | None):
     u = norm_username(username)
     return db.one("SELECT * FROM people WHERE username=? ORDER BY active DESC, id LIMIT 1", (u,)) if u else None

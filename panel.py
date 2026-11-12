@@ -1,6 +1,7 @@
 """Admin panel (shaxsiy chat): bosh menyu va tugma/matn yo'naltirish. Bo'limlar alohida modullarda."""
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import logging
 import re
@@ -40,8 +41,26 @@ MONTHS_RU = ["января", "февраля", "марта", "апреля", "м
              "ноября", "декабря"]
 
 
+# 🤝 Artur (hamkor) — 👥 Xodimlar → Artur → ⚙️ → @username yozilsa, /start bossa: faqat ko'rish (kassa, zp foizlari
+# bilan, lidlar, doska); foizlarni o'zgartirish, Push, sozlamalar — yo'q (egasi, 2026-11-12)
+PARTNER_SCREENS = {"k", "kr", "kdd", "kg", "kpl", "km"}
+
+
 def level_of(ctx, uid: int | None) -> str:
-    return P.admin_level(ctx.db, ctx.cfg.owner_ids, uid)
+    lv = P.admin_level(ctx.db, ctx.cfg.owner_ids, uid)
+    if lv or not uid:
+        return lv
+    p = P.by_tg(ctx.db, uid)
+    return "view" if p is not None and p["active"] and p["kassa_kind"] == "partner" else ""
+
+
+def _link(ctx, user) -> None:
+    """Yozgan odam xodimlar ro'yxatida @username bilan bo'lsa — Telegram ID si bog'lanadi (Artur birinchi /start)."""
+    if user is not None and getattr(user, "username", None) and not P.admin_level(ctx.db, ctx.cfg.owner_ids, user.id):
+        try:
+            P.identify(ctx.db, user.id, user.username)
+        except Exception:
+            pass
 
 
 def make_req(ctx, uid: int, chat_id: int, data: str = "", text: str = "", message=None) -> Req:
@@ -149,7 +168,7 @@ async def main_menu(ctx, r: Req):
                (r.L("👥 Xodimlar", "👥 Сотрудники"), "p"), (r.L("📣 Push", "📣 Пуш"), "u"),
                (r.L("📊 Hisobotlar", "📊 Отчёты"), "r"), (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "s")]
     if not r.can("full"):
-        buttons = [b for b in buttons if b[1] in ("c", "p", "r")]
+        buttons = [b for b in buttons if b[1] in ("c", "p", "r") or (r.partner and b[1] == "k")]
     rows = grid(buttons)
     from . import roster as R
     empty = len(R.empty_rds(db, t.date())) if db.flag("delay_enabled") else 0
@@ -356,7 +375,7 @@ def build_router(ctx) -> Router:
         if entry is None:
             return
         fn, need = entry
-        if not req.can(need):
+        if not req.can(need) and not (req.partner and prefix in PARTNER_SCREENS):
             await ui.toast(ctx.bot, req.chat_id, req.L("⛔ Bu amal uchun huquq yo'q", "⛔ Нет прав на это действие"))
             return
         ui.WAIT.pop(req.uid, None)
@@ -396,8 +415,9 @@ def build_router(ctx) -> Router:
     async def on_cb(cb: CallbackQuery) -> None:
         uid = cb.from_user.id
         data = cb.data or ""
-        try:
-            await cb.answer()                              # tugma darhol «javob beradi»
+        try:                                               # tugma darhol «javob beradi» — ekran uni kutmaydi
+            t = asyncio.ensure_future(cb.answer())
+            t.add_done_callback(lambda f: f.cancelled() or f.exception())
         except Exception:
             pass
         if ctx.notifier.locked(uid):                       # 🔒 qulflangan — hech qaysi tugma ishlamaydi
@@ -446,6 +466,7 @@ def build_router(ctx) -> Router:
     async def on_menu(message: Message) -> None:
         if await locked_input(message):
             return
+        _link(ctx, message.from_user)
         req = make_req(ctx, message.from_user.id, message.chat.id)
         if not req.level:
             from . import private
@@ -539,6 +560,7 @@ def build_router(ctx) -> Router:
             return
         ui.touch(message.chat.id)
         uid = message.from_user.id if message.from_user else None
+        _link(ctx, message.from_user)
         req = make_req(ctx, uid, message.chat.id, text=(message.text or message.caption or "").strip(), message=message)
         if not req.level:
             from . import private

@@ -746,6 +746,14 @@ def day_pay(db: Database, acct: int, day: str, skip_rid: int = 0) -> int | None:
     return next(iter(pays)) if len(pays) == 1 and None not in pays else None
 
 
+def day_pay_pct(db: Database, acct: int, day: str, skip_rid: int = 0):
+    """«🔁 Kim ishladi» — Artur bo'lsa, o'sha kun uchun yozilgan foizi (bitta bo'lsa). Yo'q — None."""
+    v = {x["pay_pct"] for x in db.all("SELECT DISTINCT ch.pay_pct FROM checks ch JOIN reports r ON r.id=ch.report_id "
+                                      "WHERE r.person_id=? AND r.status='done' AND ch.rd=? AND r.id<>?",
+                                      (acct, iso(day), skip_rid))}
+    return next(iter(v)) if len(v) == 1 else None
+
+
 def inherit_pay(db: Database, rid: int) -> None:
     """Hisobotning «kim ishladi» belgilanmagan cheklariga — o'sha kunning belgisi (umumiy akkauntda har hisobot o'zi
     so'raladi — tegilmaydi)."""
@@ -755,14 +763,16 @@ def inherit_pay(db: Database, rid: int) -> None:
     for d in report_days(db, rid):
         w = day_pay(db, r["person_id"], d, rid)
         if w is not None:
-            db.run("UPDATE checks SET pay=? WHERE report_id=? AND rd=? AND pay IS NULL", (w, rid, d))
+            db.run("UPDATE checks SET pay=?, pay_pct=? WHERE report_id=? AND rd=? AND pay IS NULL",
+                   (w, day_pay_pct(db, r["person_id"], d, rid), rid, d))
 
 
-def set_pay_day(db: Database, acct: int, day: str, pid) -> None:
-    """Shu akkauntning shu kundagi hamma cheklari uchun zp oluvchi (None = akkaunt egasi)."""
-    log(db, "pay_day", acct, day, pid, "", pid or "")
-    db.run("UPDATE checks SET pay=? WHERE rd=? AND report_id IN (SELECT id FROM reports WHERE person_id=? "
-           "AND status='done')", (pid, day, acct))
+def set_pay_day(db: Database, acct: int, day: str, pid, pct: float | None = None) -> None:
+    """Shu akkauntning shu kundagi hamma cheklari uchun zp oluvchi (None = akkaunt egasi). pct — 🤝 Artur o'zi
+    ishlagan bo'lsa, shu kun uchun uning foizi (egasi, 2026-11-12)."""
+    log(db, "pay_day", acct, day, pid, "", f"{pid or ''}{f' {pct:g}%' if pct is not None else ''}")
+    db.run("UPDATE checks SET pay=?, pay_pct=? WHERE rd=? AND report_id IN (SELECT id FROM reports WHERE person_id=? "
+           "AND status='done')", (pid, pct, day, acct))
 
 
 def unassigned_days(db: Database, acct: int) -> list[str]:
@@ -803,10 +813,11 @@ def set_check_day(db: Database, cid: int, day: str) -> None:
 
 def add_check(db: Database, pid: int, day: str, amount: int) -> None:
     w = None if is_pool(db, pid) else day_pay(db, pid, day)     # kun «🔁 Kim ishladi» bilan belgilangan bo'lsa — unga
+    wp = day_pay_pct(db, pid, day) if w is not None else None
     rid = db.run("INSERT INTO reports(person_id, chat_id, sender_name, raw, status, created) VALUES(?,?,?,?,?,?)",
                  (pid, 0, "вручную", str(amount), "done", dt.datetime.now().isoformat())).lastrowid
-    cid = db.run("INSERT INTO checks(report_id, rd, amount, usd, pay) VALUES(?,?,?,?,?)",
-                 (rid, day, amount, price_for(db, amount), w)).lastrowid
+    cid = db.run("INSERT INTO checks(report_id, rd, amount, usd, pay, pay_pct) VALUES(?,?,?,?,?,?)",
+                 (rid, day, amount, price_for(db, amount), w, wp)).lastrowid
     log(db, "chk_add", pid, day, cid, "", amount)
 
 
@@ -1269,7 +1280,8 @@ def _row(p) -> dict:
             "moved": [],                     # o'rniga ishlaganga o'tgan jarima/bonuslar (hisobga kirmaydi, faqat ko'rinadi)
             "outs": [], "ins": [], "tr_out": 0.0, "tr_in": 0.0,
             "sin": [], "sout": [], "sin_sum": 0.0, "sout_sum": 0.0,
-            "total": None, "share_part": 0.0, "pf": 0.0, "pb": 0.0}
+            "total": None, "share_part": 0.0, "pf": 0.0, "pb": 0.0,
+            "work_zp": 0.0}                  # 🤝 Artur o'zi ishlagan kunlar uchun (o'z foizi bilan)
 
 
 def calc(db: Database, start: dt.date, end: dt.date) -> dict:
@@ -1302,10 +1314,11 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             op_cache[k] = owner_pct_on(db, acct, day)
         return op_cache[k]
 
-    checks = db.all("SELECT ch.id cid, ch.rd, ch.amount, ch.usd, ch.skip, ch.pay, r.person_id acct "
+    checks = db.all("SELECT ch.id cid, ch.rd, ch.amount, ch.usd, ch.skip, ch.pay, ch.pay_pct, r.person_id acct "
                     "FROM checks ch JOIN reports r ON r.id=ch.report_id WHERE r.status='done' AND ch.rd BETWEEN ? AND ? "
                     "ORDER BY ch.rd, ch.id", (s, e))
     base_zp: dict = {}               # (pid, day) -> zp (o'tkazma va zp-ulush uchun)
+    opp_acc: dict = {}               # (acct, kim ishlagan | None, «siz %») -> $ — 📈 egasi ulushi qayerdan
     acct_usd_day: dict = {}          # (acct, day) -> usd
     zp_ad: dict = {}                 # (acct, day) -> {"all", "on", "self", "off", "self_usd"} — shu akkaunt cheklaridan zp
     day_payees: dict = {}            # (acct, day) -> shu akkauntda shu kuni kimlar ishlagan (zp oluvchilar)
@@ -1331,13 +1344,23 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         RAW += c["amount"]
         N += 1
         payee = c["pay"] or (None if a["kind"] == "pool" else c["acct"])
+        # 📈 egasi ulushi (egasi, 2026-11-12: «Cred 288 × 20% = …»): boshqalar ishlagan chekdan — «siz %»; o'rniga
+        # boshqa xodim ishlagan bo'lsa — o'sha xodimning o'z akkauntidagi foizi (op_fix bilan bir xil)
+        if payee is None or payee not in rows or rows[payee]["kind"] != "self":
+            oa = opct(c["acct"], d)
+            ow = opct(payee, d) if payee in rows and payee != c["acct"] and a["kind"] != "pool" else None
+            use = ow if (ow is not None and oa is not None) else oa
+            if use is not None:
+                k = (c["acct"], payee if payee in rows and payee != c["acct"] else None, float(use))
+                opp_acc[k] = opp_acc.get(k, 0.0) + usd
         if payee is None or payee not in rows:
             a["unassigned"] += 1
             continue
         day_payees.setdefault((c["acct"], d), set()).add(payee)
         worked.add((payee, d))
         pr = rows[payee]
-        pp = pct(payee, d)
+        # 🤝 Artur o'zi ishlagan kun — «🔁 Kim ishladi» da yozilgan foizi (uning ulush foizi emas)
+        pp = (c["pay_pct"] or 0.0) if pr["kind"] == "partner" else pct(payee, d)
         key = (c["acct"], pp)
         pr["earn"][key] = pr["earn"].get(key, 0.0) + usd
         z = usd * pp / 100
@@ -1348,7 +1371,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         if pr["kind"] == "self":
             bucket["self"] += z
             bucket["self_usd"] += usd                  # siz o'zingiz ishlagan cheklar ($)
-        elif pr["zp_on"]:
+        elif pr["zp_on"] or pr["kind"] == "partner":
             bucket["on"] += z
         else:
             bucket["off"] += z
@@ -1367,6 +1390,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     for pid, r in rows.items():
         if r["kind"] in PAYABLE:
             r["zp"] = r2(sum(u * p / 100 for (_acct, p), u in r["earn"].items()))
+        elif r["kind"] == "partner":
+            r["work_zp"] = r2(sum(u * p / 100 for (_acct, p), u in r["earn"].items()))
 
     # 🎯 kunlik kassa bonuslari (har RD papka × kun alohida) — Arturga
     kb_items = [g for g in bonus_groups(db, start, end) if (g["kassa"] or g["checks"]) and
@@ -1505,7 +1530,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
             r["pf"], r["pb"] = pf, pb
             r["kbonus"] = kbonus                       # 🎯 kassa bonuslari ham Arturga (egasi, 2026-11-04)
             r["total"] = r2(r["share_part"] + pf - pb - r["fine"] + r["bonus"] - r["adv"] - r["tr_out"] + r["tr_in"]
-                            + r["sin_sum"] + kbonus)   # Arturga yozilgan ulush ham (egasi, 2026-11-04)
+                            + r["sin_sum"] + kbonus    # Arturga yozilgan ulush ham (egasi, 2026-11-04)
+                            + r["work_zp"])            # o'zi ishlagan kunlar (egasi, 2026-11-12)
 
     K = r2(sum(acct_usd_day.values()))
     me = next((r for r in rows.values() if r["kind"] == "self"), None)
@@ -1515,7 +1541,9 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         per_acct.append({"pid": pid, "usd": r2(x["usd"]), "artur": r2(x["artur"]), "half": r2(x["usd"] - x["artur"]
                                                                                               - x["pshare"]),
                          "zp": r2(x["zp"]), "share": r2(x["share"]), "pshare": r2(x["pshare"]), "mine": r2(x["mine"]),
-                         "own": r2(x["own"]), "own_usd": r2(x["own_usd"]), "self": rows[pid]["kind"] == "self"})
+                         "own": r2(x["own"]), "own_usd": r2(x["own_usd"]), "self": rows[pid]["kind"] == "self",
+                         "opp": [(pc, r2(u_), r2(u_ * pc / 100), via) for (ac, via, pc), u_ in sorted(
+                             opp_acc.items(), key=lambda kv: (kv[0][1] is not None, kv[0][2])) if ac == pid and r2(u_)]})
     unknown = [r["p"]["name"] for r in rows.values() if r["kind"] == "worker" and not r["zp_on"] and r["earn"]]
     zps = r2(sum(r["zp"] for r in rows.values() if r["kind"] == "worker" and r["zp_on"]))
     owner_paid = r2(sum(x["share"] for x in acct_split.values()))
@@ -1548,7 +1576,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
              "mine": mine, "self_zp": me["zp"] if me else 0.0, "per_acct": per_acct, "unknown_zp": unknown,
              "partner_id": partner["id"] if partner else None,
              "partner_total": rows[partner["id"]]["total"] if partner else 0.0,
-             "partner_share": share_part, "pf": pf, "pb": pb, "wf": wf, "wb": wb, "zps_paid": r2(zps + wb - wf)}
+             "partner_share": share_part, "pf": pf, "pb": pb, "wf": wf, "wb": wb, "zps_paid": r2(zps + wb - wf),
+             "partner_work": rows[partner["id"]]["work_zp"] if partner else 0.0}
     order = [p["id"] for p in P.people(db, active_only=False) if p["kassa_kind"]]
     return {"rows": rows, "order": order, "K": K, "raw": RAW, "n": N, "owner": owner, "names":
             {pid: p["name"] for pid, p in ps.items()}, "rds": rd_of}
@@ -1560,7 +1589,8 @@ def partner_pct_of(db: Database, partner, day) -> float:
 
 def has_data(r: dict) -> bool:
     if r["kind"] == "partner":
-        return r["share_part"] > 0 or bool(r["fines"] or r["bonuses"] or r["advs"] or r["outs"] or r["ins"])
+        return r["share_part"] > 0 or bool(r["fines"] or r["bonuses"] or r["advs"] or r["outs"] or r["ins"]
+                                           or r["earn"])
     return bool(r["n"] or r["earn"] or r["fines"] or r["bonuses"] or r["advs"] or r["outs"] or r["ins"]
                 or r["sin"] or r["sout"])
 

@@ -455,6 +455,11 @@ async def finalize(ctx, rid: int) -> None:
         if r["chat_id"] and r["chat_id"] > 0:
             ids = [u for u in ids if u != r["chat_id"]]   # botga o'zi yozgan — unga «✅ Qabul qilindi» ekrani bor
         own = set(ctx.notifier.owner_ids())
+        art = P.partner_tg(db)                         # 🤝 Arturga ham — egasi ko'rgandek (egasi, 2026-11-12)
+        if art is not None and not (r["chat_id"] and r["chat_id"] == art):
+            own.add(art)
+            if art not in ids:
+                ids = list(ids) + [art]
         for d in K.report_days(db, rid):
             def build_brief(d=d, owner=False):
                 return day_brief(ctx, pid, d, owner), kb([(L(ctx, "👤 Kabinet", "👤 Кабинет"), f"po:{pid}")])
@@ -463,7 +468,7 @@ async def finalize(ctx, rid: int) -> None:
                 await _send(ctx, others, build_brief, key=f"kb:{pid}:{d}")    # shu kunning eski xulosasi o'chadi
             else:
                 await ctx.notifier.resolve(f"kb:{pid}:{d}")    # oldingi (bonussiz) nusxa qolmasin
-            mine = [u for u in ids if u in own]                 # egasiga — 🎯 kassa bonusi bilan (faqat egasi biladi)
+            mine = [u for u in ids if u in own]                 # egasiga (va Arturga) — 🎯 kassa bonusi bilan
             if mine:
                 await _send(ctx, mine, lambda d=d: build_brief(d, True), key=f"kbo:{pid}:{d}")
 

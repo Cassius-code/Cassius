@@ -22,6 +22,9 @@ W = {
                                                                                           "Зарплаты"),
     "shares": ("Ulushlar (siz to'laysiz)", "Доли (платите вы)"), "share_s": ("ulush", "доля"), "income": ("Daromadingiz", "Ваш доход"),
     "by_acct": ("Akkauntlar bo'yicha", "По аккаунтам"), "to_you": ("sizga", "вам"),
+    "your_share": ("Ulushingiz — kimdan qancha", "Ваша доля — от кого сколько"),
+    "worked_s": ("ishlagan", "работал"),
+    "p_work": ("o'zi ishlagan", "сам работал"),
     "fines_pl": ("jarimalar", "штрафы"), "bonuses_pl": ("bonuslar", "бонусы"), "no_data": ("Ma'lumot yo'q",
                                                                                            "Данных нет"),
     "unassigned": ("chekda kim ishlagani belgilanmagan", "чек(ов) без исполнителя"),
@@ -202,6 +205,9 @@ def zp_lines(b: dict, r: dict, lang: str, owner: bool, zp: bool = True) -> list[
             out.append(f"− {w('bonuses_pl', lang)} {money(r['pb'])} $")
         if r.get("kbonus"):
             out.append(f"+ 🎯 {w('kbonus_pl', lang)} {money(r['kbonus'])} $")
+        for (acct, p), u in r["earn"].items():      # 🤝 o'zi ishlagan kunlar — o'z foizi bilan (🔁 Kim ishladi)
+            out.append(f"+ {w('p_work', lang)} · {acct_label(b, acct, r['p']['id'], lang)}: {money(u)} $ × {pct(p)} = "
+                       f"{money(u * p / 100)} $")
     elif r["zp_on"]:                                   # har RD (akkaunt) bo'yicha, o'zinikidan boshlab
         me = r["p"]["id"]
         earn = sorted(r["earn"].items(), key=lambda kv: kv[0][0] != me)
@@ -336,10 +342,12 @@ def owner_card(b: dict, lang: str) -> str:
     if o["partner_id"] is None:                     # hamkor yo'q: «Artur 50%: 0 $» deb chalg'itmaymiz
         lines.append(f"⚠️ {w('no_partner', lang)}")
     else:
+        pw = o.get("partner_work", 0.0)             # 🤝 o'zi ishlagan kunlar (🔁 Kim ishladi)
         lines.append(f"− {w('partner', lang)}{ptag}: {money(o['partner_share'])}"
                      + (f" + {w('fines_pl', lang)} {money(o['pf'])}" if o["pf"] else "")
                      + (f" − {w('bonuses_pl', lang)} {money(o['pb'])}" if o["pb"] else "")
-                     + f" = <b>{money(o['partner_share'] + o['pf'] - o['pb'])} $</b>")
+                     + (f" + {w('p_work', lang)} {money(pw)}" if pw else "")
+                     + f" = <b>{money(o['partner_share'] + o['pf'] - o['pb'] + pw)} $</b>")
         if o["partner_paid"]:
             lines.append(f"− {w('pshares', lang)}: {money(o['partner_paid'])} $")
     lines.append(f"− {w('zps', lang)}: {money(o['zps'])}"
@@ -368,34 +376,25 @@ def owner_card(b: dict, lang: str) -> str:
                      + f" · {w('partner_all', lang)} <b>{money(o['partner_total'])} $</b>")
     lines.append("")
     lines += balance_lines(b, lang)
-    if o["per_acct"]:
+    if o["per_acct"]:                               # 📈 kimdan qancha (egasi, 2026-11-12: «Cred 288 × 20% = …»)
         lines.append("")
-        lines.append(f"<b>{w('by_acct', lang)}</b>")
+        lines.append(f"<b>📈 {w('your_share', lang)}</b>")
         for a in o["per_acct"]:
             nm = h(names.get(a["pid"], "?"))
-            parts = [f"{w('partner', lang)} {money(a['artur'] + a['pshare'])}"] if o["partner_id"] is not None else []
-            if a["zp"]:
-                parts.append(f"{w('zp', lang).lower()} {money(a['zp'])}")
-            if a["share"]:
-                parts.append(f"{w('share_s', lang)} {money(a['share'])}")
-            mine = f"{w('to_you', lang)} <b>{money(a['mine'])} $</b>"
-            if a["own"] and not a["self"]:          # shu akkauntda o'zingiz ham ishlagansiz — qanday chiqqani
-                mine += (f" <i>({w('own_work', lang)} {money(a['own_usd'])} $ → {money(a['own'])} + "
-                         f"{w('share_s', lang)} {money(a['mine'] - a['own'])})</i>")
-            parts.append(mine)
-            tag = f" ({w('you', lang).lower()})" if a["self"] else ""
             rd = b.get("rds", {}).get(a["pid"])
-            lines.append(f"{nm}{tag}{' · ' + h(rd) if rd else ''} · {money(a['usd'])} $ → " + " · ".join(parts))
-        me = next((r for r in b["rows"].values() if r["kind"] == "self"), None)
-        if me is not None and o["partner_id"] is not None:  # o'z bonusingiz/jarimangiz daromadga kirgan (egasi, 2026-11-04)
-            if me["bonus"]:
-                lines.append(f"+ {w('your_bonus', lang)} {money(me['bonus'])} $")
-            if me["fine"]:
-                lines.append(f"− {w('your_fine', lang)} {money(me['fine'])} $")
-        for v, sign, word in ((o["in_self"], "+", w("transfers", lang)), (o["out_self"], "−", w("transfers", lang)),
-                              (o.get("sin_self"), "+", w("share_s", lang)), (o.get("sout_self"), "−", w("share_s", lang))):
-            if v:                                           # ro'yxat yig'indisi «Daromadingiz» bilan teng bo'lsin
-                lines.append(f"{sign} {word} {money(v)} $")
+            where = f"{nm}{' · ' + h(rd) if rd else ''}"
+            got = False
+            if a["own_usd"]:                        # o'zingiz ishlagan qism — o'z foizingiz bilan
+                p_ = a["own"] / a["own_usd"] * 100 if a["own_usd"] else 0
+                lines.append(f"{where} · {w('own_work', lang)}: {money(a['own_usd'])} $ × {pct(round(p_, 2))} = "
+                             f"<b>{money(a['own'])} $</b>")
+                got = True
+            for op, usd, share, via in a["opp"]:    # boshqalar ishlagan qismdan — «siz %» (o'rniga ishlagan — uning %)
+                tag = f" · {h(names.get(via, '?'))} {w('worked_s', lang)}" if via else ""
+                lines.append(f"{where}{tag}: {money(usd)} $ × {pct(op)} = <b>{money(share)} $</b>")
+                got = True
+            if not got and a["mine"]:               # «siz %» yozilmagan (eski usul) — qolgani
+                lines.append(f"{where}: {w('to_you', lang)} <b>{money(a['mine'])} $</b>")
     return card(lines, expandable=len(lines) > 14)
 
 
@@ -422,7 +421,7 @@ def balance_lines(b: dict, lang: str) -> list[str]:
     o = b["owner"]
     mine = r2(o["income"] + o["out_self"] - o["in_self"] - o.get("sin_self", 0.0) + o.get("sout_self", 0.0))
     has_p = o["partner_id"] is not None
-    art = r2(o["partner_share"] + o["pf"] - o["pb"]) if has_p else 0.0
+    art = r2(o["partner_share"] + o["pf"] - o["pb"] + o.get("partner_work", 0.0)) if has_p else 0.0
     shares = r2(o["owner_paid"] + o["partner_paid"])
     tot = r2(art + o["zps_paid"] + shares + mine)
     ru = lang == "ru"

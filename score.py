@@ -159,6 +159,46 @@ def parts_line(row: dict) -> str:
     return " ".join(f"{icon}{row['parts'][k]}" for k, icon in icons if k in row["parts"])
 
 
+def worker_stats(ctx, pid: int, s: dt.date, e: dt.date) -> str:
+    """Xodimning zp xabariga (ruscha, oddiy matn; egasi, 2026-11-12): o'rtacha javob vaqti, zaderjkalar soni,
+    o'tgan haftaga nisbatan kassa va zp (% da), haftalik ball."""
+    from . import kassa as K
+    from .timeutil import local_date
+    db, tr, tz = ctx.db, ctx.tracker, ctx.tz
+    today = local_date(ctx.clock(), tz)
+    end = min(e, today)
+    if end < s:
+        return person_line(ctx, pid, s, e)
+    s_ts, e_ts = at(s, dt.time(0, 0), tz), at(end + dt.timedelta(days=1), dt.time(0, 0), tz)
+    lines = []
+    secs = [r["work_seconds"] for r in db.all("SELECT work_seconds FROM replies WHERE person_id=? AND reply_ts>=? "
+                                              "AND reply_ts<?", (pid, s_ts, e_ts))]
+    if secs:
+        avg = sum(secs) / len(secs) / 60
+        lines.append(f"⏱ Средний ответ: {avg:.1f} мин" if avg < 10 else f"⏱ Средний ответ: {round(avg)} мин")
+    nd = len(delays_by_person(db, tr, s_ts, e_ts).get(pid, [])) if tr is not None else 0
+    lines.append(f"🚨 Задержек: {nd}" if nd else "🚨 Задержек нет")
+    span = (end - s).days + 1                         # o'tgan hafta (yoki xuddi shuncha oldingi davr) — o'sha kunlar
+    shift = dt.timedelta(days=7 if span <= 7 else span)
+    cur = K.calc(db, s, end)["rows"].get(pid)
+    prev = K.calc(db, s - shift, end - shift)["rows"].get(pid)
+
+    def change(a, b):
+        return None if not b else round((a - b) / b * 100)
+    bits = []
+    if cur is not None and prev is not None:
+        for name, a, b in (("касса", cur["raw"], prev["raw"]), ("зп", cur["zp"], prev["zp"])):
+            c = change(a, b)
+            if c is not None:
+                bits.append(f"{name} {'+' if c > 0 else ('−' if c < 0 else '')}{abs(c)}%")
+    if bits:
+        lines.append(("📈 К прошлой неделе: " if span <= 7 else "📈 К прошлому периоду: ") + " · ".join(bits))
+    pl = person_line(ctx, pid, s, e)
+    if pl:
+        lines.append(pl)
+    return "\n".join(lines)
+
+
 def person_line(ctx, pid: int, s: dt.date, e: dt.date) -> str:
     """Xodimning zp xabariga (ruscha, oddiy matn): «🏆 Балл недели: 86 из 100 · 🔥 5 дней без задержек»."""
     try:

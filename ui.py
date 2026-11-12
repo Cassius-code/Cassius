@@ -387,6 +387,12 @@ def cancel_kb(r: Req, back: str):
 
 
 # ───────────────────────── tarix («‹ Orqaga»)
+def _ident(data: str) -> tuple:
+    """Ekran va uning asosiy yozuvi: «po:5:w0» va «po:5:lw» — bitta joy (xodim 5 kabineti)."""
+    parts = data.split(":")
+    return parts[0], (parts[1] if len(parts) > 1 else None)
+
+
 SAME_PLACE = {"kdd"}                       # ◀ ▶ bilan kun almashtiriladigan ekran: tarixda bitta joy (Orqaga — kirgan joyga)
 
 
@@ -398,8 +404,11 @@ def remember(uid: int, data: str, text: str, markup, safe: bool, ask: bool) -> N
         st.pop()
     if st and data.split(":")[0] in SAME_PLACE and st[-1]["data"].split(":")[0] == data.split(":")[0]:
         st.pop()                                 # 📅 kun ◀ ▶ — oldingi kun ko'rinishi o'rniga
+    me = _ident(data)
     for i, e in enumerate(st):                   # avvalgi ekranga qaytildi — undan keyingilar kesiladi
-        if e["data"] == data:
+        # o'sha ekran, o'sha yozuv (masalan xodim kabineti boshqa davr bilan) — ham o'sha joy: amaldan keyin
+        # «‹ Orqaga» tasdiqlash/oraliq oynaga qaytmaydi (egasi, 2026-11-12: «hech qaysi knopkada bunaqa bo'lmasin»)
+        if e["data"] == data or _ident(e["data"]) == me:
             del st[i:]
             break
     st.append({"data": data, "text": text, "markup": markup, "safe": safe, "ask": ask})

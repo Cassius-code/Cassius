@@ -89,6 +89,8 @@ async def kassa_menu(ctx, r: Req):
     if r.owner:
         items.append((r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), "kz"))
     items += [(r.L("👥 Xodimlar", "👥 Сотрудники"), "kpl"), (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), "kset")]
+    if not r.can("full"):                                    # 🤝 Artur — faqat ko'rish
+        items = [x for x in items if x[1].split(":")[0] in ("kr", "kdd", "kpl")]
     rows = grid(items)
     rows.append(nav(r))
     top = K.cumulative_rating(db, t)[:3]
@@ -172,10 +174,15 @@ def report_show(ctx, r: Req, key: str):
         rows += grid([(f"🧮 {r.L('Haftalik zp', 'Зп за неделю')} · {wlabel(x)}", f"kz:{x.isoformat()}")
                       for x in zst["weeks"]], 1)
         if s.weekday() == 0 and (e - s).days == 6 and zst["ready"]:
-            rows.append([(r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), f"kz:{s.isoformat()}"),
-                         (r.L("📋 To'lov ro'yxati", "📋 Ведомость"), f"kpay:{s.isoformat()}")])
-    rows.append([(r.L("📅 Kunlar bo'yicha", "📅 По дням"), f"kd:{pkey}" if s != e else f"kdd:{s.isoformat()}"),
-                 (r.L("🏆 Reyting", "🏆 Рейтинг"), f"kg:{key}"), ("📄 PDF", f"kf:{key}")])
+            rows.append([(r.L("🧮 Haftalik zp", "🧮 Зп за неделю"), f"kz:{s.isoformat()}")])
+    # 📅 kun: o'rtada — shu kun, chekkalarda — oldingi / keyingi kun (egasi, 2026-11-12; «📅 Kunlar bo'yicha» va
+    # «📋 To'lov ro'yxati» o'rniga). Keyingi kun hali bo'lmasa — tugma yo'q
+    d = min(e, today(ctx))
+    nd = d + dt.timedelta(days=1)
+    rows.append([(f"◀ {dm(d - dt.timedelta(days=1))}", f"kdd:{(d - dt.timedelta(days=1)).isoformat()}"),
+                 (f"📅 {dm(d)}", f"kdd:{d.isoformat()}")]
+                + ([(f"{dm(nd)} ▶", f"kdd:{nd.isoformat()}")] if nd <= today(ctx) else []))
+    rows.append([(r.L("🏆 Reyting", "🏆 Рейтинг"), f"kg:{key}")] + ([("📄 PDF", f"kf:{key}")] if r.can("full") else []))
     if r.owner:                                              # 🎯 kassa bonuslari — alohida panel (egasi, 2026-11-04)
         rows.append([(r.L("🎯 Kassa bonuslari", "🎯 Бонусы за кассу"), f"kbn:{key}")])
     if key in ("tm", "lm"):                                  # 🗓 oy yakuni — oy tanlansa
@@ -296,8 +303,8 @@ async def day_show(ctx, r: Req):
     prev_d, next_d = d - dt.timedelta(days=1), d + dt.timedelta(days=1)
     rows = [[(f"◀ {dm(prev_d)}", f"kdd:{prev_d.isoformat()}")]
             + ([(f"{dm(next_d)} ▶", f"kdd:{next_d.isoformat()}")] if next_d <= today(ctx) else [])]
-    rows += grid(btn, 2)
-    extra = [(r.L("📜 Tarix", "📜 История"), f"kh:0:{day}")]
+    rows += grid(btn if r.can("full") else [], 2)
+    extra = [(r.L("📜 Tarix", "📜 История"), f"kh:0:{day}")] if r.can("full") else []
     if r.owner:
         if K.is_closed(ctx.db, day):
             extra.append((r.L("🔓 Kunni ochish", "🔓 Открыть день"), f"kco:{day}"))
@@ -1393,23 +1400,51 @@ async def who_worked(ctx, r: Req):
                                  "Касса и чеки остаются на аккаунте. Зп получает тот, кто работал (по своему проценту).")])), \
             kb(*grid(btn, 3), nav(r, f"po:{pid}"))
     day = r.args[1]
-    if len(r.args) == 3:
+    if len(r.args) >= 3:
         msg = locked(ctx, r, day)
         if msg:
             return msg
         who = int(r.args[2])
-        K.set_pay_day(db, pid, day, who or None)
-        await ui.toast(ctx.bot, r.chat_id, f"✅ {day[8:10]}.{day[5:7]}: " +
-                       (h(P.person(db, who)["name"]) if who else r.L("akkaunt egasi", "владелец аккаунта")))
-        r.args = ui.last_args(r, "po", str(pid)) or [str(pid)]      # kabinetga — «Orqaga» kun tanlashga qaytmaydi
-        from .panel_people import person_card
-        return await person_card(ctx, r)
-    btn = [(o["name"], f"kw:{pid}:{day}:{o['id']}") for o in K.kassa_people(db, kinds=("worker", "self"))
-           if o["id"] != pid]
+        wp = P.person(db, who) if who else None
+        if wp is not None and wp["kassa_kind"] == "partner" and len(r.args) == 3:
+            # 🤝 Artur o'zi ishladi — shu kun uchun uning foizi (egasi, 2026-11-12: «% belgilab qo'yaman»)
+            ui.ask(r, "who_pct", f"kw:{pid}:{day}", pid=pid, day=day, who=who)
+            btn = [(f"{x}%", f"kw:{pid}:{day}:{who}:{x}") for x in (30, 36, 40, 50)]
+            return title("🔁", f"{h(wp['name'])} · {day[8:10]}.{day[5:7]}",
+                         r.L("necha foiz? (yoki sonni yozing)", "сколько процентов? (или напишите число)")), \
+                kb(*grid(btn, 4), nav(r, f"kw:{pid}:{day}"))
+        return await _who_set(ctx, r, pid, day, who, float(r.args[3]) if len(r.args) > 3 else None)
+    btn = [(o["name"], f"kw:{pid}:{day}:{o['id']}") for o in K.kassa_people(db, kinds=("worker", "self", "partner"))
+           if o["id"] != pid and (o["kassa_kind"] != "partner" or r.owner)]
     if p["kassa_kind"] != "pool":
         btn.append((r.L("↩️ Akkaunt egasi", "↩️ Владелец аккаунта"), f"kw:{pid}:{day}:0"))
     return title("🔁", f"{h(p['name'])} · {day[8:10]}.{day[5:7]}", r.L("kim ishladi?", "кто работал?")), \
         kb(*grid(btn), nav(r, f"kw:{pid}"))
+
+
+async def _who_set(ctx, r: Req, pid: int, day: str, who: int, pct: float | None):
+    """«🔁 Kim ishladi» yozildi → kabinetga (o'sha davr bilan; «‹ Orqaga» kun tanlashga qaytmaydi)."""
+    db = ctx.db
+    ui.WAIT.pop(r.uid, None)
+    K.set_pay_day(db, pid, day, who or None, pct if who else None)
+    await ui.toast(ctx.bot, r.chat_id, f"✅ {day[8:10]}.{day[5:7]}: " +
+                   (h(P.person(db, who)["name"]) + (f" · {pct:g}%" if pct is not None else "") if who
+                    else r.L("akkaunt egasi", "владелец аккаунта")))
+    r.args = ui.last_args(r, "po", str(pid)) or [str(pid)]
+    from .panel_people import person_card
+    return await person_card(ctx, r)
+
+
+@on_input("who_pct", "owner")
+async def who_pct(ctx, r: Req, pid: int, day: str, who: int):
+    v = parse_number(r.text)
+    if v is None or not 0 < v <= 100:
+        return r.L("⚠️ 1 dan 100 gacha son yozing", "⚠️ Напишите число от 1 до 100")
+    msg = locked(ctx, r, day)
+    if msg:
+        ui.WAIT.pop(r.uid, None)
+        return msg
+    return await _who_set(ctx, r, pid, day, who, float(v))
 
 
 # ───────────────────────── zp o'tkazish (kunlik zp dan %)
