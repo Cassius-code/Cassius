@@ -46,6 +46,10 @@ W = {
                    "Отметить: 👥 Сотрудники → Артур (если нет — ➕ Новый сотрудник) → ⚙️ Настройки → 🏷 Тип → "
                    "🤝 Партнёр"),
     "no_partner_s": ("Artur hisobga kirmagan", "Артур не учтён"),
+    "no_partner_ok": ("Hamkor yo'q — kassa: xodimlar zp si va sizga", "Партнёра нет — касса: зп сотрудников и вам"),
+    "partner_until": ("Artur {} gacha hamkor edi — keyingi kunlar Artursiz", "Артур был партнёром до {} — дальше без него"),
+    "kb_out": ("kassa bonuslari (kassadan tashqari, ishlaganga)", "бонусы за кассу (сверх кассы, работавшему)"),
+    "kb_you": ("kassa bonusingiz", "ваш бонус за кассу"),
     "own_work": ("siz ishlagan", "вы работали"),
     "acct_of": ("akkauntida", "на аккаунте"), "stood_in": ("o'rniga ishlagan — unga o'tdi",
                                                          "работал(а) вместо — перешло ему"),
@@ -137,6 +141,10 @@ def adj_lines(r: dict, lang: str) -> list[str]:
         tot = r2(sum(x["usd"] for x in items))
         out.append(f"{sign} {w(title_w, lang).capitalize()}: <b>{money(tot)} $</b>")
         out += [f"   {adj_item(x, kind, lang)}" for x in items]
+    kbi = r.get("kb_items") or []
+    if kbi and r["kind"] != "partner":                # 🎯 papka kassa bonusi (o'sha kuni shu papkada ishlagan)
+        out.append(f"+ 🎯 {w('kbonus_pl', lang).capitalize()}: <b>{money(r['kbonus'])} $</b>")
+        out += [f"   {dshort(x['day'])} · {h(x['where'])} — {money(x['amount'])} $ <i>({num(x['raw'])})</i>" for x in kbi]
     moved = r.get("moved", [])
     if moved:
         to = ", ".join(sorted({h(x["to_name"]) for x in moved}))
@@ -155,6 +163,8 @@ def total_formula(r: dict, lang: str, share: float = 0.0) -> str:
                     (r["sin_sum"], "+"), (r["sout_sum"], "−")):
         if v:
             parts.append(f"{sign} {money(v)}")
+    if r.get("kbonus") and r.get("kind") != "partner":
+        parts.append(f"+ 🎯 {money(r['kbonus'])}")
     head = f"{' '.join(parts)} = " if len(parts) > 1 else ""
     return f"= {head}<b>{money((r['total'] or 0.0) + share)} $</b>"
 
@@ -372,8 +382,8 @@ def owner_card(b: dict, lang: str) -> str:
     ptag = f" {pct(o['partner_pct'])}" if o["partner_pct"] is not None else ""
     lines = [f"<b>💼 {w('you', lang)}</b> · <i>{w('only_you', lang)}</i>",
              f"{w('kassa', lang)}: <b>{num(b['raw'])}</b> → {money(o['K'])} $ <i>({w('by_price', lang)})</i>"]
-    if o["partner_id"] is None:                     # hamkor yo'q: «Artur 50%: 0 $» deb chalg'itmaymiz
-        lines.append(f"⚠️ {w('no_partner', lang)}")
+    if o["partner_id"] is None:                     # hamkor yo'q (egasi, 2026-11-17: «endi Artur yo'q») — ⚠️ emas
+        lines.append(f"🤝 {w('no_partner_ok', lang)}")
     else:
         pw = o.get("partner_work", 0.0)             # 🤝 o'zi ishlagan kunlar (🔁 Kim ishladi)
         lines.append(f"− {w('partner', lang)}{ptag}: {money(o['partner_share'])}"
@@ -397,7 +407,15 @@ def owner_card(b: dict, lang: str) -> str:
         lines.append(f"+ {w('share_s', lang)} {money(o['sin_self'])} $")
     if o.get("sout_self"):
         lines.append(f"− {w('share_s', lang)} {money(o['sout_self'])} $")
+    if o.get("self_kbonus"):                         # 🎯 o'zingiz ishlagan papka bonusi (kassadan tashqari)
+        lines.append(f"+ 🎯 {w('kb_you', lang)} {money(o['self_kbonus'])} $")
     lines.append(f"= <b>{w('income', lang)}: {money(o['income'])} $</b>")
+    if o.get("partner_until") and o["partner_id"] is not None:
+        u = o["partner_until"]
+        lines.append(f"<i>{w('partner_until', lang).format(f'{u[8:10]}.{u[5:7]}')}</i>")
+    kbs = [(b["names"].get(pid, "?"), r["kbonus"]) for pid, r in b["rows"].items() if r["kind"] != "partner" and r["kbonus"]]
+    if kbs:                                          # 🎯 Artur yo'q kunlar: kim ishlagan bo'lsa — o'shanga
+        lines.append(f"🎯 {w('kb_out', lang)}: " + " · ".join(f"{h(n_)} {money(v)} $" for n_, v in kbs))
     if o.get("kbonus") and o["partner_id"] is not None:   # 🎯 kassadan tashqari — Arturga (daromadingiz o'zgarmaydi)
         per: dict = {}                                       # har RD bo'yicha (raqamsiz hisobot — akkaunt nomi)
         for x in o["kbonus_items"]:
@@ -433,7 +451,8 @@ def balance_lines(b: dict, lang: str) -> list[str]:
     """🧮 Kassa = Artur (jarima/bonus bilan) + xodimlar (zp, bonus, jarima bilan) + ulushlar + sizga — pul to'liq
     taqsimlanganini tekshirish (faqat egaga)."""
     o = b["owner"]
-    mine = r2(o["income"] + o["out_self"] - o["in_self"] - o.get("sin_self", 0.0) + o.get("sout_self", 0.0))
+    mine = r2(o["income"] + o["out_self"] - o["in_self"] - o.get("sin_self", 0.0) + o.get("sout_self", 0.0)
+              - o.get("self_kbonus", 0.0))           # 🎯 kassa bonusingiz kassadan tashqari
     has_p = o["partner_id"] is not None
     art = r2(o["partner_share"] + o["pf"] - o["pb"] + o.get("partner_work", 0.0)) if has_p else 0.0
     shares = r2(o["owner_paid"] + o["partner_paid"])
@@ -444,7 +463,7 @@ def balance_lines(b: dict, lang: str) -> list[str]:
     if shares:
         parts.append(f"{w('share_s', lang)} {money(shares)}")
     parts.append(f"{w('to_you', lang)} {money(mine)}")
-    issues = [f"⚠️ {w('no_partner_s', lang)}"] if o["partner_id"] is None else []
+    issues = []                                       # Artur yo'q — oddiy holat (2026-11-17), ⚠️ emas
     noprice = sum(r["noprice"] for r in b["rows"].values())
     unassigned = sum(r["unassigned"] for r in b["rows"].values())
     if noprice:
@@ -543,6 +562,9 @@ def worker_message(r: dict, s: dt.date, e: dt.date, extra: str = "") -> str:
             continue
         lines.append(f"{w(title_w, 'ru').capitalize()}: {sign}{money(r2(sum(x['usd'] for x in items)))} $")
         lines += [f"  {adj_item(x, kind, 'ru', html=False)}" for x in items]
+    if r.get("kb_items"):                              # 🎯 бонус за кассу папки (кто работал)
+        lines.append(f"Бонус за кассу: +{money(r['kbonus'])} $")
+        lines += [f"  {dshort(x['day'])} · {x['where']} — {money(x['amount'])} $" for x in r["kb_items"]]
     if r["zp_on"]:
         for o in r["outs"]:
             lines.append(f"Перенос: −{money(o['amount'])} $ ({dshort(o['day'])})")

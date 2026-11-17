@@ -44,11 +44,10 @@ async def people_list(ctx, r: Req):
         tag = f" · {folders}" if folders else ""
         btn.append((f"{KIND_ICON.get(p['kassa_kind'], '👤')} {p['name']}{tag}"[:40], f"po:{p['id']}"))
     rows = grid(btn)
-    if r.owner and not archived:                       # 🤝 Artur — botga ulash: alohida tugma (egasi, 2026-11-12)
-        pr = partner_rec(db)
-        rows.append([(f"🤝 {pr['name']} · ✅ {r.L('botda', 'в боте')}" if pr is not None and pr["tg_id"] else
-                      f"🤝 {pr['name'] if pr is not None else 'Artur'} — {r.L('botga ulash', 'подключить к боту')}",
-                      "pal")])
+    pr = partner_rec(db) if r.owner and not archived else None
+    if pr is not None:                                 # 🤝 Artur — botga ulash (faqat Artur bor bo'lsa; 2026-11-17)
+        rows.append([(f"🤝 {pr['name']} · ✅ {r.L('botda', 'в боте')}" if pr["tg_id"] else
+                      f"🤝 {pr['name']} — {r.L('botga ulash', 'подключить к боту')}", "pal")])
     tw = P.twins(db) if not archived and r.can("full") else []
     if tw:
         rows.insert(0, [(r.L(f"🔗 Bitta odamning 2 yozuvi: {len(tw)}", f"🔗 Две записи одного человека: {len(tw)}"),
@@ -320,7 +319,8 @@ async def person_card(ctx, r: Req):
         b = K.calc(db, s, e)
         text = owner_cabinet(b, s, e, r.lang, b["rows"].get(pid), zst)
         rows = grid([(r.L("📅 Davr", "📅 Период"), f"pp:{pid}"), (r.L("🧾 Cheklar", "🧾 Чеки"), f"kx:{pid}"),
-                     (r.L("⚠️ Jarima / bonus", "⚠️ Штраф / бонус"), f"pa:{pid}"),
+                     (r.L("🔁 Kim ishladi", "🔁 Кто работал"), f"kw:{pid}"),       # dam olgan kuni akkauntingizda
+                     (r.L("⚠️ Jarima / bonus", "⚠️ Штраф / бонус"), f"pa:{pid}"),   # kim ishlagan (2026-11-12)
                      (r.L("⚙️ Sozlamalar", "⚙️ Настройки"), f"ps:{pid}")])
         rows.append(nav(r, "p"))
         return text, kb(*rows)
@@ -383,6 +383,8 @@ async def person_card(ctx, r: Req):
                          + ([(r.L("✅ Oylik berildi", "✅ Зп выдана"), f"ppd:{pid}:{key}")] if r.owner else []))
         if r.owner and p["kassa_kind"] == "worker":      # egasi o'zini xodimlar orasida belgilaydi (2026-11-02)
             rows.append([(r.L("👑 Bu menman", "👑 Это я"), f"pme:{pid}")])
+        if r.owner and p["kassa_kind"] == "partner" and p["active"]:   # 🚪 Artur endi yo'q (2026-11-17)
+            rows.append([(r.L(f"🚪 {p['name']} endi yo'q", f"🚪 {p['name']} больше нет"), f"pend:{pid}")])
         rows.append([(r.L("⚙️ Sozlamalar", "⚙️ Настройки"), f"ps:{pid}")])
     else:
         rows.append([(r.L("📅 Davr", "📅 Период"), f"pp:{pid}")])
@@ -715,7 +717,45 @@ async def toggle_attend(ctx, r: Req):
 async def toggle_active(ctx, r: Req):
     p = must(P.person(ctx.db, int(r.args[0])))
     P.update_person(ctx.db, p["id"], active=0 if p["active"] else 1)
+    if p["kassa_kind"] == "partner" and not p["active"]:
+        ctx.db.set("partner_until", "")                # ♻️ Artur qaytdi — yana hamkor (tugash sanasi yo'q)
     return await person_settings(ctx, r)
+
+
+@screen("pend", "owner")
+async def partner_end(ctx, r: Req):
+    """🚪 Artur endi yo'q (egasi, 2026-11-17: «endi bizda Artur yo'q — men va bitta odam»): tanlangan kundan Artur
+    ulushi yo'q (qolgani sizga), papka kassa bonusi — o'sha kuni shu papkada ishlaganga, Artur botga kira olmaydi.
+    O'tgan kunlar o'zgarmaydi (Artur o'sha kungacha hisoblanadi)."""
+    db = ctx.db
+    pid = int(r.args[0])
+    p = must(P.person(db, pid))
+    t = today(ctx)
+    mon = K.week_start(t)
+    if len(r.args) > 1:
+        start = dt.date.fromisoformat(r.args[1])
+        db.set("partner_until", (start - dt.timedelta(days=1)).isoformat())
+        P.update_person(db, pid, active=0)             # 🗄 arxivga: botga kira olmaydi, ro'yxatda ko'rinmaydi
+        await ui.toast(ctx.bot, r.chat_id, r.L(f"✅ {p['name']} {start:%d.%m} dan yo'q", f"✅ {p['name']} нет с {start:%d.%m}"), 8)
+        r.args = []
+        ui.view(r, "p")
+        return await people_list(ctx, r)
+    opts = [(mon, r.L("Shu hafta dushanbasidan", "С понедельника этой недели")), (t, r.L("Bugundan", "С сегодня")),
+            (mon - dt.timedelta(days=7), r.L("O'tgan hafta dushanbasidan", "С понедельника прошлой недели"))]
+    seen, btn = set(), []
+    for d_, label_ in opts:
+        if d_ not in seen:
+            seen.add(d_)
+            btn.append([(f"{label_} · {d_:%d.%m}", f"pend:{pid}:{d_.isoformat()}")])
+    nm = h(p["name"])
+    lines = [r.L(f"Qaysi kundan boshlab {nm} yo'q?", f"С какого дня {nm} нет?"),
+             r.L("Shu kundan: Artur ulushi yo'q — kassa xodimlar zp si va sizga; 🎯 papka kassa bonusi — o'sha kuni shu "
+                 "papkada ishlagan odamga; Artur botga kira olmaydi. O'tgan kunlar o'zgarmaydi. Qaytarish: 🗄 Arxiv → "
+                 f"{nm} → ♻️ Qaytarish.",
+                 "С этого дня: доли Артура нет — касса: зп сотрудников и вам; 🎯 бонус за кассу папки — тому, кто в тот "
+                 "день работал в этой папке; Артур не заходит в бот. Прошлые дни не меняются. Вернуть: 🗄 Архив → "
+                 f"{nm} → ♻️ Вернуть.")]
+    return ui.join(title("🚪", nm, r.L("endi yo'q", "больше нет")), "", card(lines)), kb(*btn, nav(r, f"po:{pid}"))
 
 
 @screen("psx", "full")
@@ -822,6 +862,15 @@ async def make_owner(ctx, r: Req):
     me = db.one("SELECT * FROM people WHERE kassa_kind='self' AND active=1 AND id<>? ORDER BY id LIMIT 1", (pid,))
     nm = h(x["name"])
     who = f"@{h(x['username'])}" if x["username"] else (f"🆔 {x['tg_id']}" if x["tg_id"] else "")
+    if me is not None and x["kassa_kind"] in ("worker", "partner", "pool"):
+        # kassa yozuvi (xodim / Artur / umumiy akkaunt) «siz»ga qo'shilib ketmasin — yangi akkaunt uchun alohida yozuv
+        return ui.join(title("👑", nm, r.L("ega", "владелец")), "", card([r.L(
+            f"«{nm}» — kassa yozuvi ({kind_name(r, x['kassa_kind'])}). Uni «{h(me['name'])}» (siz) ga qo'shib bo'lmaydi. "
+            f"Yangi akkauntingiz uchun: 👥 Xodimlar → ➕ Yangi xodim → <code>Ism @username</code> → ⚙️ → 🏷 Turi → 👑 Ega. "
+            f"Yoki ⚙️ → 👮 Adminlar → ➕.",
+            f"«{nm}» — запись кассы ({kind_name(r, x['kassa_kind'])}). Её нельзя присоединить к «{h(me['name'])}» (вы). "
+            f"Для нового аккаунта: 👥 Сотрудники → ➕ Новый → <code>Имя @username</code> → ⚙️ → 🏷 Тип → 👑. "
+            f"Или ⚙️ → 👮 Админы → ➕.")])), kb(nav(r, f"psk:{pid}"))
     if not x["username"] and not x["tg_id"]:
         return ui.join(title("👑", nm, r.L("ega", "владелец")), "", card([r.L(
             "Avval shu akkauntning @username ini yozing — bot uni ega qiladi.",

@@ -274,11 +274,15 @@ def day_text(ctx, r: Req, day: str) -> tuple[str, list]:
                            f"<b>{money(tzp)} $</b>{est}"]))
     else:
         parts.append(r.L("<i>Bu kunda chek yo'q.</i>", "<i>За этот день чеков нет.</i>"))
-    if r.owner:                                            # 🎯 kassa bonusi (Arturga) — shu kun, har RD
+    if r.owner:                                            # 🎯 kassa bonusi — shu kun, har RD (kimga — ham)
         names = b["names"]
-        kb_ = [V.bonus_line(x, names, r.lang) for x in K.bonus_groups(db, day, day) if x["kassa"] or x["checks"]]
+        to_p = K.partner_on(db, day)
+        kb_ = [V.bonus_line(x, names, r.lang) + ("" if to_p else f" → <b>{h(K.bonus_to(db, x, names))}</b>")
+               for x in K.bonus_groups(db, day, day) if x["kassa"] or x["checks"]]
         if kb_:
-            parts.append(card([f"<b>🎯 {r.L('Kassa bonusi (Artur)', 'Бонус за кассу (Артур)')}</b>"] + kb_))
+            head = r.L("Kassa bonusi (Artur)", "Бонус за кассу (Артур)") if to_p else \
+                r.L("Kassa bonusi (papkada ishlaganga)", "Бонус за кассу (кто работал в папке)")
+            parts.append(card([f"<b>🎯 {head}</b>"] + kb_))
     if r.owner and blocks and zst["ready"]:
         parts.append(card(balance_lines(b, r.lang)))
     info = []
@@ -541,8 +545,9 @@ async def bonus_panel(ctx, r: Req):
         await ctx.notifier.send_document(r.chat_id, data, f"bonus_{s.isoformat()}_{e.isoformat()}.pdf",
                                          f"🎯 {plabel(s, e)}")
         return None
-    lines = [bonus_line(x, names, r.lang) for x in items] or [r.L("<i>Bu davrda bonus yo'q.</i>",
-                                                                  "<i>За период бонусов нет.</i>")]
+    all_p = all(K.partner_on(ctx.db, x["day"]) for x in items)       # hammasi Artur bor kunlarda
+    lines = [bonus_line(x, names, r.lang) + ("" if all_p else f" → <b>{h(K.bonus_to(ctx.db, x, names))}</b>")
+             for x in items] or [r.L("<i>Bu davrda bonus yo'q.</i>", "<i>За период бонусов нет.</i>")]
     total = sum(x["kassa"] + x["checks"] for x in items)
     opts = [(r.L("Bugun", "Сегодня"), "td"), (r.L("Kecha", "Вчера"), "yd"), (r.L("Bu hafta", "Эта неделя"), "tw"),
             (r.L("O'tgan hafta", "Прошлая неделя"), "lw"), (r.L("Bu oy", "Этот месяц"), "tm"),
@@ -551,7 +556,8 @@ async def bonus_panel(ctx, r: Req):
     rows.append([("📄 PDF", f"kbn:{key}:pdf")])
     rows.append(nav(r, f"kr:{key}"))
     return ui.join(title("🎯", r.L("KASSA BONUSLARI", "БОНУСЫ ЗА КАССУ"), plabel(s, e)), "", card(lines),
-                   card([r.L(f"Jami: <b>{money(total)} $</b> → Arturga", f"Итого: <b>{money(total)} $</b> → Артуру")]),
+                   card([r.L(f"Jami: <b>{money(total)} $</b>" + (" → Arturga" if all_p and items else ""),
+                             f"Итого: <b>{money(total)} $</b>" + (" → Артуру" if all_p and items else ""))]),
                    f"<i>{bonus_rule(ctx, r)}</i>"), kb(*rows)
 
 

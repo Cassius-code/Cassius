@@ -90,7 +90,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   ⚪ hali kelmagan · 🛌 dam olishda; ⏱ uning RD sida javob kutayotgan lidlar (🔴 — zaderjka); ✍️ lidga oxirgi
   yozgani; 🚨 bugungi «задержка»lar.
 - **📅 Bugun kim qayerda** (bosh menyu yoki 👥 Xodimlar). Har RD da bugun bitta xodim. «🛌 Kim ishlamaydi» (shu kunga) va
-  bo'sh qolgan RD ga boshqa xodimni qo'yish. Belgilash, jarima, eslatmalar shu ro'yxat
+  bo'sh qolgan RD ga boshqa xodimni qo'yish. 👑 Siz ham shu ro'yxatda (dam olsangiz — belgilaysiz); RD ingiz belgilanmagan
+  bo'lsa, ekranda qayerdan belgilash yozilgan (👥 Xodimlar → siz → ⚙️ → 📁 Papkalar). Belgilash, jarima, eslatmalar shu ro'yxat
   bo'yicha. Bo'sh qolgan RD menyudagi «📅 Bugun kim qayerda» tugmasida ❗ bilan ko'rinadi.
 - **🏆 Haftalik ball** (👥 Xodimlar → 🏆). Har xodimga 0–100: ⚡ tezlik · 🚨 zaderjka · 💳 karta · 🕘 intizom (har
   biri 25). 🔥 — ketma-ket zaderjkasiz ish kunlari, bir qator maslahat. Haftada 20 tadan kam javob — ball yo'q.
@@ -124,11 +125,19 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     bilan — egasi, 2026-11-12: «ha, ko'rinsin»).
     Daromadingiz va pul amallari — faqat sizda. Boshqa adminlar sizni ko'rmaydi. (Artur admin bo'lsa ham —
     ⚙️ → 👮 Adminlar — avvalgidek ishlaydi.)
+  - **🚪 Artur endi yo'q** (egasi, 2026-11-17: «men va bitta odam, 2 papka»): 👥 Xodimlar → Artur → «🚪 Artur endi
+    yo'q» → qaysi kundan (shu hafta dushanbasidan / bugundan / o'tgan hafta dushanbasidan). O'sha kundan: Artur ulushi
+    yo'q — kassa xodimlar zp si va sizga; 🎯 papka bonusi — ishlaganga; sizning o'z ishingiz 100% (`× 100%`); 💼 kartada
+    «🤝 Hamkor yo'q» (⚠️ emas); Artur arxivga o'tadi va botga kira olmaydi; uning tugmalari yo'qoladi. **O'tgan kunlar
+    o'zgarmaydi** — Artur o'sha kungacha hisoblanadi. Qaytarish: 🗄 Arxiv → Artur → ♻️ Qaytarish. Ikkinchi odam o'z
+    kassasini to'liq olsa — uning 💯 Foizi → 100.
   - **🤝 Artur o'zi ishlagan kun** — 🔁 Kim ishladi → kun → pastdagi alohida **«🤝 Artur ishladi (foiz bilan)»**
     tugmasi (xodimlar orasida emas; faqat sizga) → foiz (30 / 36 / 40 / 50 yoki o'zingiz yozasiz). O'sha kungi cheklar × shu foiz Artur jamisiga qo'shiladi: «− Artur: … + o'zi ishlagan 8 $».
     🧮 Tekshiruv ✅ bo'lib qoladi (pul yo'qolmaydi).
   - **💼 Siz kartasi:** Kassa − Artur (ulushi + jarimalar − bonuslar) − Xodimlar zp si (zp + bonuslar − jarimalar)
-    = Daromadingiz. Xodim akkauntida o'zingiz ham ishlagan bo'lsangiz — o'sha qismdan sizga o'z foizingiz (masalan
+    = Daromadingiz. O'z akkauntingizda siz ishlagan qismdan ham o'z foizingiz olinadi, qolgani Arturga (egasi,
+    2026-11-12: «bu hafta yaxshi ishlayapman — foizimni oshirdim»; oldin u yerda 50/50 bo'linardi). 👑 Kabinetingizda
+    ham «🔁 Kim ishladi» bor — dam olgan kuningiz akkauntingizda kim ishlaganini belgilaysiz. Xodim akkauntida o'zingiz ham ishlagan bo'lsangiz — o'sha qismdan sizga o'z foizingiz (masalan
     50%), qolgani Arturga; «siz %» (masalan 14%) faqat xodimning o'zi ishlagan qismidan olinadi. Masalan: Bayzed
     621 $, siz ishlagan 372 $ → 372 × 50% + (621 − 372) × 14% = 186 + 34.86 = 220.86 $. Akkauntda o'rniga boshqa
     xodim ishlagan bo'lsa — o'sha qismdan «siz %» ishlagan xodimning o'z foizi: Adam o'rniga Cred ishlasa — 125 × 20%
@@ -204,7 +213,11 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     o'zbekcha bo'lsa ham):
     `Adam` / `Дата: 19.10` / `Касса: 17,100` / `Кол-во рд: 8` / `Касса ($): 64$`. Shu kunga yana hisobot kelsa —
     eskisi o'chadi, kunning jami bilan yangisi keladi.
-  - **🎯 Kassa bonusi — Arturniki, har RD papka × kun alohida.** Bir RD ning bir kunlik kassasi 20 000 va undan
+  - **🎯 Kassa bonusi — har RD papka × kun alohida.** Artur bor kunlarda — Arturniki (pastda). **Artur yo'q kunlarda —
+    o'sha kuni shu papkada ishlagan odamniki** (egasi, 2026-11-17): xodimning zp jamisiga qo'shiladi («+ 🎯 Kassa
+    bonuslari: 20 $ · 16.11 · RD 3 — 20 $», xodimga xabarda «Бонус за кассу: +20 $»), sizniki — daromadingizga
+    («+ 🎯 kassa bonusingiz 20 $»). Kassadan tashqari pul: 🧮 Tekshiruvga kirmaydi. Panelda va 📅 Kunda har bonus
+    yonida kimga ketgani: «→ Cred». Bir RD ning bir kunlik kassasi 20 000 va undan
     ko'p — 20 $, 27 000 va undan ko'p — 30 $ (20 o'rniga); 11 va undan ko'p chek — yana 15 $. Cred bugun o'z RD
     si va Lazarus o'rniga RD 8 da ishlasa — ikkala RD ning kassasi qo'shilmaydi, har biri o'zicha. RD — achotdagi
     `Rd3 04.11` dan (bot har chekda saqlaydi); RD raqami yo'q eski hisobot — akkaunt bo'yicha. Sizga keladigan xulosada:
@@ -271,7 +284,8 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
     ham). Chek 🚫/✅ qilinsa — darhol yangilanadi.
   - **📅 Sana xatosi.** Hisobotda bitta chek boshqa (eski) sanada bo'lsa yoki hamma cheklar eski sanada bo'lsa —
     bot yozishdan oldin so'raydi: «1 950 — 25.10 ga yozilgan, qolgan cheklar esa 29.10. Xato emasmi?».
-  - Hisobot qabul qilinsa «Проёб»da: «✅ Baxa · 29.10 · 3 чека · 8 550».
+  - Hisobot qabul qilinsa «Проёб»da hisobotga reply: «✅ Baxa · 29.10 · 3 чека · 8 550» — bu xabar endi o'chmaydi
+    (🧹 tozalash unga tegmaydi; egasi, 2026-11-17).
   - **💵 Faqat zp** admini (⚙️ → 👮 Adminlar): faqat jami kassa, jami zp va har xodimning kassa / $ / zp si.
     Foizlar, PDF, o'zgartirish, sizning va Arturning ulushi — ko'rinmaydi.
 - **📣 Push.** Har papka o'z akkauntidan, faqat qo'lda: «🌅 Ertalabki» yoki «☀️ Kunduzgi» tugmasi (soatga

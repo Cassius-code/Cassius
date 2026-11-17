@@ -144,7 +144,7 @@ def bonus_pdf(items: list[dict], names: dict, s: dt.date, e: dt.date, lang: str)
     from reportlab.platypus import SimpleDocTemplate, Spacer
     st = _styles()
     L = (lambda uz, ru: ru if lang == "ru" else uz)
-    story = [_p(L("Kassa bonuslari (Arturga)", "Бонусы за кассу (Артуру)"), st["h"]), _p(V.label(s, e), st["sub"]),
+    story = [_p(L("Kassa bonuslari", "Бонусы за кассу"), st["h"]), _p(V.label(s, e), st["sub"]),
              Spacer(1, 10)]
     head = [L("Kun", "День"), "RD", L("Kassa", "Касса"), L("RD soni", "Кол-во рд"), L("Kassa uchun", "За кассу"),
             L("Chek uchun", "За чеки"), L("Jami", "Итого")]

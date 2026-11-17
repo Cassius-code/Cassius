@@ -28,8 +28,9 @@ def _day_name(r: Req, d: dt.date, off: int) -> str:
 
 
 def _candidates(db) -> list:
-    """RD ga qo'yish mumkin bo'lganlar: faol, ega/hamkor emas."""
-    return [p for p in P.people(db) if p["kassa_kind"] not in ("self", "partner", "pool")]
+    """RD ga qo'yish mumkin bo'lganlar: faol, hamkor / umumiy akkaunt emas. Ega (👑) ham — u ham ishlaydi va dam oladi
+    (egasi, 2026-11-12: «manam odamman, dam olib turaman»)."""
+    return [p for p in P.people(db) if p["kassa_kind"] not in ("partner", "pool")]
 
 
 @screen("rt", "view")
@@ -133,6 +134,12 @@ async def roster_off(ctx, r: Req):
                  "xodim sozlamalarida (🛌).",
                  "Нажмите: ▫️ работает → 🛌 не работает (и обратно). Только на этот день. Постоянные выходные — в "
                  "настройках сотрудника (🛌).")]
+    me = next((p for p in P.people(db) if p["kassa_kind"] == "self"), None)
+    if r.owner and me is not None and not P.person_folders(db, me["id"]) and not R.person_rds(db, me["id"], d):
+        lines.append(r.L(f"👑 {h(me['name'])} (siz) bu ro'yxatda yo'q — RD ingiz belgilanmagan: 👥 Xodimlar → "
+                         f"{h(me['name'])} → ⚙️ → 📁 Papkalar.",
+                         f"👑 {h(me['name'])} (вы) нет в списке — ваш RD не указан: 👥 Сотрудники → "
+                         f"{h(me['name'])} → ⚙️ → 📁 Папки."))
     if empty:
         lines.append(r.L("❗ Hech kim yo'q: ", "❗ Никого: ") + ", ".join(h(f["name"]) for f in empty) +
                      r.L(" — RD ni bosib, kim qarashini tanlang.", " — нажмите RD и выберите, кто смотрит."))

@@ -1129,20 +1129,42 @@ def bonus_groups(db: Database, start, end) -> list[dict]:
     ikkalasining kassasi qo'shilmaydi). RD raqami hisobotdagi «Rd3 04.11» dan; raqamsiz hisobot — akkaunt bo'yicha.
     -> [{day, rd, acct, accts, raw, n, kassa, checks}] (bonussizlari ham)."""
     grp: dict = {}
-    for c in db.all("SELECT ch.rd, ch.amount, ch.rd_no, r.person_id acct FROM checks ch JOIN reports r "
-                    "ON r.id=ch.report_id WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? "
+    for c in db.all("SELECT ch.rd, ch.amount, ch.rd_no, ch.pay, r.person_id acct, p.kassa_kind kind FROM checks ch "
+                    "JOIN reports r ON r.id=ch.report_id LEFT JOIN people p ON p.id=r.person_id "
+                    "WHERE r.status='done' AND ch.skip=0 AND ch.rd BETWEEN ? AND ? "
                     "AND r.person_id IS NOT NULL", (iso(start), iso(end))):
         key = (c["rd"], f"rd{c['rd_no']}" if c["rd_no"] else f"a{c['acct']}")
         g = grp.setdefault(key, {"day": c["rd"], "rd": c["rd_no"], "acct": None if c["rd_no"] else c["acct"],
-                                 "raw": 0, "n": 0, "accts": set()})
+                                 "raw": 0, "n": 0, "accts": set(), "who": {}})
         g["raw"] += int(c["amount"])
         g["n"] += 1
         g["accts"].add(c["acct"])
+        who = c["pay"] or (None if c["kind"] == "pool" else c["acct"])      # shu chekni kim ishlagan
+        if who:
+            g["who"][who] = g["who"].get(who, 0) + int(c["amount"])
     out = []
     for g in grp.values():
         kb, cb = day_bonus(db, g["raw"], g["n"])
         out.append({**g, "accts": sorted(g["accts"]), "kassa": kb, "checks": cb})
     return sorted(out, key=lambda x: (x["day"], int(x["rd"]) if x["rd"] else 99, x["acct"] or 0))
+
+
+def partner_on(db: Database, day) -> bool:
+    """🤝 Shu kuni Artur (hamkor) bormi: yozuvi faol (yoki arxivda, lekin «… gacha» belgilangan) va kun o'sha sanadan
+    keyin emas (egasi, 2026-11-17: «endi Artur yo'q»)."""
+    until = db.get("partner_until") or ""
+    p = db.one("SELECT active FROM people WHERE kassa_kind='partner' ORDER BY active DESC, id LIMIT 1")
+    if p is None or (not p["active"] and not until):
+        return False
+    return not until or iso(day) <= until
+
+
+def bonus_to(db: Database, g: dict, names: dict) -> str:
+    """🎯 Bu bonus kimga: Artur bor kun — Artur; yo'q kun — o'sha papkada ishlagan(lar)."""
+    if partner_on(db, g["day"]):
+        p = db.one("SELECT name FROM people WHERE kassa_kind='partner' ORDER BY active DESC, id LIMIT 1")
+        return p["name"] if p else "Artur"
+    return ", ".join(names.get(w_, "?") for w_ in sorted(g.get("who") or {}, key=lambda k: -g["who"][k])) or "—"
 
 
 def day_bonus(db: Database, raw: int, n: int) -> tuple[float, float]:
@@ -1281,7 +1303,8 @@ def _row(p) -> dict:
             "outs": [], "ins": [], "tr_out": 0.0, "tr_in": 0.0,
             "sin": [], "sout": [], "sin_sum": 0.0, "sout_sum": 0.0,
             "total": None, "share_part": 0.0, "pf": 0.0, "pb": 0.0,
-            "work_zp": 0.0}                  # 🤝 Artur o'zi ishlagan kunlar uchun (o'z foizi bilan)
+            "work_zp": 0.0,                  # 🤝 Artur o'zi ishlagan kunlar uchun (o'z foizi bilan)
+            "kbonus": 0.0, "kb_items": []}   # 🎯 kassa bonusi — Artur yo'q kunlarda o'sha papkada ishlaganga
 
 
 def calc(db: Database, start: dt.date, end: dt.date) -> dict:
@@ -1299,6 +1322,15 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     ps = {p["id"]: p for p in db.all("SELECT * FROM people")}
     rows = {pid: _row(p) for pid, p in ps.items() if p["kassa_kind"]}
     partner = next((p for p in ps.values() if p["kassa_kind"] == "partner" and p["active"]), None)
+    # 🤝 Artur shu kungacha hamkor (egasi, 2026-11-17: «endi Artur yo'q — men va bitta odam»): keyingi kunlarda —
+    # hamkorsiz (o'tgan kunlar o'zgarmaydi; arxivdagi Artur o'sha kunlar uchun hisoblanadi)
+    p_until = db.get("partner_until") or ""
+    if partner is None and p_until:
+        partner = next((p for p in ps.values() if p["kassa_kind"] == "partner"), None)
+
+    def p_on(day: str) -> bool:
+        return partner is not None and (not p_until or day <= p_until)
+    p_any = partner is not None and (not p_until or s <= p_until)      # shu davrda Artur bo'lgan kun bormi
     pct_cache: dict = {}
     op_cache: dict = {}
 
@@ -1346,7 +1378,7 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         payee = c["pay"] or (None if a["kind"] == "pool" else c["acct"])
         # 📈 egasi ulushi (egasi, 2026-11-12: «Cred 288 × 20% = …»): boshqalar ishlagan chekdan — «siz %»; o'rniga
         # boshqa xodim ishlagan bo'lsa — o'sha xodimning o'z akkauntidagi foizi (op_fix bilan bir xil)
-        if payee is None or payee not in rows or rows[payee]["kind"] != "self":
+        if p_on(d) and (payee is None or payee not in rows or rows[payee]["kind"] != "self"):
             oa = opct(c["acct"], d)
             ow = opct(payee, d) if payee in rows and payee != c["acct"] and a["kind"] != "pool" else None
             use = ow if (ow is not None and oa is not None) else oa
@@ -1361,6 +1393,8 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         pr = rows[payee]
         # 🤝 Artur o'zi ishlagan kun — «🔁 Kim ishladi» da yozilgan foizi (uning ulush foizi emas)
         pp = (c["pay_pct"] or 0.0) if pr["kind"] == "partner" else pct(payee, d)
+        if pr["kind"] == "self" and not p_on(d):
+            pp = 100.0                                 # 👑 hamkorsiz kun: o'zingiz ishlagani — to'liq sizniki
         key = (c["acct"], pp)
         pr["earn"][key] = pr["earn"].get(key, 0.0) + usd
         z = usd * pp / 100
@@ -1393,10 +1427,25 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         elif r["kind"] == "partner":
             r["work_zp"] = r2(sum(u * p / 100 for (_acct, p), u in r["earn"].items()))
 
-    # 🎯 kunlik kassa bonuslari (har RD papka × kun alohida) — Arturga
-    kb_items = [g for g in bonus_groups(db, start, end) if (g["kassa"] or g["checks"]) and
-                any(a in rows for a in g["accts"])]
+    # 🎯 kunlik kassa bonuslari (har RD papka × kun alohida): Artur bor kunlar — Arturga; Artur yo'q kunlar — o'sha
+    # papkada ishlagan odamga (egasi, 2026-11-17: «har papkadagi bonuslar shu ishlayotgan odamga»)
+    kb_all = [g for g in bonus_groups(db, start, end) if (g["kassa"] or g["checks"]) and
+              any(a in rows for a in g["accts"])]
+    kb_items = [g for g in kb_all if p_on(g["day"])]
     kbonus = r2(sum(x["kassa"] + x["checks"] for x in kb_items)) if partner is not None else 0.0
+    for g in kb_all:
+        if p_on(g["day"]) or not g["raw"]:
+            continue
+        amt = g["kassa"] + g["checks"]
+        where = f"RD {g['rd']}" if g["rd"] else (ps[g["acct"]]["name"] if g["acct"] in ps else "?")
+        for who, raw in g["who"].items():
+            if who in rows and rows[who]["kind"] in PAYABLE:
+                v = amt * raw / g["raw"]
+                rows[who]["kbonus"] += v
+                rows[who]["kb_items"].append({"day": g["day"], "where": where, "raw": g["raw"], "n": g["n"],
+                                              "amount": r2(v)})
+    for r in rows.values():
+        r["kbonus"] = r2(r["kbonus"])
 
     # jarima / bonus / avans
     rd_of: dict = {}                 # odam (akkaunt) -> papkalari (RD): «RD 7, RD 9» — hisobda qaysi papkadan ekani
@@ -1472,11 +1521,19 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
         u = acct_usd_day.get((acct, d), 0.0)
         z = zp_ad.get((acct, d), zero)
         sh = share_ad.get((acct, d), {"owner": 0.0, "partner": 0.0})
+        if not p_on(d) and sh["partner"]:              # Artur yo'q kun — u to'laydigan ulushni siz to'laysiz
+            sh = {"owner": sh["owner"] + sh["partner"], "partner": 0.0}
         op = opct(acct, d)
-        if partner is None:
+        if not p_on(d):
             art = 0.0
         elif op is None:
-            art = u * pct(partner["id"], d) / 100
+            # 👑 siz o'zingiz ishlagan qism — o'z foizingiz bilan, qolgani Arturga (split dagidek); boshqalar ishlagani —
+            # eski usulda (Artur 50%). Egasi, 2026-11-12: «bu hafta yaxshi ishlayapman — foizimni oshirdim» — oldin o'z
+            # akkauntingiz ham 50/50 bo'linardi, oshirilgan foiz pulga ta'sir qilmasdi. Foizingiz 50% bo'lsa — o'zgarishsiz.
+            pp_ = pct(partner["id"], d)
+            art = (u - z["self_usd"]) * pp_ / 100 + (z["self_usd"] - z["self"])
+            if z["self_usd"] and abs(z["self"] - z["self_usd"] * pp_ / 100) > 0.004:
+                modes.add("own")                       # «Artur 50%» deb bitta formula bilan ko'rsatib bo'lmaydi
             if u:
                 modes.add("legacy")
                 if rows[acct]["kind"] in ("worker", "pool"):
@@ -1520,12 +1577,12 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
 
     # jami
     payable = [r for r in rows.values() if r["kind"] in PAYABLE]
-    pf = r2(sum(r["fine"] for r in payable))
-    pb = r2(sum(r["bonus"] for r in payable))
+    pf = r2(sum(x["usd"] for r in payable for x in r["fines"] if p_on(x["day"])))      # Artur bor kunlar
+    pb = r2(sum(x["usd"] for r in payable for x in r["bonuses"] if p_on(x["day"])))
     for r in rows.values():
         if r["kind"] in PAYABLE and r["zp_on"]:
             r["total"] = r2(r["zp"] - r["fine"] + r["bonus"] - r["adv"] - r["tr_out"] + r["tr_in"]
-                            + r["sin_sum"] - r["sout_sum"])
+                            + r["sin_sum"] - r["sout_sum"] + r["kbonus"])
         elif r["kind"] == "partner":
             r["pf"], r["pb"] = pf, pb
             r["kbonus"] = kbonus                       # 🎯 kassa bonuslari ham Arturga (egasi, 2026-11-04)
@@ -1549,6 +1606,11 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     owner_paid = r2(sum(x["share"] for x in acct_split.values()))
     partner_paid = r2(sum(x["pshare"] for x in acct_split.values()))
     share_part = rows[partner["id"]]["share_part"] if partner else 0.0
+    # Artur bor kunlar: sizning jarima/bonusingiz — u bilan; Artur yo'q kunlar: xodimlar jarimasi sizga, bonusini
+    # siz to'laysiz. 🎯 kassa bonusingiz (Artur yo'q kunlar) — kassadan tashqari, daromadingizga qo'shiladi.
+    me_fine_p = r2(sum(x["usd"] for x in me["fines"] if p_on(x["day"]))) if me else 0.0
+    me_bonus_p = r2(sum(x["usd"] for x in me["bonuses"] if p_on(x["day"]))) if me else 0.0
+    self_kb = me["kbonus"] if me else 0.0
     out_self = me["tr_out"] if me else 0.0
     in_self = me["tr_in"] if me else 0.0
     mine = r2(sum(x["mine"] for x in acct_split.values()))
@@ -1559,25 +1621,26 @@ def calc(db: Database, start: dt.date, end: dt.date) -> dict:
     # ulush: sizga yozilgani — daromadga, o'z zp ingizdan berganingiz — ayriladi (egasi, 2026-11-04: avval yo'qolardi)
     sin_self = me["sin_sum"] if me else 0.0
     sout_self = me["sout_sum"] if me else 0.0
-    if partner is not None:
-        income = r2(mine - out_self + in_self - (me["fine"] if me else 0.0) + (me["bonus"] if me else 0.0)
-                    + sin_self - sout_self)
-    else:
-        income = r2(mine - out_self + in_self - wb + wf + sin_self - sout_self)
+    wf_np = r2(sum(x["usd"] for r in rows.values() if r["kind"] == "worker" for x in r["fines"] if not p_on(x["day"])))
+    wb_np = r2(sum(x["usd"] for r in rows.values() if r["kind"] == "worker" for x in r["bonuses"]
+                   if not p_on(x["day"])))
+    income = r2(mine - out_self + in_self - me_fine_p + me_bonus_p - wb_np + wf_np + sin_self - sout_self + self_kb)
     mode = "split" if modes == {"split"} else ("legacy" if modes <= {"legacy"} else "mixed")
-    owner = {"K": K, "partner_pct": partner_pct_of(db, partner, e) if mode == "legacy" else None, "mode": mode,
+    p_full = p_any and not (p_until and iso(end) > p_until)       # butun davr Artur bilan
+    owner = {"K": K, "partner_pct": partner_pct_of(db, partner, e) if mode == "legacy" and p_full else None,
+             "mode": mode, "self_kbonus": self_kb, "partner_until": p_until if partner is not None else "",
              "half": r2(K - share_part - partner_paid), "zps": zps, "owner_paid": owner_paid,
              "partner_paid": partner_paid, "out_self": r2(out_self), "in_self": r2(in_self), "income": income,
              "sin_self": r2(sin_self), "sout_self": r2(sout_self),
              # boshqa akkauntlarda «siz %» bor, bularda yo'q — eski usulda hisoblandi (egasi, 2026-11-04: ogohlantirish)
              "no_opct": [ps[x]["name"] for x in sorted(no_op, key=lambda x: ps[x]["name"].lower())]
              if "split" in modes else [], "no_opct_pp": partner_pct_of(db, partner, e) if partner else None,
-             "kbonus": kbonus, "kbonus_items": kb_items if partner is not None else [],
+             "kbonus": kbonus, "kbonus_items": kb_items if p_any else [],
              "mine": mine, "self_zp": me["zp"] if me else 0.0, "per_acct": per_acct, "unknown_zp": unknown,
-             "partner_id": partner["id"] if partner else None,
-             "partner_total": rows[partner["id"]]["total"] if partner else 0.0,
+             "partner_id": partner["id"] if p_any else None,
+             "partner_total": rows[partner["id"]]["total"] if p_any else 0.0,
              "partner_share": share_part, "pf": pf, "pb": pb, "wf": wf, "wb": wb, "zps_paid": r2(zps + wb - wf),
-             "partner_work": rows[partner["id"]]["work_zp"] if partner else 0.0}
+             "partner_work": rows[partner["id"]]["work_zp"] if p_any else 0.0}
     order = [p["id"] for p in P.people(db, active_only=False) if p["kassa_kind"]]
     return {"rows": rows, "order": order, "K": K, "raw": RAW, "n": N, "owner": owner, "names":
             {pid: p["name"] for pid, p in ps.items()}, "rds": rd_of}
