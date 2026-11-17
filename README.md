@@ -442,7 +442,11 @@ Eng yaxshi vaqt — kechasi, ish vaqtidan tashqari.
   bossa — faqat cheklar yo'riqnomasi, tugmasiz). Xodimning «/» menyusida faqat `/gaz` (menyu va ID yo'q); ega va
   adminlarda — `/menu`, `/hisobot`, `/id` (o'zi ham RD da ishlasa — `/gaz` ham).
 - «Проёб» guruhi:
-  - `/proyob` — shu guruhni «Проёб» qilish
+  - `/proyob` — shu guruhni «Проёб» qilish. **Mavzuli guruh bo'lsa** — kerakli mavzuning ichida `/proyob` yozing: bot
+    zaderjka, eslatma, 📌 doska, Push paneli va haftalik xulosani faqat shu mavzuga yozadi (egasi, 2026-11-17).
+  - `/achot` — **alohida achot guruhi**: botni o'sha guruhga qo'shing, admin qiling va `/achot` yozing. Achotlar shu
+    guruhda hisoblanadi, bot achotga reply qilib kassani yozadi («✅ Cred · 17.11 · 2 чека · 4 550» — o'chmaydi).
+    Belgilanmagan bo'lsa — achotlar «Проёб»ning o'zida. Ikkalasi ham ⚙️ Sozlamalar → 👥 «Проёб» da ko'rinadi.
   - `/statistika` — hafta xulosasi va eng yaxshilar
   - `/topweek` — shu hafta kassasi, `/toplast` — o'tgan hafta, `/topall` — shu kungacha (boshlang'ich kassa bilan)
   - `/frozen` — 💤 qotib qolgan lidlar, `/cooling` — 📉 soviyotgan lidlar (har RD alohida xabar)

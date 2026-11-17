@@ -99,6 +99,35 @@ class Notifier:
             raise NotConfigured("«Проёб» guruhi belgilanmagan")
         return int(raw)
 
+    def topic_id(self) -> int | None:
+        """«Проёб» mavzuli guruhda alohida mavzu bo'lsa — o'sha mavzu (o'sha mavzuda /proyob yozilgan; egasi,
+        2026-11-17). Bot hamma xabarini shu mavzuga yozadi."""
+        raw = (self.db.get("proyob_topic_id") or "").strip()
+        return int(raw) if raw.isdigit() and int(raw) > 1 else None
+
+    def thread_kw(self) -> dict:
+        t = self.topic_id()
+        return {"message_thread_id": t} if t else {}
+
+    def achot_id(self) -> int | None:
+        """🧾 Achot guruhi (alohida; o'sha guruhda /achot yozilgan): hisobotlar shu yerda hisoblanadi."""
+        raw = (self.db.get("achot_group_id") or "").strip()
+        return int(raw) if raw.lstrip("-").isdigit() else None
+
+    async def send_reply(self, chat_id: int, msg_id: int, text: str, trash: str | None = None) -> None:
+        """Guruhdagi xabarga javob — o'sha guruhda (🧾 achot guruhi yoki «Проёб»)."""
+        try:
+            gid = self.group_id()
+        except NotConfigured:
+            gid = None
+        if gid is not None and int(chat_id) == gid:
+            await self.send_group(text, reply_to=msg_id, trash=trash)
+            return
+        msg = await self._call(self.bot.send_message, chat_id=chat_id, text=text, reply_to_message_id=msg_id,
+                               disable_web_page_preview=True, parse_mode="HTML")
+        if trash:
+            self.trash(msg.chat.id, msg.message_id, trash)
+
     @staticmethod
     def _done_kb(alert_id):
         if alert_id is None:
@@ -148,7 +177,8 @@ class Notifier:
             for attempt in (1, 2):
                 try:
                     self._own.append((time.time(), self._norm(text)))
-                    m = await client.send_message(gid, text, parse_mode="html", link_preview=False, reply_to=reply_to)
+                    m = await client.send_message(gid, text, parse_mode="html", link_preview=False,
+                                                  reply_to=reply_to or self.topic_id())     # mavzuga
                     return gid, int(m.id)
                 except ValueError as exc:                # guruh akkaunt xotirasida yo'q (ishga tushgan zahoti)
                     if attempt == 1:
@@ -163,7 +193,7 @@ class Notifier:
                 except Exception as exc:
                     await self._main_failed(exc)
                     break
-        kw = {"reply_to_message_id": reply_to} if reply_to else {}
+        kw = {"reply_to_message_id": reply_to} if reply_to else self.thread_kw()       # «Проёб» mavzusiga
         msg = await self._call(self.bot.send_message, chat_id=gid, text=text, reply_markup=self._done_kb(done_button),
                                disable_web_page_preview=True, parse_mode="HTML", **kw)
         return msg.chat.id, msg.message_id

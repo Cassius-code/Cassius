@@ -69,7 +69,11 @@ async def settings(ctx, r: Req):
              + (f" · {h(ub.me_label)}" if ub and ub.me_label else ""),
              f"📲 {r.L('Push akkauntlar', 'Пуш-аккаунты')} — <b>{len(accs)}</b>",
              "👥 «Проёб» — " + (f"<code>{h(db.get('proyob_group_id'))}</code>" if db.get("proyob_group_id")
-                                else r.L("belgilanmagan ⚠️", "не задана ⚠️")),
+                                else r.L("belgilanmagan ⚠️", "не задана ⚠️"))
+             + (f" · {r.L('mavzu', 'тема')} #{h(db.get('proyob_topic_id'))}" if db.get("proyob_topic_id") else ""),
+             "🧾 " + r.L("Achot guruhi", "Группа отчётов") + " — " + (
+                 f"<code>{h(db.get('achot_group_id'))}</code>" if db.get("achot_group_id")
+                 else r.L("«Проёб»ning o'zi", "сам «Проёб»")),
              f"✍️ {r.L('«Проёб»ga yozadi', 'Пишет в «Проёб»')} — " + (r.L("🔑 asosiy akkaunt", "🔑 основной аккаунт")
                                                                     if db.get("proyob_sender") == "main"
                                                                     else r.L("🤖 bot", "🤖 бот")),
@@ -182,10 +186,22 @@ async def bot_toggle(ctx, r: Req):
 async def group(ctx, r: Req):
     ui.ask(r, "group_id", "s")
     cur = ctx.db.get("proyob_group_id")
+    topic, achot = ctx.db.get("proyob_topic_id"), ctx.db.get("achot_group_id")
     return ui.join(title("👥", r.L("«ПРОЁБ» GURUHI", "ГРУППА «ПРОЁБ»")), "", card(
-        [r.L(f"Hozir: <code>{h(cur) or '—'}</code>", f"Сейчас: <code>{h(cur) or '—'}</code>"),
-         r.L("<b>Eng osoni:</b> botni guruhga qo'shing, admin qiling va guruhning o'zida <code>/proyob</code> yozing.",
-             "<b>Проще всего:</b> добавьте бота в группу, сделайте админом и напишите в группе <code>/proyob</code>."),
+        [r.L(f"Hozir: <code>{h(cur) or '—'}</code>", f"Сейчас: <code>{h(cur) or '—'}</code>")
+         + (r.L(f" · mavzu #{h(topic)}", f" · тема #{h(topic)}") if topic else ""),
+         r.L("<b>Eng osoni:</b> botni guruhga qo'shing, admin qiling va guruhning o'zida <code>/proyob</code> yozing. "
+             "Mavzuli guruh bo'lsa — kerakli <b>mavzuning ichida</b> <code>/proyob</code> yozing: bot zaderjka, eslatma, "
+             "doska, Push paneli va haftalik xulosani faqat shu mavzuga yozadi.",
+             "<b>Проще всего:</b> добавьте бота в группу, сделайте админом и напишите в группе <code>/proyob</code>. "
+             "Если группа с темами — напишите <code>/proyob</code> <b>внутри нужной темы</b>: бот будет писать задержки, "
+             "напоминания, доску, панель Пуша и итоги недели только туда."),
+         r.L(f"🧾 <b>Achot guruhi</b> — {('<code>' + h(achot) + '</code>') if achot else '«Проёб»ning o‘zi'}. Alohida "
+             "bo'lsa: botni o'sha guruhga qo'shing, admin qiling va <code>/achot</code> yozing — achotlar shu yerda "
+             "hisoblanadi, bot reply qilib kassani yozadi (o'chmaydi).",
+             f"🧾 <b>Группа отчётов</b> — {('<code>' + h(achot) + '</code>') if achot else 'сам «Проёб»'}. Если отдельная: "
+             "добавьте бота в ту группу, сделайте админом и напишите <code>/achot</code> — отчёты считаются там, бот "
+             "отвечает на отчёт кассой (не удаляется)."),
          r.L("Yoki guruh ID sini shu yerga yuboring (<code>-100…</code>).", "Или пришлите сюда ID группы (<code>-100…</code>).")])), \
         ui.cancel_kb(r, "s")
 

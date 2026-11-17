@@ -30,6 +30,11 @@ def is_proyob(ctx, chat_id: int) -> bool:
     return str(chat_id) == (ctx.db.get("proyob_group_id") or "").strip()
 
 
+def is_achot(ctx, chat_id: int) -> bool:
+    """🧾 Alohida achot guruhi (egasi, 2026-11-17): hisobotlar shu yerda hisoblanadi, javob ham shu yerga."""
+    return str(chat_id) == (ctx.db.get("achot_group_id") or "").strip()
+
+
 def sender_info(ctx, message: Message) -> tuple[int | None, bool, str]:
     """-> (user_id, staff (ega/to'liq admin yoki anonim admin), ism)."""
     anon = message.sender_chat is not None and message.sender_chat.id == message.chat.id
@@ -108,7 +113,8 @@ def group_lock(ctx):
             if name.startswith(("Send", "Forward", "Copy")) or name in names:
                 cid = getattr(method, "chat_id", None)
                 private = isinstance(cid, int) and cid > 0
-                if cid is not None and not private and str(cid) != (ctx.db.get("proyob_group_id") or "").strip():
+                if cid is not None and not private and str(cid) not in {(ctx.db.get("proyob_group_id") or "").strip(),
+                                                                        (ctx.db.get("achot_group_id") or "").strip()}:
                     log.warning("🔒 %s → %s to'xtatildi: bot faqat «Проёб» ga yozadi", name, cid)
                     raise TelegramForbiddenError(method=method, message="locked: bot writes only to «Проёб»")
             return await make_request(bot, method)
@@ -153,7 +159,18 @@ def build_router(ctx) -> Router:
         if uid is None or P.admin_level(ctx.db, ctx.cfg.owner_ids, uid) not in ("owner", "full"):
             return                                       # begona guruhda jim
         ctx.db.set("proyob_group_id", str(message.chat.id))
-        await reply(message, "✅ Эта группа подключена как «Проёб».")
+        topic = message.message_thread_id if getattr(message, "is_topic_message", False) else None
+        ctx.db.set("proyob_topic_id", str(topic) if topic else "")      # mavzuli guruh: bot shu mavzuga yozadi
+        await reply(message, "✅ Эта тема подключена как «Проёб»: бот пишет сюда задержки и напоминания."
+                    if topic else "✅ Эта группа подключена как «Проёб».")
+
+    @r.message(in_group, Command("achot", "otchet"))
+    async def cmd_achot(message: Message) -> None:
+        uid, _staff, _n = sender_info(ctx, message)
+        if uid is None or P.admin_level(ctx.db, ctx.cfg.owner_ids, uid) not in ("owner", "full"):
+            return                                       # begona guruhda jim
+        ctx.db.set("achot_group_id", str(message.chat.id))
+        await reply(message, "✅ Эта группа — для отчётов: присылайте сюда отчёты, бот посчитает кассу и ответит.")
 
     @r.message(in_group, Command("id"))
     async def cmd_id(message: Message) -> None:
@@ -278,7 +295,7 @@ def build_router(ctx) -> Router:
             except Exception:
                 pass
             return
-        if not is_proyob(ctx, message.chat.id) or not ctx.db.flag("bot_enabled"):
+        if not (is_proyob(ctx, message.chat.id) or is_achot(ctx, message.chat.id)) or not ctx.db.flag("bot_enabled"):
             return
         text = (message.text or message.caption or "").strip()
         if ctx.notifier.is_own(text):

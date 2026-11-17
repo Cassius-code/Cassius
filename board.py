@@ -96,7 +96,7 @@ async def refresh(ctx, now: int, force: bool = False) -> None:
             log.info("Doska o'chirilgan — qaytadan yoziladi")
     try:
         msg = await ctx.bot.send_message(chat_id=gid, text=body, parse_mode="HTML", disable_notification=True,
-                                         disable_web_page_preview=True)
+                                         disable_web_page_preview=True, **n.thread_kw())   # «Проёб» mavzusiga
     except Exception as exc:
         wait = getattr(exc, "retry_after", None)
         if wait:

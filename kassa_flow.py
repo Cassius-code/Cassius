@@ -425,8 +425,9 @@ async def finalize(ctx, rid: int) -> None:
         text = confirm_text(ctx, rid)                         # 🧾 «✅ Baxa · 29.10 · 3 чека · 8 550»
         if text:
             try:
-                # o'chmaydi (egasi, 2026-11-17: «achotga reply qilib kassani yozadi, lekin uchib ketyapti»)
-                await ctx.notifier.send_group(text, reply_to=r["msg_id"])
+                # o'chmaydi (egasi, 2026-11-17: «achotga reply qilib kassani yozadi, lekin uchib ketyapti»); hisobot
+                # qaysi guruhda bo'lsa (🧾 achot guruhi yoki «Проёб») — o'sha yerda
+                await ctx.notifier.send_reply(r["chat_id"], r["msg_id"], text)
             except Exception as exc:
                 log.info("Hisobot tasdig'i yozilmadi: %s", exc)
     pid = r["person_id"]

@@ -61,7 +61,7 @@ class GroupPanel:
                 return
         text = self.render(snap)
         msg = await self.n._call(self.n.bot.send_message, chat_id=gid, text=text, parse_mode="HTML",
-                                 disable_notification=True, disable_web_page_preview=True)
+                                 disable_notification=True, disable_web_page_preview=True, **self.n.thread_kw())
         self.gid, self.mid, self.shown = msg.chat.id, msg.message_id, text
         self.db.set("push_panel", f"{self.bid}:{self.gid}:{self.mid}")
 
