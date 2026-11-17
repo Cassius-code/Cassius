@@ -268,24 +268,21 @@ class Pusher:
 
         def group(r) -> int:
             """0 — ertalab gaplashgan, 1 — jim turgan, 2 — hozirgina yozishgan, 3 — bugun gaplashmagan."""
+            if idle and talk(r) > quiet_border:
+                return 2                                   # jim turgan daqiqa ichida gaplashgan — yarim tundan oldin ham
             if talk(r) < today:
                 return 3
-            if idle and talk(r) > quiet_border:
-                return 2
             return 0 if (r["chat_id"], r["topic_id"]) in morning_talk else 1
 
         busy = sum(1 for r in rows if group(r) == 2)
         rows = [r for r in rows if group(r) != 2]          # hozir gaplashayotganlarga — hech qachon
         if slot == "morning":
-            rows = [r for r in rows if group(r) == 3]      # bugun gaplashmaganlar: kecha → eskiroq (yangisi oldin)
+            rows = [r for r in rows if group(r) == 3]      # 🌅 faqat bugun gaplashmaganlar
 
-            def key(r):
-                return (-(r["last_seen"] or 0),)
-        else:                                              # ☀️ bugungilar, keyin kecha → eskiroq
-
-            def key(r):
-                g = group(r)
-                return (g, -(r["last_seen"] or 0))         # har guruhda: lid oxirgi yozgani, yangisi oldin
+        def key(r):
+            # hamma Push turida: lid qachon kelgan (topik ochilgan) — eng yangisi birinchi, keyin eskiroqlari (egasi,
+            # 2026-11-17: «yangiroq liddan boshlab eskilarga qarab»). Bir vaqtda kelganlar — oxirgi yozgani bo'yicha.
+            return (-(r["born"] or 0), -(r["last_seen"] or 0))
         rows.sort(key=key)
         limit = max(0, self.db.get_int("push_limit"))
         by_f: dict[int, list] = {}
@@ -298,7 +295,8 @@ class Pusher:
             quota[fid] = n
             items += [(r, fid) for r in v[:n]]
         items.sort(key=lambda t: key(t[0]))
-        groups = {"morning": 0, "quiet": 0, "recent": 0, "older": 0, "yesterday": 0}
+        groups = {"morning": 0, "quiet": 0, "recent": 0, "older": 0, "yesterday": 0,
+                  "born_today": 0, "born_yday": 0, "born_week": 0, "born_old": 0}
         yday = today - 86400
         for r, _fid in items:
             g = group(r)
@@ -306,6 +304,9 @@ class Pusher:
                 groups["yesterday" if (r["last_seen"] or 0) >= yday else "older"] += 1
             else:
                 groups[("morning", "quiet", "recent")[g]] += 1
+            b = r["born"] or 0                              # lid qachon kelgan
+            groups["born_today" if b >= today else "born_yday" if b >= yday else
+                   "born_week" if b >= today - 6 * 86400 else "born_old"] += 1
         return {"items": [(r["chat_id"], r["topic_id"], fid) for r, fid in items], "by_folder": quota,
                 "pool": [(r["chat_id"], r["topic_id"], cmap[r["chat_id"]]) for r in rows],   # son chegarasisiz
                 "no_account": no_account, "quiet": [], "matched": matched, "fresh": fresh, "cooled": busy,
@@ -449,7 +450,7 @@ class Pusher:
                                   "VALUES(?,?,?,?,?,?,?)",
                                   (int(self.clock()), trigger, total(), push["kind"], aud["slot"], push["id"],
                                    1 if control else 0)).lastrowid)
-        stat = {"sent": sum(prev_ok.values()), "failed": 0, "done": 0, "aborted": "", "held": 0}
+        stat = {"sent": sum(prev_ok.values()), "failed": 0, "done": 0, "aborted": "", "held": 0, "talking": 0}
         reasons: dict[str, int] = {}
         per_folder: dict[int, list[int]] = {fid: [prev_ok.get(fid, 0), 0] for fid in prev_ok}
 
@@ -519,6 +520,17 @@ class Pusher:
                 slow, waits, errors = 1, 0, 0             # Telegram kuttirgandan keyin — sekinroq
                 drip_n, drip_m = self.drip()              # ⏱ bo'lib yuborish: N tadan, har M daqiqada
                 batch_start, batch_sent = self.clock(), 0
+
+                def talking(c, t) -> bool:
+                    """Hozir gaplashyapti: jim turgan daqiqa ichida lid yoki xodim yozgan (ro'yxat Push boshida tuzilgan —
+                    orada gaplashib qolgan bo'lishi mumkin; egasi, 2026-11-17: «20 daqiqa bo'lmagan lidga ham push»)."""
+                    idle = max(0, self.db.get_int("push_idle_minutes"))
+                    if not idle:
+                        return False
+                    th = self.db.one("SELECT last_seen, last_staff_ts FROM threads WHERE chat_id=? AND topic_id=?",
+                                     (c, t))
+                    return th is not None and max(th["last_seen"] or 0, th["last_staff_ts"] or 0) > \
+                        self.clock() - idle * 60
                 while not self._stop:
                     fid = pick()                          # son pauza paytida o'zgargan bo'lishi mumkin
                     if fid is None:
@@ -552,6 +564,9 @@ class Pusher:
                         if ok.get(fid, 0) + busy.get(fid, 0) >= cap(fid):   # son kutish paytida kamaytirilgan
                             queues[fid].appendleft((idx, chat_id, topic_id))
                             continue
+                    if talking(chat_id, topic_id):        # hozir gaplashyapti — yubormaymiz, o'rniga keyingisi
+                        stat["talking"] += 1
+                        continue
                     first = False
                     busy[fid] = busy.get(fid, 0) + 1
                     try:
@@ -689,6 +704,7 @@ class Pusher:
             self._workers = []
             self.progress_text = ""
         res = {"status": status, "sent": stat["sent"], "failed": stat["failed"], "total": n, "held": stat["held"],
+               "talking": stat["talking"],
                "reasons": reasons, "reason": stat["aborted"], "per_folder": per_folder, "aud": aud,
                "push_id": push["id"]}
         self.last_report = (int(self.clock()), res)

@@ -296,8 +296,13 @@ Bitta bot: zaderjka nazorati, stavka, «доброе утро», tanaffus, jarim
   emas; zaderjka nazoratiga ta'sir qilmaydi.
   **⏱ Bo'lib yuborish** (⚙️ Sozlamalar): Hammasi birdan · 5 daqiqada 5 ta · 10 daqiqada 7 ta · 10 daqiqada 8 ta — har
   papkaga N ta, keyin tanaffus (panelda «⏳ RD 1 → 12:45»); tasdiqlashda taxminiy vaqt shunga qarab.
-  🌅 ertalabki — bugun gaplashmaganlar: kecha yozganlar → eskiroqlar (lidning oxirgi yozgani, yangisi oldin);
-  ☀️ kunduzgi — avval bugungilar, tugasa — kecha → eskiroqlar. Har papkaga aynan siz yozgan son.
+  **Tartib — hamma Push turida bir xil: eng oxirgi kelgan lid (topik ochilgan vaqti) birinchi, keyin eskiroqlari**
+  (egasi, 2026-11-17). 🌅 ertalabki — faqat bugun gaplashmaganlarga; ☀️ kunduzgi, 🌙 kechki, 🔎 lupa — hammaga.
+  Tasdiqlashda: «bugun kelgan · kecha kelgan · shu hafta kelgan · eskiroq» — nechtadan. Har papkaga aynan siz yozgan son.
+  **Hozir gaplashayotganga yubormaydi:** ⚙️ «⏳ Jim turgan» (masalan 90 daq) ichida lid yoki xodim yozgan bo'lsa —
+  ro'yxatga kirmaydi va **yuborish paytida ham qayta tekshiriladi** (Push uzoq ketsa, ayniqsa bo'lib yuborishda, orada
+  gaplashib qolgani o'tkaziladi; natijada «⏭ Hozir gaplashayotgani uchun o'tkazildi: N»). Yarim tundan oldin
+  gaplashgan bo'lsa ham hisobga olinadi.
   **📚 Kutubxona:** har Push — raqam (nomini bot beradi: «№7 · 🎤 ovozli · 29.10 14:30»), mazmuni o'qilmaydi.
   Bitta raqam bitta lidga HECH QACHON ikki marta ketmaydi; boshqa raqam — ketishi mumkin (3 soat oraliq bilan).
   Tahrirlash — raqam o'sha; «🆕 Yangi Push» — yangi raqam; aynan bir xil matn/fayl — eski raqam deb taniladi.

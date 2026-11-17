@@ -62,24 +62,20 @@ def dstr(iso: str) -> str:
 def slot_info(ctx, r: Req, slot: str) -> tuple[str, str]:
     """(nom, qoida) — tanlangan Push turi uchun (egasi tugma bilan tanlaydi, soatga qaralmaydi)."""
     idle = ctx.db.get_int("push_idle_minutes")
+    # tartib hamma turda bir xil: eng oxirgi kelgan lid birinchi (egasi, 2026-11-17)
+    order = r.L("Tartib: eng yangi kelgan liddan eng eskisiga.", "Порядок: от самого нового лида к старым.")
+    busy = r.L(f"Oxirgi {idle} daqiqada gaplashganlarga (lid yoki xodim yozgan) yuborilmaydi — yuborish paytida ham "
+               f"tekshiriladi.", f"Тем, с кем общались за последние {idle} мин (писал лид или сотрудник), не "
+               f"отправляется — проверяется и в момент отправки.") if idle else ""
     if slot == "morning":
         return (r.L("🌅 Ertalabki push", "🌅 Утренний push"),
-                r.L("Bugun gaplashmaganlarga: kecha yozganlardan boshlab eskiroqlariga (lidning oxirgi yozgani "
-                    "bo'yicha, yangisi oldin).",
-                    "Тем, с кем сегодня не общались: со вчерашних — к более старым (по последнему сообщению лида, "
-                    "новые раньше)."))
+                " ".join(x for x in (r.L("Bugun gaplashmaganlarga.", "Тем, с кем сегодня не общались."), order, busy) if x))
     if slot == "lupa":                                     # 🔎 egasi, 2026-11-12: «lupalarga alohida push»
         return (r.L("🔎 Lupa push", "🔎 Пуш лупе"),
-                r.L("Faqat 🔎 belgili lidlarga (oddiy 🌅 ☀️ 🌙 Push ularga bormaydi). Tartib: bugun gaplashganlar, keyin "
-                    "kechagi va eskiroqlar. Hozir gaplashayotganlarga yuborilmaydi.",
-                    "Только лидам с 🔎 (обычный 🌅 ☀️ 🌙 Пуш им не идёт). Порядок: сегодняшние, потом вчерашние и "
-                    "старше. Тем, кто сейчас в переписке, — не отправляется."))
+                " ".join(x for x in (r.L("Faqat 🔎 belgili lidlarga (oddiy 🌅 ☀️ 🌙 Push ularga bormaydi).",
+                                         "Только лидам с 🔎 (обычный 🌅 ☀️ 🌙 Пуш им не идёт)."), order, busy) if x))
     head = r.L("🌙 Kechki push", "🌙 Вечерний push") if slot == "evening" else r.L("☀️ Kunduzgi push", "☀️ Дневной push")
-    return (head,
-            r.L(f"Avval bugun gaplashganlar: 1) ertalab gaplashganlar, 2) {idle} daq dan beri jim turganlar; ular "
-                "tugasa — kechagi, keyin eskiroqlar. Hozir gaplashayotganlarga yuborilmaydi.",
-                f"Сначала сегодняшние: 1) утренние, 2) молчат {idle}+ мин; потом вчерашние и старше. Тем, кто "
-                "сейчас в переписке, — не отправляется."))
+    return head, " ".join(x for x in (order, busy) if x)
 
 
 def current_lines(ctx, r: Req) -> list[str]:
@@ -161,11 +157,10 @@ async def start_preview(ctx, r: Req):
     folders = {f["id"]: f for f in P.folders(ctx.db)}
     name, rule = slot_info(ctx, r, slot)
     g = aud["groups"]
-    order = {"morning": [(r.L("kecha yozganlar", "вчерашние"), g["yesterday"]), (r.L("eskiroqlar", "старше"), g["older"])],
-             "day": [(r.L("ertalab gaplashganlar", "утренние"), g["morning"]), (r.L("jim turganlar", "молчат"), g["quiet"]),
-                     (r.L("kechagilar", "вчерашние"), g["yesterday"]), (r.L("eskiroqlar", "старше"), g["older"])]}
-    order["evening"] = order["lupa"] = order["day"]
-    steps = [f"{i + 1}) {a} — <b>{b}</b>" for i, (a, b) in enumerate(order[slot])]
+    # lid qachon kelgan: yangisidan eskisiga (egasi, 2026-11-17)
+    steps = [f"{i + 1}) {a} — <b>{b}</b>" for i, (a, b) in enumerate(
+        [(r.L("bugun kelgan lidlar", "пришли сегодня"), g["born_today"]), (r.L("kecha kelgan", "вчера"), g["born_yday"]),
+         (r.L("shu hafta kelgan", "за неделю"), g["born_week"]), (r.L("eskiroq lidlar", "старше"), g["born_old"])]) if b]
     lines = [f"📁 {h(folders[fid]['name'])} → <b>{q}</b>" for fid, q in aud["by_folder"].items() if q]
     skipped = [(r.L("shu Push'ni oldin olgan", "уже получали этот Пуш"), aud["got_before"]),
                (r.L("hozir gaplashayotgan", "сейчас в переписке"), aud["cooled"]),
@@ -256,6 +251,9 @@ def report_lines(ctx, r: Req, res: dict) -> list[str]:
                      + (r.L(f" (rejada {total})", f" (план {total})") if total != sent else ""))
         if bad:
             lines.append(r.L(f"Yuborilmadi: <b>{bad}</b> ta", f"Не отправлено: <b>{bad}</b>"))
+        if res.get("talking"):                     # ro'yxat tuzilgandan keyin gaplashib qolganlar
+            lines.append(r.L(f"⏭ Hozir gaplashayotgani uchun o'tkazildi: {res['talking']} ta",
+                             f"⏭ Пропущено — сейчас в переписке: {res['talking']}"))
         if res.get("held"):
             lines.append(r.L(f"🧪 Nazorat guruhi (yuborilmadi, taqqoslash uchun): {res['held']} ta",
                              f"🧪 Контрольная группа (не отправлено, для сравнения): {res['held']}"))
